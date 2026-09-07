@@ -2,8 +2,9 @@
 
 Machine-level (not per-project) AI agent configuration. Everything here applies
 to every project on a machine, which is exactly why it needs version control:
-until 2026-09-07 these 30 skills lived only in `~/.agents/` with no history, no
-backup, and no way to tell what had changed.
+until 2026-09-07 these skills lived only in `~/.agents/` with no history, no
+backup, and no way to tell what had changed. Seventeen are tracked here now:
+sixteen from `mattpocock/skills` and one from `vercel-labs/skills`.
 
 Project-level agent configuration is deliberately **not** here. A project's
 `.agents/` has to live inside the project repo: a clone must carry its own
@@ -73,7 +74,8 @@ same script works on a machine with only one of them.
 
 ## Why the script exists
 
-The bridge used to be hand-made. By 2026-09-07, ten of the thirty skills had no
+The bridge used to be hand-made. By 2026-09-07, ten of the thirty skills then
+installed had no
 symlink at all — `find-skills`, `grill-me`, `grill-with-docs`, `handoff`,
 `improve-codebase-architecture`, `prototype`, `setup-matt-pocock-skills`,
 `tdd`, `teach`, `triage`. They were installed, they were on disk, and Claude
@@ -107,24 +109,32 @@ not, the fallback is Codex's own installer, which can pull from a private repo
 — at the cost of making real copies, which reintroduces the drift this layout
 avoids.
 
-## Do not run a blanket `npx skills update -g`
+## Two CLI behaviours to know
 
-Two reasons, both measured on 2026-09-07:
+**`add -y` fans out to every agent the CLI knows.** There are 55 of them,
+`.adal` through `.zencoder`, and `-y` accepts them all — which creates about 50
+directories in `$HOME`, only three of which correspond to anything installed
+here. Let it prompt, or pass `-a`, so it targets the agents in the lock's
+`lastSelectedAgents`. `update -g` does **not** do this: verified against a
+scratch HOME on 2026-09-07, it created nothing but `.npm` and left the existing
+symlinks intact.
 
-**It would create about 50 directories in `$HOME`.** The CLI fans a skill out
-to every agent it knows — 55 of them, `.adal` through `.zencoder`. Only three
-of those exist on this machine today.
+**A blanket update silently drops skills upstream has deleted.** On 2026-09-07
+this set was 29 skills from `mattpocock/skills`, and 13 of them were no longer
+in that repo — upstream had pruned them since the 2026-06-16 install, four
+having already been under `skills/deprecated/` at the time. An update would
+have removed them with no warning.
 
-**13 of the 29 skills from `mattpocock/skills` are no longer in that repo.**
+Those 13 were removed deliberately instead, by owner decision the same day:
 `caveman`, `design-an-interface`, `diagnose`, `edit-article`, `obsidian-vault`,
 `qa`, `request-refactor-plan`, `review`, `to-issues`, `to-prd`,
-`ubiquitous-language`, `write-a-skill`, `zoom-out`. Upstream has 37 skills and
-has pruned these since this set was installed on 2026-06-16 — four of them were
-already under `skills/deprecated/` at install time. Several are in active use.
-Updating risks losing them, and this repo is the only copy that remains.
+`ubiquitous-language`, `write-a-skill`, `zoom-out`. They are recoverable from
+this repo's history at `3b78d38` — which is the reason to version-control
+before pruning, not after.
 
-Update named skills individually (`npx skills update <name>`) after checking
-that one still exists upstream, rather than updating the lot.
+The remaining 16 are now identical to current upstream. Update named skills
+(`npx skills update -g <name>`) after checking each still exists upstream,
+rather than updating the lot.
 
 For the record, two things are **not** wrong with this setup, contrary to first
 impressions: `agents/.skill-lock.json` is the current CLI's global-scope
@@ -141,6 +151,6 @@ Codex, which is not one of the CLI's 55 targets.
   by the script.
 - `~/.claude/settings.json`, `~/.codex/config.toml` — machine settings that may
   contain tokens or paths; deliberately left out for now, worth revisiting.
-- `~/.claude/skills-backup-2026-08-04/` — a manual backup from before this repo
-  existed. Git is the backup now; it can be deleted once you are satisfied
-  nothing in it is missing here.
+- `~/.claude/skills-backup-2026-08-04/` — a manual backup from before this
+  repo existed, deleted on 2026-09-07 after all nine of its skills were
+  verified byte-identical to the tracked copies. Git is the backup now.
