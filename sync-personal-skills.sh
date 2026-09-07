@@ -1,11 +1,11 @@
 #!/bin/bash
 # Rebuild the symlink bridges that let AI tools discover the skills in
-# Personal/agents/skills/. Idempotent — run it any time, especially after
+# agents/skills/. Idempotent — run it any time, especially after
 # adding or removing a skill.
 #
 # Layout:
-#   ~/Jarvis/Personal/agents/skills/<name>/   canonical content (this repo)
-#   ~/.agents                              -> Jarvis/Personal/agents
+#   ~/Jarvis/agents/skills/<name>/   canonical content (this repo)
+#   ~/.agents                     -> Jarvis/agents
 #   ~/.claude/skills/<name>                -> ../../.agents/skills/<name>
 #
 # Why a script: the bridge was previously hand-made, and by 2026-09-07 ten of
@@ -14,7 +14,7 @@
 # and the check below makes it visible.
 set -euo pipefail
 
-CANONICAL="$HOME/Jarvis/Personal/agents/skills"
+CANONICAL="$HOME/Jarvis/agents/skills"
 CLAUDE_DIR="$HOME/.claude/skills"
 
 # Codex also reads <name>/SKILL.md, from ~/.codex/skills/. It is NOT bridged
@@ -31,7 +31,7 @@ fi
 
 # ~/.agents is the path every other symlink resolves through, and it has to stay
 # a symlink into this repo. There is normally no syncing to do — ~/.agents and
-# Personal/agents are the same bytes, same inode, so they cannot drift. The one
+# Jarvis/agents are the same bytes, same inode, so they cannot drift. The one
 # way this layout breaks is if something replaces that symlink with a real
 # directory: then two copies of every skill exist, edits land in whichever one
 # the tool happened to open, and nothing says so. Check for it loudly.
@@ -56,8 +56,8 @@ elif [ -e "$AGENTS_LINK" ]; then
   echo "error: ~/.agents exists but is neither a symlink nor a directory." >&2
   exit 1
 else
-  ln -s Jarvis/Personal/agents "$AGENTS_LINK"
-  echo "created  ~/.agents -> Jarvis/Personal/agents"
+  ln -s Jarvis/agents "$AGENTS_LINK"
+  echo "created  ~/.agents -> Jarvis/agents"
 fi
 
 mkdir -p "$CLAUDE_DIR"
