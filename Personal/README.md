@@ -30,6 +30,24 @@ Two hops, and the second one matters: `~/.claude/skills/<name>` resolves
 repo directly. That is deliberate — `~/.agents` is the stable address, so this
 repo can be cloned anywhere as long as that one symlink points at it.
 
+## There is nothing to sync
+
+`~/.agents` is a symlink, not a copy. `~/.agents/skills/foo/SKILL.md` and
+`Personal/agents/skills/foo/SKILL.md` are the same inode — one file with two
+names. Editing through either path edits the same bytes, and `git status` in
+this repo sees it immediately. The two cannot drift, because there is only one
+of them.
+
+This is why the repo is cloned at `~/Jarvis` with `~/.agents` pointing into it,
+rather than keeping a same-shaped copy in both places. Two real directories
+would need syncing and would drift; one directory with two names cannot.
+
+The single way this breaks is if something **replaces** the `~/.agents` symlink
+with a real directory — then two copies do exist, edits land in whichever one
+the tool opened, and nothing announces it. `sync-personal-skills.sh` refuses to
+run in that case and tells you to diff the two before choosing, rather than
+quietly linking on top of the wrong one.
+
 ## Setting up a new machine
 
 ```sh

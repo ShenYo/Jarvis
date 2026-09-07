@@ -29,10 +29,34 @@ if [ ! -d "$CANONICAL" ]; then
   exit 1
 fi
 
-# ~/.agents is the path every existing symlink resolves through, so it has to
-# point here before anything else will work.
-if [ ! -e "$HOME/.agents" ]; then
-  ln -s Jarvis/Personal/agents "$HOME/.agents"
+# ~/.agents is the path every other symlink resolves through, and it has to stay
+# a symlink into this repo. There is normally no syncing to do — ~/.agents and
+# Personal/agents are the same bytes, same inode, so they cannot drift. The one
+# way this layout breaks is if something replaces that symlink with a real
+# directory: then two copies of every skill exist, edits land in whichever one
+# the tool happened to open, and nothing says so. Check for it loudly.
+AGENTS_LINK="$HOME/.agents"
+CANONICAL_PARENT=$(cd "$CANONICAL/.." && pwd -P)
+
+if [ -L "$AGENTS_LINK" ]; then
+  resolved=$(cd -P "$AGENTS_LINK" 2>/dev/null && pwd -P) || resolved=""
+  if [ "$resolved" != "$CANONICAL_PARENT" ]; then
+    echo "error: ~/.agents resolves to ${resolved:-a missing target}," >&2
+    echo "       but this repo's content is at $CANONICAL_PARENT." >&2
+    echo "       Point it here, or clone this repo where it already points." >&2
+    exit 1
+  fi
+elif [ -d "$AGENTS_LINK" ]; then
+  echo "error: ~/.agents is a real directory, not a symlink into this repo." >&2
+  echo "       A second copy of the skills exists and the two will drift." >&2
+  echo "       Diff it against $CANONICAL_PARENT, keep whichever is current," >&2
+  echo "       then replace ~/.agents with the symlink." >&2
+  exit 1
+elif [ -e "$AGENTS_LINK" ]; then
+  echo "error: ~/.agents exists but is neither a symlink nor a directory." >&2
+  exit 1
+else
+  ln -s Jarvis/Personal/agents "$AGENTS_LINK"
   echo "created  ~/.agents -> Jarvis/Personal/agents"
 fi
 
