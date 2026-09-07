@@ -29,6 +29,7 @@ it, so there is exactly one copy of every skill.
 ```
 ~/.agents                 -> Jarvis/agents
 ~/.claude/skills/<name>   -> ../../.agents/skills/<name>
+~/.codex/skills/<name>    -> ../../.agents/skills/<name>
 ```
 
 Two hops, and the second one matters: `~/.claude/skills/<name>` resolves
@@ -62,9 +63,13 @@ git clone git@github.com:ShenYo/Jarvis.git ~/Jarvis
 ```
 
 The script creates `~/.agents` if it is missing, links every skill into
-`~/.claude/skills/`, then verifies its own work: every skill has a live link,
-no link dangles, every skill has a `SKILL.md`. It exits non-zero if any check
+`~/.claude/skills/` and, when Codex is installed, `~/.codex/skills/` — then
+verifies its own work: every skill has a live link in every bridged tool, no
+link dangles, every skill has a `SKILL.md`. It exits non-zero if any check
 fails. Re-run it after adding or removing a skill.
+
+A tool that is not installed is skipped rather than treated as an error, so the
+same script works on a machine with only one of them.
 
 ## Why the script exists
 
@@ -78,37 +83,62 @@ That is the failure mode to design against: a bridge that silently half-exists.
 Hence a rebuild that is safe to re-run, plus checks that fail loudly rather
 than a script that prints "done".
 
-## Open question: Codex
+## Codex
 
-`~/.codex/skills/` exists and uses the same `<name>/SKILL.md` layout, but
-**none of these skills reach Codex** — the script does not bridge it, and
-nothing else does either.
+Bridged, using the same symlinks as Claude Code. Verified from Codex's own
+tooling rather than guessed:
 
-Verified: the directory holds only Codex's own skills, under `.system/`
-(`review-agent`, `skill-creator`, `plugin-creator`, `skill-installer`,
-`openai-docs`) and `codex-primary-runtime/` (`spreadsheets`, `slides`). There
-are no symlinks into `~/.agents`.
+- Its `skill-installer` skill states it installs "into `$CODEX_HOME/skills`",
+  so that directory is where user skills belong.
+- Its `list-skills.py` decides what is already installed with
+  `os.path.isdir()`, which **follows symlinks**, and matches on directory name
+  with no marker required.
 
-**Not** verified, and worth checking before bridging:
+`.system` (Codex's built-ins, marked by `.codex-system-skills.marker`) and
+`codex-primary-runtime` are left alone: the script skips them when linking and
+exempts them from its dangling check, so it never reports on or touches
+anything Codex installed itself.
 
-1. Whether Codex actually loads user skills placed in `~/.codex/skills/`.
-   `.system/` carries a `.codex-system-skills.marker`, which implies unmarked
-   directories are user territory — but that is an inference.
-2. Whether `.system/skill-installer` treats that directory as its own and
-   would remove hand-placed symlinks.
+Still unverified: Codex's **runtime** skill loader is a compiled binary, not
+that Python script, so strictly speaking only its tooling is confirmed to
+follow symlinks. Open a Codex session and check the skills appear; if they do
+not, the fallback is Codex's own installer, which can pull from a private repo
+(`install-skill-from-github.py --repo ShenYo/Jarvis --path agents/skills/<name>`)
+— at the cost of making real copies, which reintroduces the drift this layout
+avoids.
 
-There is also a cleaner route than symlinks. Skills installed by the current
-`npx skills` CLI carry an `agents/openai.yaml` descriptor for Codex; **none of
-the 30 skills here have one**, and the lock file is named `.skill-lock.json`
-rather than the current `skills-lock.json`, so this set was installed by an
-older version. Re-installing with the current CLI may produce the Codex
-descriptors directly. `npx skills experimental_sync` ("Sync skills from
-node_modules into agent directories", plural) looks relevant.
+## Do not run a blanket `npx skills update -g`
+
+Two reasons, both measured on 2026-09-07:
+
+**It would create about 50 directories in `$HOME`.** The CLI fans a skill out
+to every agent it knows — 55 of them, `.adal` through `.zencoder`. Only three
+of those exist on this machine today.
+
+**13 of the 29 skills from `mattpocock/skills` are no longer in that repo.**
+`caveman`, `design-an-interface`, `diagnose`, `edit-article`, `obsidian-vault`,
+`qa`, `request-refactor-plan`, `review`, `to-issues`, `to-prd`,
+`ubiquitous-language`, `write-a-skill`, `zoom-out`. Upstream has 37 skills and
+has pruned these since this set was installed on 2026-06-16 — four of them were
+already under `skills/deprecated/` at install time. Several are in active use.
+Updating risks losing them, and this repo is the only copy that remains.
+
+Update named skills individually (`npx skills update <name>`) after checking
+that one still exists upstream, rather than updating the lot.
+
+For the record, two things are **not** wrong with this setup, contrary to first
+impressions: `agents/.skill-lock.json` is the current CLI's global-scope
+filename (`skills-lock.json` is the *project*-scope name, which is why
+pet_care's differs), and the missing `agents/openai.yaml` descriptors are
+upstream files added after 2026-06-16 rather than something a reinstall must
+generate. Neither is a reason to re-run the installer, and neither affects
+Codex, which is not one of the CLI's 55 targets.
 
 ## Not in this repo
 
 - Project-level `.agents/` — see the note at the top; it stays in its project.
-- `~/.claude/skills/*` — generated symlinks, rebuilt by the script.
+- `~/.claude/skills/*` and `~/.codex/skills/*` — generated symlinks, rebuilt
+  by the script.
 - `~/.claude/settings.json`, `~/.codex/config.toml` — machine settings that may
   contain tokens or paths; deliberately left out for now, worth revisiting.
 - `~/.claude/skills-backup-2026-08-04/` — a manual backup from before this repo
