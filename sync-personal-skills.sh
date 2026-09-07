@@ -9,6 +9,9 @@
 #   ~/.claude/skills/<name>      -> ../../.agents/skills/<name>
 #   ~/.codex/skills/<name>       -> ../../.agents/skills/<name>
 #
+# Skills may also be grouped one level deep — .agents/skills/git/commit/ links
+# as ~/.claude/skills/git-commit, from that skill's own `name:` field.
+#
 # Why a script: the bridge was previously hand-made, and by 2026-09-07 ten of
 # the thirty skills had no symlink at all, so Claude Code could not see them.
 # Nothing detected that. A rebuild that can be re-run makes the drift fixable,
@@ -55,6 +58,28 @@ fi
 
 fail=0
 
+# What counts as a skill: a directory containing SKILL.md — not merely a
+# directory. Some skills are grouped under a container that holds no SKILL.md
+# of its own (pet_care keeps four under .agents/skills/git/), and treating
+# every directory as a skill both links the container, which no tool can load,
+# and hides the real skills inside it. Depth 2 covers one level of grouping.
+#
+# The link name comes from the skill's own `name:` frontmatter, because that is
+# what the tools match on; git/commit declares `name: git-commit`. Falling back
+# to the directory name keeps a skill that omits the field working.
+#
+# Emits "<relative path>\t<link name>" per skill.
+skills() {
+  local dir rel name
+  while IFS= read -r dir; do
+    rel=${dir#"$CANONICAL"/}
+    name=$(sed -n 's/^name:[[:space:]]*//p' "$dir/SKILL.md" | head -1 | tr -d '\r')
+    [ -n "$name" ] || name=$(basename "$dir")
+    printf '%s\t%s\n' "$rel" "$name"
+  done < <(find "$CANONICAL" -mindepth 1 -maxdepth 2 -type d \
+             -exec test -f '{}/SKILL.md' \; -print | sort)
+}
+
 # bridge <target dir> <label> [names to leave alone...]
 #
 # Reserved names are directories the tool owns. They are skipped when linking
@@ -67,29 +92,28 @@ bridge() {
 
   mkdir -p "$target"
 
-  local created=0 name link
-  for dir in "$CANONICAL"/*/; do
-    name=$(basename "$dir")
+  local created=0 rel name link
+  while IFS=$'\t' read -r rel name; do
     link="$target/$name"
     # -e is false for a dangling symlink, so a broken link is replaced too.
     if [ ! -e "$link" ]; then
-      ln -sfn "../../.agents/skills/$name" "$link"
+      ln -sfn "../../.agents/skills/$rel" "$link"
       echo "linked   $label: $name"
       created=$((created + 1))
     fi
-  done
+  done < <(skills)
 
   local total
   total=$(find "$target" -maxdepth 1 -mindepth 1 | wc -l | tr -d ' ')
   echo "$label: $created new link(s); $total entries"
 
   # Every canonical skill must be reachable.
-  while IFS= read -r name; do
+  while IFS=$'\t' read -r rel name; do
     if [ ! -e "$target/$name" ]; then
-      echo "MISSING  $label: $name has no link in $target" >&2
+      echo "MISSING  $label: $name ($rel) has no link in $target" >&2
       fail=1
     fi
-  done < <(find "$CANONICAL" -maxdepth 1 -mindepth 1 -type d -exec basename {} \;)
+  done < <(skills)
 
   # No link may dangle, including ones this script did not create.
   for link in "$target"/*; do
@@ -120,15 +144,22 @@ else
   echo "Codex: not installed ($CODEX_DIR absent) — skipped."
 fi
 
-# A skill without SKILL.md is invisible to every tool, linked or not.
+# A top-level directory that neither is a skill nor groups any is dead weight —
+# most likely a skill whose SKILL.md is missing, which no tool would report.
 echo ""
 while IFS= read -r dir; do
-  [ -f "$dir/SKILL.md" ] || { echo "NO SKILL.md  $(basename "$dir")" >&2; fail=1; }
-done < <(find "$CANONICAL" -maxdepth 1 -mindepth 1 -type d)
+  [ -f "$dir/SKILL.md" ] && continue
+  if find "$dir" -mindepth 2 -maxdepth 2 -name SKILL.md | grep -q .; then
+    echo "note: $(basename "$dir")/ groups skills and is correctly not linked itself."
+    continue
+  fi
+  echo "NO SKILL.md  $(basename "$dir") is neither a skill nor a group" >&2
+  fail=1
+done < <(find "$CANONICAL" -maxdepth 1 -mindepth 1 -type d | sort)
 
 if [ "$fail" -ne 0 ]; then
   echo "checks FAILED — see above." >&2
   exit 1
 fi
 
-echo "checks passed: every skill is linked into every installed tool, no link dangles, every skill has SKILL.md."
+echo "checks passed: every skill is linked into every installed tool under its declared name, no link dangles, and no directory is a skill with its SKILL.md missing."

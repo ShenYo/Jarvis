@@ -25,6 +25,16 @@ sync-personal-skills.sh      rebuilds the symlink bridges; idempotent
 `agents/` is the real content. Everything outside this repo is a symlink into
 it, so there is exactly one copy of every skill.
 
+A skill is a directory containing `SKILL.md` — not merely a directory. Skills
+may be grouped one level deep under a container that has no `SKILL.md` of its
+own; the container is not linked, the skills inside it are. The link name comes
+from each skill's `name:` frontmatter, which is what the tools match on, so
+`agents/skills/git/commit/` with `name: git-commit` links as
+`~/.claude/skills/git-commit`. Nothing here is nested today; the support exists
+because pet_care groups its four git skills that way, and a script that assumed
+one directory per skill both linked the unloadable container and hid the real
+skills inside.
+
 ## The symlink chain
 
 ```
