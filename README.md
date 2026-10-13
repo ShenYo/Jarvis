@@ -3,15 +3,34 @@
 Machine-level (not per-project) AI agent configuration. Everything here applies
 to every project on a machine, which is exactly why it needs version control:
 until 2026-09-07 these skills lived only in `~/.agents/` with no history, no
-backup, and no way to tell what had changed. Seventeen are tracked here now:
-sixteen from `mattpocock/skills` and one from `vercel-labs/skills`.
+backup, and no way to tell what had changed.
 
-Project-level agent configuration is deliberately **not** here. A project's
-`.agents/` has to live inside the project repo: a clone must carry its own
-rules, CI checks out only the project, and collaborators cannot be asked to
-depend on one person's home directory. Anything portable enough to be shared
-between projects belongs in a separate library repo that projects vendor a copy
-from — not in this one.
+## Current inventory and layers
+
+The current checkout has 34 canonical `SKILL.md` files, 34 Claude bridge links,
+34 Codex bridge links, and 33 lock entries. `setup-project-agents` is the one
+canonical skill without a lock entry. Recount rather than treating this prose
+as a cache:
+
+```sh
+find ~/.Jarvis/agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f | wc -l
+find ~/.claude/skills -maxdepth 1 -type l | wc -l
+find ~/.codex/skills -maxdepth 1 -type l | wc -l
+jq '.skills | length' ~/.Jarvis/agents/.skill-lock.json
+comm -23 \
+  <(find ~/.Jarvis/agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f \
+    -exec sed -n 's/^name:[[:space:]]*//p' {} \; | sort) \
+  <(jq -r '.skills | keys[]' ~/.Jarvis/agents/.skill-lock.json | sort)
+```
+
+The layers have different owners and update paths:
+
+- **Jarvis** is the personal canonical content at `~/.Jarvis/agents`, reached
+  through the stable `~/.agents` symlink.
+- **Friday** is a shared, blank-repository baseline; it supplies a reviewed
+  payload, not this machine's personal skill catalog.
+- A **consumer** owns its project `.agents/` seeds, overlays, and optional
+  integration extension. It must remain reproducible without `~/.Jarvis`.
 
 ## Layout
 
@@ -82,6 +101,36 @@ fails. Re-run it after adding or removing a skill.
 A tool that is not installed is skipped rather than treated as an error, so the
 same script works on a machine with only one of them.
 
+## Project baseline adoption
+
+Use `$setup-project-agents` only to preview and adopt a pinned Friday baseline
+in a blank Git repository:
+
+```text
+$setup-project-agents target=/absolute/path/to/repository friday=/absolute/path/to/Friday
+```
+
+Both paths are required. The skill canonicalizes them, requires `target` to be
+a Git repository root and `friday` to be a different clean Git worktree with
+regular `install.sh` and `payload` paths, then records Friday's full SHA and
+the target Git state. Its only pre-authorization action is:
+
+```sh
+bash "$friday/install.sh" --check "$target"
+```
+
+Record the reviewed Friday SHA as the pin. Any conflict or failed preview stops
+the workflow for reconciliation in the consumer; neither this wrapper nor
+Friday is an update engine. Installation needs a fresh explicit authorization
+that names both the canonical target and that exact pinned SHA. Only then does
+the skill run Friday's installer, preview again, run the consumer checker, and
+report the target status and diff check.
+
+Do not manually copy baseline files, modify Friday or its vendor payload, or
+change a lock file for this workflow. The skill creates no commit or push; the
+consumer records the pinned provenance and any atomic adoption commit under
+its own reviewed convention.
+
 ## Why the script exists
 
 The bridge used to be hand-made. By 2026-09-07, ten of the thirty skills then
@@ -95,29 +144,20 @@ That is the failure mode to design against: a bridge that silently half-exists.
 Hence a rebuild that is safe to re-run, plus checks that fail loudly rather
 than a script that prints "done".
 
-## Codex
+## Bridge status
 
-Bridged, using the same symlinks as Claude Code. Verified from Codex's own
-tooling rather than guessed:
+`sync-personal-skills.sh` creates and verifies the 34 current symlink entries
+for Claude Code and Codex. This proves bridge topology and non-dangling links,
+not Git-operation enforcement or each runtime's skill-loader behavior.
 
-- Its `skill-installer` skill states it installs "into `$CODEX_HOME/skills`",
-  so that directory is where user skills belong.
-- Its `list-skills.py` decides what is already installed with
-  `os.path.isdir()`, which **follows symlinks**, and matches on directory name
-  with no marker required.
+Claude Code receives links in `~/.claude/skills/`. Codex receives links in
+`$CODEX_HOME/skills` (normally `~/.codex/skills/`); `.system` and
+`codex-primary-runtime` remain tool-owned and the script skips them. Codex's
+installer documentation and a Python listing tool support the destination and
+symlink convention, but the compiled Codex runtime loader remains unverified.
 
-`.system` (Codex's built-ins, marked by `.codex-system-skills.marker`) and
-`codex-primary-runtime` are left alone: the script skips them when linking and
-exempts them from its dangling check, so it never reports on or touches
-anything Codex installed itself.
-
-Still unverified: Codex's **runtime** skill loader is a compiled binary, not
-that Python script, so strictly speaking only its tooling is confirmed to
-follow symlinks. Open a Codex session and check the skills appear; if they do
-not, the fallback is Codex's own installer, which can pull from a private repo
-(`install-skill-from-github.py --repo ShenYo/Jarvis --path agents/skills/<name>`)
-— at the cost of making real copies, which reintroduces the drift this layout
-avoids.
+Gemini has no bridge created by this script. Its discovery and runtime behavior
+are pending/unknown here; this README makes no Gemini enforcement claim.
 
 ## Two CLI behaviours to know
 
@@ -142,9 +182,10 @@ Those 13 were removed deliberately instead, by owner decision the same day:
 this repo's history at `3b78d38` — which is the reason to version-control
 before pruning, not after.
 
-The remaining 16 are now identical to current upstream. Update named skills
-(`npx skills update -g <name>`) after checking each still exists upstream,
-rather than updating the lot.
+The remaining 16 were recorded as identical to then-current upstream in that
+2026-09-07 audit; this is historical evidence, not the current inventory.
+Update named skills (`npx skills update -g <name>`) only after checking each
+still exists upstream, rather than updating the lot.
 
 For the record, two things are **not** wrong with this setup, contrary to first
 impressions: `agents/.skill-lock.json` is the current CLI's global-scope
