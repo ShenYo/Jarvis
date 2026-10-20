@@ -33,6 +33,31 @@ Jarvis addresses four related scenarios:
 A project must remain reproducible without `~/.Jarvis`. Jarvis can help an
 agent work on a project, but it must not become a hidden project dependency.
 
+## Current operating context
+
+> **繁中摘要**：個人 Skills 是可選輔助，專案必需成果必須由專案自身的
+> 文件、測試或自動化承載；Matt Pocock 等 vendor Skill 維持原廠更新路徑。相同
+> 名稱的個人 Skill 優先只屬 owner policy，不能當作任何 runtime 的載入保證。
+
+Jarvis remains the personal, optional layer; a project-required outcome must
+live in project-controlled documentation, tests, or automation. TDD,
+Wayfinder, and comparable personal helpers may assist work, but their absence
+must not block a consumer project.
+
+Matt Pocock and other CLI-managed vendor Skills are updated only through their
+owning CLI after reviewing the named upstream source. Do not patch their
+vendored files to implement project setup or policy. When an optional external
+tracker is available, its project output is defined by that project's contract:
+resolve the Git root first, then use
+`docs/temp/matt-pocock/<feature>/<unique-suffix>/`. If the optional capability,
+repository root, or valid feature is unavailable, stop that optional workflow
+rather than writing an alternative personal or vendor location.
+
+An owner's preference for a same-name personal Skill is an ownership policy,
+not evidence of runtime precedence. Jarvis makes no precedence claim beyond
+the bridge limits below. Codex Skill Phase B as a whole remains **UNVERIFIED**;
+do not infer completion from individual probes or bridge entries.
+
 ## Current inventory
 
 **Inventory observation, 2026-10-13:** this checkout has 34 canonical
@@ -112,10 +137,37 @@ quietly linking on top of the wrong one.
 
 ## Setting up a new machine
 
+> **繁中摘要**：Jarvis 是個人可選層。先確認 Git、Bash 與遠端存取權，且
+> `~/.Jarvis` 不存在；clone 後只執行 bridge 與唯讀確認。此流程不安裝 Claude／
+> Codex、不設定憑證，也不讓新專案依賴 Jarvis。
+
+Prerequisites are Git, Bash, and access to the configured Jarvis remote. Choose
+this canonical destination only when `~/.Jarvis` does not already exist; never
+clone over an existing checkout. Inspect and reconcile an existing checkout
+under its own Git history instead.
+
 ```sh
-git clone git@github.com:ShenYo/Jarvis.git ~/.Jarvis
-~/.Jarvis/sync-personal-skills.sh
+(
+  set -eu
+  if [ -e "$HOME/.Jarvis" ] || [ -L "$HOME/.Jarvis" ]; then
+    echo '~/.Jarvis already exists or is a dangling link; inspect it instead of overwriting it.' >&2
+    exit 1
+  fi
+  git clone git@github.com:ShenYo/Jarvis.git "$HOME/.Jarvis"
+  "$HOME/.Jarvis/sync-personal-skills.sh"
+)
 ```
+
+The bridge command neither installs a runtime nor creates credentials. It is
+safe to omit Jarvis entirely for a project: personal Skills remain optional.
+After the bridge, use the read-only checks in [Verify](#verify) to confirm the
+canonical symlink and any already-installed Claude/Codex bridge directories.
+
+For a new project, bootstrap the portable baseline from a separately reviewed,
+clean Friday checkout; do not copy Jarvis Skills into the project. The optional
+`setup-project-agents` Skill under `~/.agents` is a convenience wrapper for a
+blank-project Friday adoption, not a prerequisite for this manual workflow or
+for any consumer project.
 
 The script creates `~/.agents` if it is missing, ensures the Claude bridge
 directory exists, and creates or replaces a canonical-name entry only when it
