@@ -470,5 +470,3 @@ depend on Jarvis. Repair the one canonical copy and rerun the script.
 - `~/.claude/skills-backup-2026-08-04/` — a manual backup from before this
   repo existed, deleted on 2026-09-07 after all nine of its skills were
   verified byte-identical to the tracked copies. Git is the backup now.
-
-> **中文摘要**：十一檔 managed core 維持封閉（deliberate, reverted next commit）。
