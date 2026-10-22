@@ -1,5 +1,7 @@
 # Jarvis
 
+**English** · [繁體中文](./README.zh-TW.md)
+
 > **繁中摘要**：Jarvis 是這台機器的個人 AI agent Skills 版本庫。它讓
 > `~/.Jarvis/agents` 成為唯一 canonical copy，透過 `~/.agents` 與 Claude
 > Code／Codex 的 symlink 共用；它也提供 Friday 基線的安全採用 wrapper。專案
@@ -40,8 +42,9 @@ agent work on a project, but it must not become a hidden project dependency.
 > 名稱的個人 Skill 優先只屬 owner policy，不能當作任何 runtime 的載入保證。
 
 Jarvis remains the personal, optional layer; a project-required outcome must
-live in project-controlled documentation, tests, or automation. TDD,
-Wayfinder, and comparable personal helpers may assist work, but their absence
+live in project-controlled documentation, tests, or automation.
+[TDD](./agents/skills/tdd/), [Wayfinder](./agents/skills/wayfinder/), and
+comparable personal helpers may assist work, but their absence
 must not block a consumer project.
 
 Matt Pocock and other CLI-managed vendor Skills are updated only through their
@@ -62,7 +65,8 @@ do not infer completion from individual probes or bridge entries.
 
 **Inventory observation, 2026-10-13:** this checkout has 34 canonical
 `SKILL.md` files, 34 Claude bridge links, 34 Codex bridge links, and 33 lock
-entries. `setup-project-agents` is the canonical Skill without a lock entry.
+entries. [`setup-project-agents`](./agents/skills/setup-project-agents/) is
+the canonical Skill without a lock entry.
 These are observations, not enduring facts; recount rather than treating this
 README as a cache:
 
@@ -131,7 +135,8 @@ would need syncing and would drift; one directory with two names cannot.
 
 The single way this breaks is if something **replaces** the `~/.agents` symlink
 with a real directory — then two copies do exist, edits land in whichever one
-the tool opened, and nothing announces it. `sync-personal-skills.sh` refuses to
+the tool opened, and nothing announces it.
+[`sync-personal-skills.sh`](./sync-personal-skills.sh) refuses to
 run in that case and tells you to diff the two before choosing, rather than
 quietly linking on top of the wrong one.
 
@@ -165,7 +170,8 @@ canonical symlink and any already-installed Claude/Codex bridge directories.
 
 For a new project, bootstrap the portable baseline from a separately reviewed,
 clean Friday checkout; do not copy Jarvis Skills into the project. The optional
-`setup-project-agents` Skill under `~/.agents` is a convenience wrapper for a
+[`setup-project-agents`](./agents/skills/setup-project-agents/) Skill under
+`~/.agents` is a convenience wrapper for a
 blank-project Friday adoption, not a prerequisite for this manual workflow or
 for any consumer project.
 
@@ -199,7 +205,7 @@ git -C ~/.Jarvis status --short
 
 For locally maintained content, edit the tracked files, review the diff, and
 run the bridge script. For a CLI-managed Skill, inspect
-`agents/.skill-lock.json` for its source and verify that the named upstream
+[`agents/.skill-lock.json`](./agents/.skill-lock.json) for its source and verify that the named upstream
 Skill still exists before using its owning CLI to update that named Skill.
 
 Do not use a blanket `npx skills update -g` as routine maintenance. Upstream
@@ -222,7 +228,7 @@ CODEX_SKILLS="${CODEX_HOME:-$HOME/.codex}/skills"
 
 ### Verify
 
-Running `~/.Jarvis/sync-personal-skills.sh` is the normal bridge check. For a
+Running [`~/.Jarvis/sync-personal-skills.sh`](./sync-personal-skills.sh) is the normal bridge check. For a
 read-only inspection, use:
 
 ```sh
@@ -254,8 +260,10 @@ ln -s .Jarvis/agents ~/.agents
 
 ## Friday adoption wrapper
 
-`setup-matt-pocock-skills` is third-party/CLI-managed. **Do not modify it for
-project setup.** Use the locally maintained `setup-project-agents` wrapper
+[`setup-matt-pocock-skills`](./agents/skills/setup-matt-pocock-skills/) is
+third-party/CLI-managed. **Do not modify it for
+project setup.** Use the locally maintained
+[`setup-project-agents`](./agents/skills/setup-project-agents/) wrapper
 instead. It is deliberately narrow: it adopts Friday's shared baseline, not
 personal Skills, consumer overlays, or conflicts.
 
@@ -289,13 +297,14 @@ its own reviewed convention.
 
 ## CLI-managed and locally maintained content
 
-`agents/.skill-lock.json` records Skills installed by the Skills CLI, including
+[`agents/.skill-lock.json`](./agents/.skill-lock.json) records Skills installed by the Skills CLI, including
 their source, path, hash, and timestamps. Treat those as third-party/
 CLI-managed: do not casually patch their contents or rewrite the lock to make
 an installation look different. A missing lock entry means the CLI did not
 record that Skill; it does not make a canonical Skill invalid.
 
-Jarvis's bridge script, this README, and `setup-project-agents` are locally
+Jarvis's bridge script, this README, and
+[`setup-project-agents`](./agents/skills/setup-project-agents/) are locally
 maintained. Personal settings are intentionally excluded:
 `~/.claude/settings.json` and `~/.codex/config.toml` may contain local paths
 or secrets and are not part of this repository.
@@ -309,7 +318,7 @@ rather than merely printing success.
 
 ## Bridge status and limitations
 
-`sync-personal-skills.sh` ensures canonical names have existing entries in each
+[`sync-personal-skills.sh`](./sync-personal-skills.sh) ensures canonical names have existing entries in each
 bridged tool and reports dangling non-reserved entries. It does not validate or
 repair a live canonical-name entry that points at the wrong target, nor does it
 prove Git-operation enforcement or each runtime's native skill-loader behavior.
@@ -336,7 +345,7 @@ Avoid a blanket `npx skills update -g`: a 2026-09-07 audit found that upstream
 had removed Skills that were still locally installed. Use
 `npx skills update -g <name>` only after checking that specific upstream Skill,
 then review the diff. The existing global lock filename is
-`agents/.skill-lock.json`; `skills-lock.json` is project scope. Missing
+[`agents/.skill-lock.json`](./agents/.skill-lock.json); `skills-lock.json` is project scope. Missing
 `agents/openai.yaml` descriptors are not, by themselves, a reason to reinstall.
 
 ## Troubleshooting
