@@ -388,6 +388,33 @@ Jarvis makes no claim about Claude's or Codex's runtime precedence between
 personal, project, and built-in Skills. A live link is filesystem evidence, not
 proof that a particular prompt will load a particular Skill.
 
+Two things were observed natively on **Claude Code 2.1.306** (2026-10-22), in
+a consumer repository and a disposable fixture. They do not turn the paragraph
+above into a precedence rule; they are what was seen.
+
+- **The bridge reaches a consumer-repo session.** A session rooted in another
+  repository reported `code-review`, `tdd`, `research`, `writing-for-agents`
+  and `setup-project-agents` as available, resolving through
+  `~/.claude/skills/<name>` into `~/.agents/skills` with `~/.agents` →
+  `.Jarvis/agents`. So the centralization here does reach a working session,
+  not just the filesystem.
+- **On a same-name collision, the personal Skill was the one present, and the
+  project copy was not listed at all.** A fixture carried a project skill at
+  `.claude/skills/research/` alongside this repository's personal `research`.
+  A session with every tool disallowed — so the answer could only come from
+  loaded context — reported **exactly one** skill named `research` and quoted
+  the personal description verbatim. A control in the same fixture, a project
+  skill with no personal counterpart, *was* listed, which is what makes the
+  collision result meaningful rather than a discovery failure.
+
+  The practical consequence: the losing Skill is **invisible**, not merely
+  lower-priority, so a session cannot be asked to use the other one. If a
+  project needs its own version of a name that exists here, rename one of
+  them.
+
+  One name, one fixture, one version, two scopes. Nothing is claimed about
+  project-vs-plugin, plugin-vs-personal, or Codex.
+
 Gemini has no bridge created by this script. Its discovery and runtime behavior
 are pending/unknown here; this README makes no Gemini enforcement claim.
 
