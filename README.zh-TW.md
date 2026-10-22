@@ -61,11 +61,15 @@ Skill Phase B 整體上仍屬 **UNVERIFIED**；不要從個別探測或 bridge e
 
 ## 目前盤點
 
-**盤點觀察，2026-10-13：** 這個 checkout 有 34 個 canonical `SKILL.md`
-檔案、34 個 Claude bridge links、34 個 Codex bridge links，以及 33 筆 lock
-entries。[`setup-project-agents`](./agents/skills/setup-project-agents/)
-是沒有 lock entry 的 canonical Skill。這些都是觀察結果，不是恆久事實；請重新
-計數，而不是把這份 README 當成快取：
+**盤點觀察，2026-10-22：** 這個 checkout 有 36 個 canonical `SKILL.md`
+檔案、35 個 Claude bridge links、35 個 Codex bridge links，以及 35 筆 lock
+entries。其中 `orca-cli` 與 `orchestration` 這兩個 canonical Skill 尚未建立
+bridge link：它們由 `skills` CLI 安裝，該工具會寫入 canonical 副本與 lock
+entry，但不會建立 bridge，因此在 [`sync-personal-skills.sh`](./sync-personal-skills.sh)
+執行之前，Claude Code 與 Codex 都看不到它們。Claude bridge 目錄中另有一個
+沒有對應 canonical Skill 的殘留項目 `synced`。
+[`setup-project-agents`](./agents/skills/setup-project-agents/) 則是唯一沒有
+lock entry 的 canonical Skill。
 
 ```sh
 find ~/.Jarvis/agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f | wc -l

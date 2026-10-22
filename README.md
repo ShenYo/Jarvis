@@ -63,9 +63,14 @@ do not infer completion from individual probes or bridge entries.
 
 ## Current inventory
 
-**Inventory observation, 2026-10-13:** this checkout has 34 canonical
-`SKILL.md` files, 34 Claude bridge links, 34 Codex bridge links, and 33 lock
-entries. [`setup-project-agents`](./agents/skills/setup-project-agents/) is
+**Inventory observation, 2026-10-22:** this checkout has 36 canonical
+`SKILL.md` files, 35 Claude bridge links, 35 Codex bridge links, and 35 lock
+entries. Two canonical Skills, `orca-cli` and `orchestration`, have no bridge
+link yet: they were installed by the `skills` CLI, which writes the canonical
+copy and the lock entry but does not create the bridge, so they are not visible
+to Claude Code or Codex until [`sync-personal-skills.sh`](./sync-personal-skills.sh)
+runs. A stale `synced` entry also sits in the Claude bridge directory with no
+canonical Skill behind it. [`setup-project-agents`](./agents/skills/setup-project-agents/) is
 the canonical Skill without a lock entry.
 These are observations, not enduring facts; recount rather than treating this
 README as a cache:
