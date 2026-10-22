@@ -413,7 +413,21 @@ above into a precedence rule; they are what was seen.
   them.
 
   One name, one fixture, one version, two scopes. Nothing is claimed about
-  project-vs-plugin, plugin-vs-personal, or Codex.
+  project-vs-plugin or Codex.
+- **A personal Skill also won over a marketplace plugin of the same name, and
+  the plugin kept the name when the bridge was gone.** `code-review` exists
+  both here and at
+  `~/.claude/plugins/marketplaces/claude-plugins-official/plugins/code-review`.
+  With the bridge in place, a session rooted in a consumer repository quoted
+  *this* repository's description for `code-review`. With `~/.agents` and
+  `~/.claude/skills` temporarily moved aside, the name stayed available —
+  served by the marketplace copy — while `tdd`, `research`,
+  `writing-for-agents` and `setup-project-agents` all became unavailable.
+
+  Both directions are reported as observed. The practical point is not a
+  precedence rule but that **a name can have more than one provider here**, so
+  "the Skill is available" does not by itself mean the one in this repository
+  is the one that loaded.
 
 Gemini has no bridge created by this script. Its discovery and runtime behavior
 are pending/unknown here; this README makes no Gemini enforcement claim.

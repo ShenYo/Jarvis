@@ -394,8 +394,19 @@ prompt 一定會載入某個特定 Skill。
   session 沒辦法被要求改用另一個。如果某個專案需要自己版本的、而這裡也存在的
   名稱，請把其中一個改名。
 
-  一個名稱、一個 fixture、一個版本、兩個 scope。對 project-vs-plugin、
-  plugin-vs-personal 或 Codex，都不做任何宣稱。
+  一個名稱、一個 fixture、一個版本、兩個 scope。對 project-vs-plugin 或
+  Codex 不做任何宣稱。
+- **個人 Skill 同樣勝過同名的 marketplace plugin；而 bridge 被移走時，那個名稱
+  由 plugin 接手。** `code-review` 同時存在於這裡與
+  `~/.claude/plugins/marketplaces/claude-plugins-official/plugins/code-review`。
+  bridge 在位時，一個根在消費端 repository 的 session 引用的是**這個**
+  repository 的 `code-review` 描述。而當 `~/.agents` 與 `~/.claude/skills`
+  被暫時移開時，這個名稱仍然可用 —— 由 marketplace 那份提供 —— 但 `tdd`、
+  `research`、`writing-for-agents` 與 `setup-project-agents` 全都變成不可用。
+
+  兩個方向都只照實記錄。重點不是某條優先序規則，而是**一個名稱在這裡可能有
+  不只一個提供者**，所以「這個 Skill 可用」本身並不代表載入的是這個
+  repository 裡的那一份。
 
 Gemini 目前沒有由這支腳本建立的 bridge。它的 discovery 與 runtime 行為在
 這裡是 pending/unknown 的；這份 README 不對 Gemini 做任何強制性宣告。
