@@ -319,6 +319,51 @@ maintained. Personal settings are intentionally excluded:
 `~/.claude/settings.json` and `~/.codex/config.toml` may contain local paths
 or secrets and are not part of this repository.
 
+## Local Git hooks
+
+`core.hooksPath` points at [`.githooks/`](.githooks), so this clone runs three
+commit-time and push-time checks. They are a guard against mistakes, not a
+server-side control: `core.hooksPath` is per-clone configuration that is never
+cloned, so a fresh clone of this repository runs none of them until someone
+sets it again.
+
+| Hook | Refuses |
+| --- | --- |
+| [`pre-commit`](.githooks/pre-commit) | A staged diff whose added lines look like a credential, key, token, password or connection string. It names the rule and the file, never the matched value. |
+| [`commit-msg`](.githooks/commit-msg) | A subject that is not Conventional Commits, and a larger change with no body saying why it exists. |
+| [`pre-push`](.githooks/pre-push) | Deleting a remote ref, rewriting history (a force-push), and pushing directly to the default branch. It decides from the refs being pushed, not from the command text. |
+
+Two of these are copies of files this platform's sibling repository ships to
+its consumers, at `payload/.agents/githooks/` in
+[Friday](https://github.com/ShenYo/Friday). This repository is not a Friday
+payload consumer — it has no `.agents/` tree — so `install.sh` cannot wire it
+and the hooks are copied instead. They are kept byte-identical to the payload
+apart from the lines that point at documentation, so
+
+```sh
+diff ~/.Friday/payload/.agents/githooks/pre-commit .githooks/pre-commit
+diff ~/.Friday/payload/.agents/githooks/commit-msg .githooks/commit-msg
+```
+
+shows the whole intended delta, and any drift beyond it. `pre-push` is specific
+to this repository and has no payload counterpart.
+
+### Why the push rules live here rather than on GitHub
+
+Branch protection and rulesets need a paid plan for a private repository, and
+this one is private on the free plan. `pre-push` is the local substitute. It
+protects this clone only, which is why the three operations it refuses are
+also written down as permanently agent-prohibited rather than relying on the
+hook to be present.
+
+### If a hook refuses something it should not
+
+Do not reach for `--no-verify`; the collaborative Git guard refuses that flag.
+A rule that is wrong should be fixed in the hook, with the reason recorded, or
+the specific line marked with `secret-scan:allow` and justified where it
+appears. That marker is per-line on purpose: there is no file-level or
+directory-level opt-out.
+
 ## Historical context
 
 The bridge was hand-maintained before 2026-09-07, and installed Skills could be

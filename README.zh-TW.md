@@ -309,6 +309,46 @@ Jarvis 的 bridge script、這份 README，以及
 `~/.codex/config.toml` 可能包含本機路徑或機密資訊，目前並不屬於這個
 repository。
 
+## 本機 Git hooks
+
+`core.hooksPath` 指向 [`.githooks/`](.githooks)，所以這個 clone 會執行三道
+commit 期與 push 期的檢查。它們是防手滑的護欄，不是伺服器端的控制：
+`core.hooksPath` 是 per-clone 設定、永遠不會被 clone 帶走，所以重新 clone
+這個 repository 之後，在有人再次設定之前這三道檢查都不會執行。
+
+| Hook | 會拒絕什麼 |
+| --- | --- |
+| [`pre-commit`](.githooks/pre-commit) | staged diff 的新增行看起來像憑證、金鑰、token、密碼或連線字串。它只會說出規則名稱與檔案，不會印出比對到的值。 |
+| [`commit-msg`](.githooks/commit-msg) | 主旨不符 Conventional Commits；以及較大的改動沒有內文說明「為什麼」。 |
+| [`pre-push`](.githooks/pre-push) | 刪除 remote ref、改寫歷史（force-push）、以及直接推送 default branch。它是依據被推送的 ref 判斷，不是看指令字串。 |
+
+其中兩個是這個平台的姊妹 repository 發給 consumer 的檔案副本，位於
+[Friday](https://github.com/ShenYo/Friday) 的 `payload/.agents/githooks/`。
+這個 repository 不是 Friday payload consumer —— 它沒有 `.agents/` 樹 ——
+所以 `install.sh` 無法接線，只能用副本。副本與 payload 保持 byte-identical，
+只有指向文件的那幾行不同，因此
+
+```sh
+diff ~/.Friday/payload/.agents/githooks/pre-commit .githooks/pre-commit
+diff ~/.Friday/payload/.agents/githooks/commit-msg .githooks/commit-msg
+```
+
+會顯示出完整的預期差異，以及任何超出範圍的走樣。`pre-push` 是這個
+repository 專有的，payload 裡沒有對應檔案。
+
+### 為什麼 push 規則放在這裡而不是 GitHub 上
+
+private repository 的 branch protection 與 ruleset 需要付費方案，而這個
+repository 是免費方案下的 private repo。`pre-push` 是本機的替代品。它只保護
+這一個 clone —— 正因為如此，它拒絕的那三個操作同時也被寫成「對 agent
+永久禁止」，而不是指望這個 hook 一定存在。
+
+### 如果 hook 擋了不該擋的東西
+
+不要動用 `--no-verify`，collaborative Git guard 會拒絕這個旗標。規則錯了就該
+修 hook 並記錄原因，或是在該行標上 `secret-scan:allow` 並就地說明理由。那個
+標記刻意是逐行的：沒有檔案層級或目錄層級的整體豁免。
+
 ## 歷史背景
 
 在 2026-09-07 之前，這個 bridge 都是手動維護的，已安裝的 Skills 可能存在於

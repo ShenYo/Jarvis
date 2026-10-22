@@ -1,0 +1,227 @@
+#!/bin/bash
+# Refuse a commit whose staged content looks like it carries a secret.
+#
+# This is a Git hook rather than a runtime tool hook because a runtime hook
+# sees only the command string: `git commit -F -` passes its message on stdin,
+# and `git commit` stages nothing by itself, so neither the message nor the
+# staged diff is visible there. A Git hook sees both, and it covers commits a
+# person makes by hand as well as an agent's.
+#
+# Scope is staged content only. A secret already in history is out of reach
+# here and cannot be removed by an agent at all, since that needs a history
+# rewrite and a force push, both permanently prohibited. See
+# the README of this repository. This repository is not a Friday payload
+# consumer -- it has no .agents/ tree -- so the hook is a copy, kept
+# byte-identical to the payload apart from these pointers.
+#
+# Note for maintainers: the rule table below is fed straight into a `while`
+# loop. Do not wrap it in `$(...)` — bash scans heredoc bodies for quote pairs
+# inside command substitution even when the delimiter is quoted, and these
+# patterns contain unbalanced quotes.
+
+set -uo pipefail
+
+PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:$PATH}"
+export PATH
+
+# Byte-oriented, not character-oriented. A single invalid multibyte sequence
+# used to abort awk, leave the scan input empty, and let the hook reach exit 0
+# with all rules disarmed -- silently, and by accident on any latin-1 or
+# non-UTF-8 file. Under LC_ALL=C there are no multibyte sequences to fail on.
+LC_ALL=C
+export LC_ALL
+
+refuse() {
+  echo "COMMIT REFUSED: $1" >&2
+  echo "" >&2
+  echo "Nothing was committed. See the README of this repository" >&2
+  echo "(Check for sensitive information). Do not reach for --no-verify: the" >&2
+  echo "collaborative Git guard refuses that flag." >&2
+  exit 1
+}
+
+for required in git grep awk sort; do
+  command -v "$required" >/dev/null 2>&1 \
+    || refuse "required executable unavailable: $required (failing closed)"
+done
+
+git rev-parse --git-dir >/dev/null 2>&1 \
+  || refuse "not inside a Git repository (failing closed)"
+
+# Added and changed lines only. Deleting a line that held a secret is how a
+# secret gets removed, so scanning removals would refuse the fix.
+# --text defeats two evasions: a NUL byte anywhere in the file, and a
+# `-diff` gitattribute, both of which otherwise produce no + lines to scan.
+# ACMRT keeps renames and type changes, which a filter of d alone dropped.
+staged_diff=$(git diff --cached --no-color --text --diff-filter=ACMRT -U0 \
+  --src-prefix=a/ --dst-prefix=b/ 2>/dev/null) \
+  || refuse "unable to read the staged diff (failing closed)"
+
+# This file is the rule table, so its own added lines are patterns by
+# definition and must not be scanned. Derive the path instead of naming it:
+# core.hooksPath decides where the hook lives -- `.agents/githooks` in a
+# payload consumer, `.githooks` in Jarvis and Friday, `payload/.agents/githooks`
+# if a producer points at what it ships -- and a hardcoded string silently
+# stops exempting the moment the file sits anywhere else, which makes this
+# file impossible to commit. $0 mirrors how core.hooksPath was set, so an
+# absolute setting needs the repo root stripped. If the path cannot be
+# resolved the exemption is dropped rather than guessed: that makes the scan
+# stricter, never weaker.
+self_rel=$0
+case $self_rel in
+  /*)
+    self_root=$(git rev-parse --show-toplevel 2>/dev/null) || self_root=''
+    if [ -n "$self_root" ]; then
+      self_rel=${self_rel#"$self_root"/}
+    else
+      self_rel=''
+    fi
+    ;;
+esac
+# Still absolute (outside the work tree) or empty: exempt nothing.
+case $self_rel in
+  /*) self_rel='' ;;
+esac
+
+# Two exemptions, both narrow, because a scanner that cannot describe its own
+# rules is a scanner nobody can maintain:
+#
+#  - this file is the rule table, so its added lines are patterns by
+#    definition and are never scanned (see $self_rel above);
+#  - any single line carrying the marker below is skipped, for a documented
+#    example or a test fixture that must look like the real thing.
+#
+# The marker is deliberately per-line and must be justified where it appears.
+# It is not a file-level or directory-level opt-out.
+added=$(printf '%s\n' "$staged_diff" | awk -v self_rel="$self_rel" '
+    # The whole header after "+++ ", not $2: Git does not quote a plain space,
+    # so a path like ".agents/githooks/pre-commit notes" collapsed onto the
+    # exempt path under a whitespace split and skipped the entire file.
+    /^\+\+\+ / { f = substr($0, 5); sub(/^b\//, "", f); skip = (self_rel != "" && f == self_rel); next }
+    /^\+/ && $0 !~ /^\+\+\+/ {
+      if (skip) next
+      if (index($0, "secret-scan:allow") > 0) next
+      print
+    }
+    END { print "@@scan-reached-end@@" }
+  ') || refuse "unable to extract the staged additions (failing closed)"
+
+# The original fail-open was awk dying partway and leaving an empty result. A
+# sentinel from awk END distinguishes that from the ordinary cases where there
+# is simply nothing to scan: a deletion-only commit, a mode change, or a diff
+# whose every added line is exempt. An earlier revision tested for a "+" in the
+# diff instead, which matched the "+++" header of every diff and so refused
+# every deletion-only commit -- including removing a secret the scan had just
+# flagged, which is the remedy this hook prints.
+# Suffix, not substring: a staged line containing the sentinel would otherwise
+# satisfy this ahead of a truncation point and let the rest go unscanned.
+stripped_added=${added%@@scan-reached-end@@}
+[ "$stripped_added" != "$added" ] \
+  || refuse "the staged additions could not be read to the end (failing closed)"
+added=$stripped_added
+
+# Name the rule and the files it matched, never the matched value.
+where_of() {
+  local pat=$1
+  printf '%s\n' "$staged_diff" | awk -v pat="$pat" -v self_rel="$self_rel" '
+      /^\+\+\+ / { f = substr($0, 5); sub(/^b\//, "", f); skip = (self_rel != "" && f == self_rel); next }
+      /^\+/ && $0 !~ /^\+\+\+/ {
+        if (skip) next
+        if (index($0, "secret-scan:allow") > 0) next
+        if (tolower($0) ~ tolower(pat)) print f
+      }
+    ' | sort -u | tr '\n' ' '
+}
+
+findings=""
+while IFS="	" read -r label pattern; do
+  [ -n "${label:-}" ] || continue
+  [ -n "${pattern:-}" ] || continue
+  # -i throughout: API_KEY, AWS_SECRET_ACCESS_KEY and DATABASE_PASSWORD are the
+  # dominant real-world spellings and a case-sensitive rule missed all of them.
+  # Keep only the lines that match, then drop the ones a known non-secret
+  # shape explains. Deleting characters from the value class was the previous
+  # approach and it cost real coverage: credentials contain "/", "_", "-" and
+  # "." far more often than the settings that were being silenced.
+  matching=$(printf '%s\n' "$added" | grep -Ei -- "$pattern" || true)
+  [ -n "$matching" ] || continue
+  # Exclusions apply only to the general keyword rule. The provider-specific
+  # rules recognise a credential by its own format and are high-precision, so
+  # filtering them only creates false negatives: an identifier-suffix rule
+  # would discard "aws_access_key_id = AKIA...", which is a real finding.
+  if [ "$label" = "assigned secret literal" ]; then
+  while IFS= read -r exclusion; do
+    [ -n "$exclusion" ] || continue
+    matching=$(printf '%s\n' "$matching" | grep -Eiv -- "$exclusion" || true)
+    [ -n "$matching" ] || break
+  done <<'EXCLUSIONS'
+[:=][ "']{0,3}/
+[:=][ "']{0,3}\$[({]
+[:=][ "']{0,3}[A-Za-z_]+\.(env|environ|config|settings)\b
+process\.env
+os\.environ
+[:=][ "']{0,3}<[A-Za-z_ -]+>
+[:=][ "']{0,3}(xxx|yyy|zzz|todo|changeme|placeholder|example|redacted|dummy|sample)
+(name|ref|path|file|type|kind|id|field|label|class|header|param|env|var)[ "']{0,3}[:=]
+EXCLUSIONS
+  fi
+  [ -n "$matching" ] || continue
+  # Report it.
+  where=$(where_of "$pattern")
+  findings="${findings}  - ${label}: ${where:-(staged diff)}
+"
+done <<'RULES'
+private key block	-----BEGIN ([A-Z ]+ )?PRIVATE KEY( BLOCK)?-----
+OpenSSH private key	-----BEGIN OPENSSH PRIVATE KEY-----
+AWS access key id	(^|[^A-Za-z0-9])(AKIA|ASIA)[0-9A-Z]{16}([^A-Za-z0-9]|$)
+GitHub token	(gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})
+Slack token	xox[abprs]-[0-9A-Za-z-]{10,}
+Google API key	AIza[0-9A-Za-z_-]{35}
+Stripe secret key	(^|[^A-Za-z0-9])sk_(live|test)_[0-9A-Za-z]{16,}
+Anthropic API key	sk-ant-[A-Za-z0-9_-]{20,}
+JSON Web Token	(^|[^A-Za-z0-9])eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}
+assigned secret literal	(password|passwd|secret|api[_-]?key|apikey|access[_-]?token|auth[_-]?token|client[_-]?secret|private[_-]?key)[A-Za-z0-9_]*[ "']{0,3}[:=][ "']{0,3}[A-Za-z0-9/+=._-]{20,}
+credentials in a URL	[a-zA-Z][a-zA-Z0-9+.-]*://[^[:space:]:@/]+:[^[:space:]@/]+@[^[:space:]/]+
+RULES
+
+if [ -n "$findings" ]; then
+  echo "COMMIT REFUSED: staged changes look like they carry a secret." >&2
+  echo "" >&2
+  printf '%s' "$findings" >&2
+  echo "" >&2
+  echo "The matched values are deliberately not printed. Remove the value," >&2
+  echo "unstage the file, or move it to an ignored path." >&2
+  echo "" >&2
+  echo "If a value is genuinely not a secret, say which rule and why rather" >&2
+  echo "than bypassing the check." >&2
+  echo "" >&2
+  echo "If a real secret already reached a commit or a remote, treat it as" >&2
+  echo "compromised and rotate it: an agent cannot remove it from history." >&2
+  exit 1
+fi
+
+# Newly added files of a kind that normally holds credentials, judged by name
+# rather than content. Already-tracked files are left alone, so a repository
+# that made that choice deliberately is not second-guessed on every commit.
+# Name-based check. --name-status rather than --name-only, so a rename into a
+# credential-shaped name is caught: `git mv notes.txt .env` reports R, which a
+# filter of A alone missed entirely. For R and C the destination is the name
+# that matters.
+while IFS=$'\t' read -r status first second; do
+  [ -n "${status:-}" ] || continue
+  case "$status" in
+    R*|C*) f=${second:-} ;;
+    A*)    f=${first:-} ;;
+    *)     continue ;;
+  esac
+  [ -n "$f" ] || continue
+  case "$f" in
+    .env|.env.*|*/.env|*/.env.*|.envrc|*/.envrc|.netrc|*/.netrc|.npmrc|*/.npmrc\
+    |*.pem|*.key|*.p12|*.pfx|*.crt|*.ovpn|*id_rsa|*id_ed25519|*.keystore|*.jks\
+    |credentials|*/credentials|*service-account*.json|*secrets.y*ml)
+      refuse "staged file '$f' is the kind that normally holds credentials. Add it to .gitignore, or confirm it carries none and is meant to be tracked."
+      ;;
+  esac
+done < <(git diff --cached --name-status --diff-filter=ACR 2>/dev/null || true)
+
+exit 0
