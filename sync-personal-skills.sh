@@ -4,8 +4,8 @@
 # removing a skill.
 #
 # Layout:
-#   ~/Jarvis/agents/skills/<name>/  canonical content (this repo)
-#   ~/.agents                    -> Jarvis/agents
+#   ~/.Jarvis/agents/skills/<name>/  canonical content (this repo)
+#   ~/.agents                     -> .Jarvis/agents
 #   ~/.claude/skills/<name>      -> ../../.agents/skills/<name>
 #   ~/.codex/skills/<name>       -> ../../.agents/skills/<name>
 #
@@ -18,16 +18,16 @@
 # and the checks below make it visible.
 set -euo pipefail
 
-CANONICAL="$HOME/Jarvis/agents/skills"
+CANONICAL="$HOME/.Jarvis/agents/skills"
 
 if [ ! -d "$CANONICAL" ]; then
-  echo "error: $CANONICAL not found — is this repo cloned at ~/Jarvis?" >&2
+  echo "error: $CANONICAL not found — is this repo cloned at ~/.Jarvis?" >&2
   exit 1
 fi
 
 # ~/.agents is the path every other symlink resolves through, and it has to stay
 # a symlink into this repo. There is normally no syncing to do — ~/.agents and
-# Jarvis/agents are the same bytes, same inode, so they cannot drift. The one
+# .Jarvis/agents are the same bytes, same inode, so they cannot drift. The one
 # way this layout breaks is if something replaces that symlink with a real
 # directory: then two copies of every skill exist, edits land in whichever one
 # the tool happened to open, and nothing says so. Check for it loudly.
@@ -52,8 +52,8 @@ elif [ -e "$AGENTS_LINK" ]; then
   echo "error: ~/.agents exists but is neither a symlink nor a directory." >&2
   exit 1
 else
-  ln -s Jarvis/agents "$AGENTS_LINK"
-  echo "created  ~/.agents -> Jarvis/agents"
+  ln -s .Jarvis/agents "$AGENTS_LINK"
+  echo "created  ~/.agents -> .Jarvis/agents"
 fi
 
 fail=0

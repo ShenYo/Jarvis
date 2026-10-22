@@ -1,0 +1,87 @@
+#!/bin/bash
+# Refuse a push that destroys history or crosses a human-review checkpoint.
+#
+# This is where push rules belong. A runtime tool hook sees only the command
+# string, and the spellings that reach a given outcome are effectively
+# unbounded: `--force`, `-f`, a leading `+` on the refspec, `--mirror`,
+# `update-ref` plus a plain push, an alias, a wrapper script. Git hands this
+# hook the refs and the object ids instead, so the question becomes what the
+# push actually does rather than how it was written.
+#
+# stdin carries one line per ref:  <local ref> <local sha> <remote ref> <remote sha>
+#
+# Scope: this refuses, it does not ask. Everything here is either permanently
+# prohibited or reserved for a person by
+# the README of this repository.
+#
+# Why this lives here rather than on GitHub: branch protection and rulesets
+# need a paid plan for a private repository, and this one is private on the
+# free plan. This hook is the local substitute. It protects this clone only,
+# so it is a guard against mistakes, not a server-side control.
+
+set -uo pipefail
+
+PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:$PATH}"
+export PATH
+LC_ALL=C
+export LC_ALL
+
+remote_name=${1:-}
+zero=0000000000000000000000000000000000000000
+
+refuse() {
+  echo "PUSH REFUSED: $1" >&2
+  echo "" >&2
+  echo "Nothing was pushed. This repository has no server-side branch" >&2
+  echo "protection -- that needs a paid plan for a private repository -- so" >&2
+  echo "this hook is the substitute. See the README." >&2
+  echo "Do not reach for --no-verify: the collaborative Git guard refuses it." >&2
+  exit 1
+}
+
+command -v git >/dev/null 2>&1 || refuse "git is unavailable (failing closed)"
+
+# The default branch must resolve from the local remote HEAD. `git remote show`
+# would need the network, which a hook must not depend on. A guessed branch
+# name can protect the wrong branch, so a missing, malformed, or locally
+# dangling remote HEAD refuses every push until the repository is refreshed deliberately.
+[ -n "$remote_name" ] \
+  || refuse "remote name is unavailable; cannot resolve the default branch (failing closed)"
+symref=$(git symbolic-ref --quiet "refs/remotes/$remote_name/HEAD" 2>/dev/null || true)
+default_ref=""
+case "$symref" in
+  "refs/remotes/$remote_name/"?*)
+    if git show-ref --verify --quiet "$symref"; then
+      default_ref=${symref#refs/remotes/$remote_name/}
+    fi
+    ;;
+esac
+[ -n "$default_ref" ] \
+  || refuse "could not resolve the default branch for '$remote_name' (failing closed); refresh remote HEAD before pushing"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ -n "${remote_ref:-}" ] || continue
+  short_remote=${remote_ref#refs/heads/}
+
+  # 1. Deleting a remote ref. The refspec spelling does not matter: a deletion
+  #    always arrives with an all-zero local sha.
+  if [ "$local_sha" = "$zero" ]; then
+    refuse "this would delete '$short_remote' on '$remote_name'. Deleting a ref is permanently agent-prohibited, because an agent cannot reliably tell a merged branch from one that only looks merged. Ask the user to run it directly."
+  fi
+
+  # 2. Rewriting history. Non-fast-forward is the property that matters, so
+  #    --force, -f, +refspec and --mirror are all covered by the same test.
+  if [ "$remote_sha" != "$zero" ]; then
+    if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+      refuse "this would rewrite history on '$short_remote': the remote commit ${remote_sha:0:7} is not an ancestor of ${local_sha:0:7}. Force-pushing is permanently agent-prohibited. Ask the user to run it directly."
+    fi
+  fi
+
+  # 3. The default branch is a human-review checkpoint, so that merging a pull
+  #    request cannot be bypassed by pushing straight to the branch it targets.
+  if [ "$short_remote" = "$default_ref" ]; then
+    refuse "this would push directly to the default branch '$default_ref'. That is reserved for a person, because it bypasses pull-request review. Open a pull request, or ask the user to push."
+  fi
+done
+
+exit 0
