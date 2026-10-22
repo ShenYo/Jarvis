@@ -56,8 +56,39 @@ case "$symref" in
     fi
     ;;
 esac
-[ -n "$default_ref" ] \
-  || refuse "could not resolve the default branch for '$remote_name' (failing closed); refresh remote HEAD before pushing"
+if [ -z "$default_ref" ]; then
+  # Before failing closed, tell two situations apart. They look identical from
+  # here and only one of them is safe.
+  #
+  #   The remote has refs and its HEAD will not resolve -- a dangling or
+  #   unfetched HEAD. There IS a default branch; this hook just cannot see
+  #   which. Refusing is the only honest answer.
+  #
+  #   The remote has NO refs at all -- the first push to a repository that was
+  #   just created. There is no default branch to protect, no ref to delete,
+  #   and no history to rewrite. Nothing this hook forbids can apply.
+  #
+  # Without the distinction the first push to a new remote is impossible: the
+  # default branch does not exist until something is pushed, and the hook
+  # refuses until it does. The only way through was
+  # `-c core.hooksPath=/dev/null`, which is the bypass this hook exists to
+  # discourage. See issue #15.
+  #
+  # The network call is affordable because this branch is only reached when
+  # HEAD already failed to resolve, which does not happen on an ordinary push.
+  # Ask by URL, not by name. Git hands the hook both, and the URL always
+  # resolves -- the name only does when it is a configured remote, which it
+  # is not when git is invoked with a bare URL.
+  if ! remote_refs=$(git ls-remote --heads --tags "${2:-$remote_name}" 2>/dev/null); then
+    refuse "could not reach '$remote_name' to tell an empty remote from an unresolvable HEAD (failing closed)"
+  fi
+  if [ -n "$remote_refs" ]; then
+    refuse "could not resolve the default branch for '$remote_name' (failing closed); refresh remote HEAD before pushing"
+  fi
+  # An empty remote. Fall through: the per-ref rules below still refuse a
+  # deletion and a non-fast-forward, and rule 3 cannot match because there is
+  # no default branch name to match against.
+fi
 
 while read -r local_ref local_sha remote_ref remote_sha; do
   [ -n "${remote_ref:-}" ] || continue
