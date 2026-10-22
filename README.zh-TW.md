@@ -374,6 +374,29 @@ Jarvis 不對 Claude 或 Codex 在個人、專案與內建 Skills 之間的 runt
 順序做任何宣告。一個 live 的 link 只是檔案系統層級的證據，並不能證明某個特定
 prompt 一定會載入某個特定 Skill。
 
+以下兩點是在 **Claude Code 2.1.306** 上原生觀察到的（2026-10-22），地點是一個
+消費端 repository 與一次性 fixture。它們不會把上面那段話變成優先序規則；它們
+只是被看到的事實。
+
+- **這個 bridge 確實能到達消費端 repo 的 session。** 一個根在其他 repository
+  的 session 回報 `code-review`、`tdd`、`research`、`writing-for-agents` 與
+  `setup-project-agents` 皆為可用，解析路徑是 `~/.claude/skills/<name>` →
+  `~/.agents/skills`，而 `~/.agents` → `.Jarvis/agents`。所以這裡的集中化確實
+  會到達一個運作中的 session，不只是存在於檔案系統上。
+- **同名碰撞時，出現的是個人版，而專案版完全沒有被列出。** 一個 fixture 在
+  `.claude/skills/research/` 放了專案版 skill，與這個 repository 的個人
+  `research` 同名。一個停用了所有工具的 session —— 因此答案只能來自已載入的
+  context —— 回報**恰好一個**名為 `research` 的 skill，並逐字引用了個人版的
+  描述。同一個 fixture 裡的控制組（一個沒有同名對手的專案 skill）**有**被
+  列出，這才讓碰撞結果具有意義，而不是單純的「沒被發現」。
+
+  實務上的後果是：輸的那個 Skill 是**不可見**的，而不只是優先序較低，所以
+  session 沒辦法被要求改用另一個。如果某個專案需要自己版本的、而這裡也存在的
+  名稱，請把其中一個改名。
+
+  一個名稱、一個 fixture、一個版本、兩個 scope。對 project-vs-plugin、
+  plugin-vs-personal 或 Codex，都不做任何宣稱。
+
 Gemini 目前沒有由這支腳本建立的 bridge。它的 discovery 與 runtime 行為在
 這裡是 pending/unknown 的；這份 README 不對 Gemini 做任何強制性宣告。
 
