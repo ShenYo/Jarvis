@@ -62,7 +62,7 @@ Skill Phase B 整體上仍屬 **UNVERIFIED**；不要從個別探測或 bridge e
 ## 目前盤點
 
 **盤點觀察，2026-10-22：** 這個 checkout 有 36 個 canonical `SKILL.md`
-檔案、35 個 Claude bridge links、35 個 Codex bridge links，以及 35 筆 lock
+檔案、34 個 Claude bridge links、34 個 Codex bridge links，以及 35 筆 lock
 entries。其中 `orca-cli` 與 `orchestration` 這兩個 canonical Skill 尚未建立
 bridge link：它們由 `skills` CLI 安裝，該工具會寫入 canonical 副本與 lock
 entry，但不會建立 bridge，因此在 [`sync-personal-skills.sh`](./sync-personal-skills.sh)
@@ -163,7 +163,7 @@ checkout 上面再 clone 一次。既有的 checkout 應該在它自己的 Git h
 
 這個 bridge 指令既不會安裝任何 runtime，也不會建立任何憑證。對某個專案而言，
 完全省略 Jarvis 也是安全的：個人 Skills 始終是可選的。執行 bridge 之後，請用
-[Verify](#verify) 小節裡的唯讀檢查，確認 canonical symlink 以及任何已安裝的
+[驗證](#驗證) 小節裡的唯讀檢查，確認 canonical symlink 以及任何已安裝的
 Claude/Codex bridge 目錄。
 
 對於新專案，請從另外一份經過審查、乾淨的 Friday checkout 來 bootstrap 這份

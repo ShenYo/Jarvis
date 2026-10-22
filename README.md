@@ -64,7 +64,7 @@ do not infer completion from individual probes or bridge entries.
 ## Current inventory
 
 **Inventory observation, 2026-10-22:** this checkout has 36 canonical
-`SKILL.md` files, 35 Claude bridge links, 35 Codex bridge links, and 35 lock
+`SKILL.md` files, 34 Claude bridge links, 34 Codex bridge links, and 35 lock
 entries. Two canonical Skills, `orca-cli` and `orchestration`, have no bridge
 link yet: they were installed by the `skills` CLI, which writes the canonical
 copy and the lock entry but does not create the bridge, so they are not visible
