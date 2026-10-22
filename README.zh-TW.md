@@ -62,12 +62,17 @@ Skill Phase B 整體上仍屬 **UNVERIFIED**；不要從個別探測或 bridge e
 ## 目前盤點
 
 **盤點觀察，2026-10-22：** 這個 checkout 有 36 個 canonical `SKILL.md`
-檔案、34 個 Claude bridge links、34 個 Codex bridge links，以及 35 筆 lock
-entries。其中 `orca-cli` 與 `orchestration` 這兩個 canonical Skill 尚未建立
-bridge link：它們由 `skills` CLI 安裝，該工具會寫入 canonical 副本與 lock
-entry，但不會建立 bridge，因此在 [`sync-personal-skills.sh`](./sync-personal-skills.sh)
-執行之前，Claude Code 與 Codex 都看不到它們。Claude bridge 目錄中另有一個
-沒有對應 canonical Skill 的殘留項目 `synced`。
+檔案、36 個 Claude bridge links、36 個 Codex bridge links，以及 35 筆 lock
+entries。每個 canonical Skill 在兩個工具中都可被存取。
+
+`orca-cli` 與 `orchestration` 曾短暫無法存取：`skills` CLI 會寫入 canonical
+副本與 lock entry，但不會建立 bridge，因此它安裝的 Skill 在
+[`sync-personal-skills.sh`](./sync-personal-skills.sh) 執行之前，對 Claude Code
+與 Codex 都是看不見的。這是正常的操作順序，不是故障 —— 先用 CLI 安裝，再做
+bridge。
+
+Claude bridge 目錄中另有一個 `synced` 項目。它是真實目錄而非 symlink，屬於
+其他工具，因此 bridge 腳本刻意不去動它。
 [`setup-project-agents`](./agents/skills/setup-project-agents/) 則是唯一沒有
 lock entry 的 canonical Skill。
 
