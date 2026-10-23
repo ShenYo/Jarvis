@@ -1,0 +1,45 @@
+name: Mirror drift
+
+# This repository keeps byte-identical copies of three Friday payload hooks,
+# wired through core.hooksPath. The last time Friday's payload moved, the copy
+# here was missed -- along with the one in Friday itself -- because keeping
+# them in step was a manual step and manual steps get skipped.
+
+on:
+  pull_request:
+    paths: [".githooks/**", ".friday-lock.json", ".github/workflows/mirror-drift.yml"]
+  push:
+    branches-ignore: [main]
+    paths: [".githooks/**", ".friday-lock.json", ".github/workflows/mirror-drift.yml"]
+  schedule:
+    - cron: "0 7 * * *"
+
+jobs:
+  mirror-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The lock records each mirror's own sha256 in the layout `sha256sum -c`
+      # reads, so a local edit is caught here without a Friday checkout and
+      # without a cross-repository token.
+      #
+      # It cannot see the other direction -- whether Friday's payload moved --
+      # because that needs Friday. `friday-lock check` from a machine that has
+      # both reports it, and ShenYo/Friday#7 covers the hosted version.
+      - name: Mirrors match .friday-lock.json
+        run: |
+          [ -f .friday-lock.json ] || { echo "no .friday-lock.json"; exit 1; }
+          jq -r '.mirrors // {} | to_entries[] | "\(.value.local_sha256)  \(.key)"' \
+            .friday-lock.json > /tmp/mirrors.sums
+          n=$(wc -l < /tmp/mirrors.sums)
+          [ "$n" -gt 0 ] || { echo "the lock records no mirrors"; exit 1; }
+          echo "checking $n mirrored hook(s) against the lock"
+          sha256sum -c /tmp/mirrors.sums
+      - name: Report what a failure above means
+        if: failure()
+        run: |
+          echo "A mirrored hook no longer matches what .friday-lock.json recorded."
+          echo "Mirrors are byte-identical to Friday's payload. Either restore it:"
+          echo "    cp ~/.Friday/payload/.agents/githooks/<hook> .githooks/<hook>"
+          echo "or, if Friday's payload moved, carry the change properly:"
+          echo "    bash ~/.Friday/bin/friday-propagate ."

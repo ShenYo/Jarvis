@@ -12,14 +12,27 @@
 #
 # Scope: this refuses, it does not ask. Everything here is either permanently
 # prohibited or reserved for a person by
-# the README of this repository.
-#
-# Why this lives here rather than on GitHub: branch protection and rulesets
-# need a paid plan for a private repository, and this one is private on the
-# free plan. This hook is the local substitute. It protects this clone only,
-# so it is a guard against mistakes, not a server-side control.
+# the git guideline, resolved at run time by doc_of below.
 
 set -uo pipefail
+
+# Where the guideline lives depends on who is running this file. An installed
+# consumer has it at .agents/docs/; the producer ships it under payload/; a
+# repository that only mirrors these hooks has neither. Resolving it here
+# rather than naming one path is what lets this file be byte-identical
+# everywhere it runs -- see ShenYo/Friday#18. A mirror kept in step by hand
+# was missed entirely the last time the payload moved.
+doc_of() {
+  local rel=$1
+  if [ -f ".agents/docs/git-guideline/$rel" ]; then
+    printf '%s\n' ".agents/docs/git-guideline/$rel"
+  elif [ -f "payload/.agents/docs/git-guideline/$rel" ]; then
+    printf '%s\n' "payload/.agents/docs/git-guideline/$rel"
+  else
+    printf '%s\n' "the git guideline for this repository"
+  fi
+}
+
 
 PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:$PATH}"
 export PATH
@@ -32,9 +45,7 @@ zero=0000000000000000000000000000000000000000
 refuse() {
   echo "PUSH REFUSED: $1" >&2
   echo "" >&2
-  echo "Nothing was pushed. This repository has no server-side branch" >&2
-  echo "protection -- that needs a paid plan for a private repository -- so" >&2
-  echo "this hook is the substitute. See the README." >&2
+  echo "Nothing was pushed. See $(doc_of safety-boundary.md)." >&2
   echo "Do not reach for --no-verify: the collaborative Git guard refuses it." >&2
   exit 1
 }
