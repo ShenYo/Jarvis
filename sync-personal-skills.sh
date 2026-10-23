@@ -134,14 +134,20 @@ bridge "$HOME/.claude/skills" "Claude Code"
 # .codex-system-skills.marker) and codex-primary-runtime; leave both alone.
 #
 # Only bridged when Codex is actually installed, so this stays a no-op on a
-# machine that does not have it.
-CODEX_DIR="${CODEX_HOME:-$HOME/.codex}/skills"
-if [ -d "$CODEX_DIR" ]; then
+# machine that does not have it. Installation is decided by the Codex home
+# itself, not by skills/ inside it: a fresh Codex install has the home but has
+# never created skills/, and testing the inner directory reported "not
+# installed" on a machine that had it — leaving Codex with no skills at all
+# while saying nothing was wrong. The Claude Code branch above creates its
+# target with mkdir -p; this one now does the same through bridge().
+CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
+CODEX_DIR="$CODEX_HOME_DIR/skills"
+if [ -d "$CODEX_HOME_DIR" ]; then
   echo ""
   bridge "$CODEX_DIR" "Codex" ".system" "codex-primary-runtime"
 else
   echo ""
-  echo "Codex: not installed ($CODEX_DIR absent) — skipped."
+  echo "Codex: not installed ($CODEX_HOME_DIR absent) — skipped."
 fi
 
 # A top-level directory that neither is a skill nor groups any is dead weight —

@@ -32,8 +32,14 @@ Jarvis addresses four related scenarios:
 | **Friday** | A reviewed shared baseline that a consumer may pin and adopt | This machine's personal catalog or a consumer's conflict resolution |
 | **Consumer project** | Its `.agents/` seed, overlays, integrations, tests, and recorded Friday provenance | Jarvis's personal Skills or Friday's vendor payload |
 
-A project must remain reproducible without `~/.Jarvis`. Jarvis can help an
-agent work on a project, but it must not become a hidden project dependency.
+A consumer project must build, test, and pass CI on a machine that has no
+personal layer at all -- a CI runner or another person's laptop has no copy of
+this repository. So whatever a project requires belongs in that project or in
+the Friday baseline it adopted, never here. Jarvis can help an agent work on a
+project; it must not become a hidden project dependency.
+
+This constrains consumer projects, not Jarvis. Jarvis is expected to be present
+on this machine, and an agent working here may rely on it.
 
 ## Current operating context
 
@@ -173,6 +179,12 @@ under its own Git history instead.
 )
 ```
 
+Every Skill is tracked in this repository, so the clone and the bridge are the
+whole setup -- nothing is fetched at run time and the Skills CLI is not needed
+to use them. It is needed only to install or update a CLI-managed Skill
+afterwards; see [CLI-managed and locally maintained
+content](#cli-managed-and-locally-maintained-content).
+
 The bridge command neither installs a runtime nor creates credentials. It is
 safe to omit Jarvis entirely for a project: personal Skills remain optional.
 After the bridge, use the read-only checks in [Verify](#verify) to confirm the
@@ -187,10 +199,12 @@ for any consumer project.
 
 The script creates `~/.agents` if it is missing, ensures the Claude bridge
 directory exists, and creates or replaces a canonical-name entry only when it
-is missing or dangling. It bridges Codex only when
-`${CODEX_HOME:-$HOME/.codex}/skills` already exists; an absent Codex directory
-is skipped rather than treated as an error. It checks that each canonical skill
-has an existing entry under its declared name in every bridged tool, reports
+is missing or dangling. It bridges Codex when
+`${CODEX_HOME:-$HOME/.codex}` exists, creating `skills/` under it if needed: a
+fresh Codex install has the home but has never created that subdirectory, so
+testing for the subdirectory instead left Codex with no Skills at all while
+reporting it as not installed. An absent Codex home is skipped rather than
+treated as an error. It checks that each canonical skill has an existing entry under its declared name in every bridged tool, reports
 dangling non-reserved entries, and rejects a top-level canonical directory that
 is neither a Skill nor a grouping directory. A live canonical-name entry that
 points at the wrong target is left unchanged and is not detected. It exits

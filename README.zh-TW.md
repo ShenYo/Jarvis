@@ -32,8 +32,13 @@ Jarvis 處理四個相關情境：
 | **Friday** | 一份經審查、consumer 可以 pin 並採用的共享 baseline | 這台機器的個人目錄，或某個 consumer 的衝突處理 |
 | **Consumer project** | 它自己的 `.agents/` seed、overlays、整合、測試，以及已記錄的 Friday provenance | Jarvis 的個人 Skills，或 Friday 的 vendor payload |
 
-一個專案必須在沒有 `~/.Jarvis` 的情況下仍可重現。Jarvis 可以協助 agent 在專案
-上工作，但絕不能成為專案隱性的依賴。
+Consumer 專案必須在一台完全沒有個人層的機器上 build、測試並通過 CI —— CI
+runner 或別人的筆電上沒有這個 repository 的副本。因此專案所需的一切，屬於該專案
+本身或它所採用的 Friday 基線，不屬於這裡。Jarvis 可以協助 agent 在專案上工作，
+但絕不能成為專案隱性的依賴。
+
+這條限制的對象是 consumer 專案，不是 Jarvis。Jarvis 預期存在於這台機器上，在這裡
+工作的 agent 可以依賴它。
 
 ## 目前的運作情境
 
@@ -178,10 +183,16 @@ Claude/Codex bridge 目錄。
 方便用的 wrapper，用於空白專案的 Friday 採用，並不是這個手動流程、或任何
 consumer project 的前提條件。
 
+每一個 Skill 都被這個 repository 追蹤，所以 clone 加上 bridge 就是完整的設定
+—— 執行期不抓取任何東西，使用它們也不需要 Skills CLI。只有在之後要安裝或更新
+CLI-managed Skill 時才需要它，見[CLI-managed 與本地維護的內容](#cli-managed-與本地維護的內容)。
+
 這支腳本會在 `~/.agents` 不存在時建立它、確保 Claude bridge 目錄存在，並且只
-在某個 canonical-name entry 缺失或 dangling 時才建立或替換它。它只在
-`${CODEX_HOME:-$HOME/.codex}/skills` 已經存在時才對 Codex 做 bridge；不存在
-的 Codex 目錄會被跳過，而不是視為錯誤。它會檢查每個 canonical skill，在每個
+在某個 canonical-name entry 缺失或 dangling 時才建立或替換它。當
+`${CODEX_HOME:-$HOME/.codex}` 存在時它會對 Codex 做 bridge，並在需要時建立其下的
+`skills/` —— 全新安裝的 Codex 有 home 但從未建立該子目錄，而以子目錄作為判準會讓
+Codex 完全拿不到 skill，卻回報為未安裝。不存在的 Codex home 會被跳過，而不是視為
+錯誤。它會檢查每個 canonical skill，在每個
 已 bridge 的工具裡，是否都有一個以其宣告名稱存在的 entry，回報 dangling 的
 non-reserved entries，並拒絕一個既不是 Skill、也不是 grouping directory 的
 top-level canonical 目錄。一個指向錯誤目標、但本身仍是 live 的
