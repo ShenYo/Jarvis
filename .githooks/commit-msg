@@ -6,14 +6,30 @@
 # applies to a person's commits as well as an agent's.
 #
 # The rules here are the mechanically checkable part of
-# the README of this repository. This repository is not a Friday payload
-# consumer, so the hook is a copy, kept byte-identical to the payload apart
-# from these pointers. Whether a commit actually covers
+# the git guideline, resolved at run time by doc_of below. Whether a commit covers
 # one task is a semantic property no hook can decide; a vague subject is the
 # cheapest honest proxy, because a commit that lumps several tasks together
 # cannot be given a specific subject.
 
 set -uo pipefail
+
+# Where the guideline lives depends on who is running this file. An installed
+# consumer has it at .agents/docs/; the producer ships it under payload/; a
+# repository that only mirrors these hooks has neither. Resolving it here
+# rather than naming one path is what lets this file be byte-identical
+# everywhere it runs -- see ShenYo/Friday#18. A mirror kept in step by hand
+# was missed entirely the last time the payload moved.
+doc_of() {
+  local rel=$1
+  if [ -f ".agents/docs/git-guideline/$rel" ]; then
+    printf '%s\n' ".agents/docs/git-guideline/$rel"
+  elif [ -f "payload/.agents/docs/git-guideline/$rel" ]; then
+    printf '%s\n' "payload/.agents/docs/git-guideline/$rel"
+  else
+    printf '%s\n' "the git guideline for this repository"
+  fi
+}
+
 
 PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:$PATH}"
 export PATH
@@ -25,7 +41,7 @@ refuse() {
   echo "COMMIT REFUSED: $1" >&2
   echo "" >&2
   echo "Nothing was committed. The message is preserved; fix it and commit again." >&2
-  echo "Format rules: the README of this repository" >&2
+  echo "Format rules: $(doc_of git-commit.md)" >&2
   echo "Do not reach for --no-verify: the collaborative Git guard refuses it." >&2
   exit 1
 }

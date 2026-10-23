@@ -10,9 +10,7 @@
 # Scope is staged content only. A secret already in history is out of reach
 # here and cannot be removed by an agent at all, since that needs a history
 # rewrite and a force push, both permanently prohibited. See
-# the README of this repository. This repository is not a Friday payload
-# consumer -- it has no .agents/ tree -- so the hook is a copy, kept
-# byte-identical to the payload apart from these pointers.
+# the git guideline, resolved at run time by doc_of below.
 #
 # Note for maintainers: the rule table below is fed straight into a `while`
 # loop. Do not wrap it in `$(...)` — bash scans heredoc bodies for quote pairs
@@ -20,6 +18,24 @@
 # patterns contain unbalanced quotes.
 
 set -uo pipefail
+
+# Where the guideline lives depends on who is running this file. An installed
+# consumer has it at .agents/docs/; the producer ships it under payload/; a
+# repository that only mirrors these hooks has neither. Resolving it here
+# rather than naming one path is what lets this file be byte-identical
+# everywhere it runs -- see ShenYo/Friday#18. A mirror kept in step by hand
+# was missed entirely the last time the payload moved.
+doc_of() {
+  local rel=$1
+  if [ -f ".agents/docs/git-guideline/$rel" ]; then
+    printf '%s\n' ".agents/docs/git-guideline/$rel"
+  elif [ -f "payload/.agents/docs/git-guideline/$rel" ]; then
+    printf '%s\n' "payload/.agents/docs/git-guideline/$rel"
+  else
+    printf '%s\n' "the git guideline for this repository"
+  fi
+}
+
 
 PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:$PATH}"
 export PATH
@@ -34,7 +50,7 @@ export LC_ALL
 refuse() {
   echo "COMMIT REFUSED: $1" >&2
   echo "" >&2
-  echo "Nothing was committed. See the README of this repository" >&2
+  echo "Nothing was committed. See $(doc_of safety-boundary.md)" >&2
   echo "(Check for sensitive information). Do not reach for --no-verify: the" >&2
   echo "collaborative Git guard refuses that flag." >&2
   exit 1

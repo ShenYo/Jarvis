@@ -1,0 +1,25 @@
+{
+  "friday": {
+    "repo": "ShenYo/Friday",
+    "commit": "c61dd0bd3ee9f0b6f32fb367b4a6d778523695de",
+    "synced": "2026-10-23"
+  },
+  "managed_core": {},
+  "mirrors": {
+    ".githooks/commit-msg": {
+      "source": ".agents/githooks/commit-msg",
+      "source_sha256": "149f955b3d960fc0207b6367c34356710a13fd6f2a70076fc3c1d1da35b860fe",
+      "local_sha256": "149f955b3d960fc0207b6367c34356710a13fd6f2a70076fc3c1d1da35b860fe"
+    },
+    ".githooks/pre-commit": {
+      "source": ".agents/githooks/pre-commit",
+      "source_sha256": "affadd81b97544a0211a2419733b743e2e327d404d71b281876c23a1dc1fb0ee",
+      "local_sha256": "affadd81b97544a0211a2419733b743e2e327d404d71b281876c23a1dc1fb0ee"
+    },
+    ".githooks/pre-push": {
+      "source": ".agents/githooks/pre-push",
+      "source_sha256": "fd3c17405074bc16c8c833b6c8dd07567a9c0550ad34e7bff0e6224c06149496",
+      "local_sha256": "fd3c17405074bc16c8c833b6c8dd07567a9c0550ad34e7bff0e6224c06149496"
+    }
+  }
+}
