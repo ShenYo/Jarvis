@@ -470,7 +470,7 @@ Jarvis makes no claim about Claude's or Codex's runtime precedence between
 personal, project, and built-in Skills. A live link is filesystem evidence, not
 proof that a particular prompt will load a particular Skill.
 
-Two things were observed natively on **Claude Code 2.1.306** (2026-10-22), in
+Three things were observed natively on **Claude Code 2.1.306** (2026-10-22), in
 a consumer repository and a disposable fixture. They do not turn the paragraph
 above into a precedence rule; they are what was seen.
 
@@ -498,8 +498,8 @@ above into a precedence rule; they are what was seen.
   project-vs-plugin or Codex.
 - **A personal Skill also won over a marketplace plugin of the same name, and
   the plugin kept the name when the bridge was gone.** `code-review` exists
-  both here and at
-  `~/.claude/plugins/marketplaces/claude-plugins-official/plugins/code-review`.
+  both here, as a Skill, and in the official marketplace as a plugin command
+  (`~/.claude/plugins/marketplaces/claude-plugins-official/plugins/code-review/commands/code-review.md`).
   With the bridge in place, a session rooted in a consumer repository quoted
   *this* repository's description for `code-review`. With `~/.agents` and
   `~/.claude/skills` temporarily moved aside, the name stayed available —
