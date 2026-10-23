@@ -5,3 +5,7 @@
 .idea/
 .vscode/
 *.swp
+
+# Agent scratch space. docs/temp/ already held scratch work while nothing
+# ignored it, so a blanket `git add -A` would have committed it.
+docs/temp/

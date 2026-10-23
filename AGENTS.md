@@ -64,28 +64,49 @@ Do not reach for `--no-verify`; the guard refuses that flag.
 
 ## Working rules
 
-The hooks enforce rules whose text lives in Friday, which is public. Read them
-there:
+These are this repository's own, stated here rather than linked. Basic
+discipline should not be something this repository borrows -- and unlike the
+Git rules below, it does not move when a hook changes.
 
-- [agent-rules.md](https://github.com/ShenYo/Friday/blob/main/payload/.agents/docs/agent-rules.md)
-  -- scope, understand first, small reversible changes, verify the outcome
-- [git-guideline/safety-boundary.md](https://github.com/ShenYo/Friday/blob/main/payload/.agents/docs/git-guideline/safety-boundary.md)
-  -- which Git and GitHub operations are the agent's own call and which are
-  reserved for a human
-- [git-guideline/git-commit.md](https://github.com/ShenYo/Friday/blob/main/payload/.agents/docs/git-guideline/git-commit.md)
-  -- commit message shape
-- [scratch-files.md](https://github.com/ShenYo/Friday/blob/main/payload/.agents/docs/scratch-files.md)
-  -- temporary artifacts belong under an ignored `docs/temp/<purpose>/` and are
-  never staged
+1. **Scope.** Make only the changes the request needs. Report what you noticed
+   rather than fixing it unasked: in a repository that is mostly vendored
+   content, an unasked fix is usually an edit to someone else's file.
+2. **Understand first.** Read the file, and the lock entry or upstream source
+   behind it, before changing it. Where two readings of a request would produce
+   materially different work, say so instead of choosing silently.
+3. **Small and reversible.** Prefer the smallest change that meets the request,
+   in the conventions already here. No speculative abstraction, no unrelated
+   cleanup riding along.
+4. **Verify, and say what you ran.** A claim about behaviour needs a command
+   and its output. State what passed, what you could not check, and why --
+   `UNVERIFIED` is an acceptable answer and a guess is not.
+5. **Scratch files go under `docs/temp/<purpose>/`**, which `.gitignore`
+   ignores. Never stage one, and never reach for a blanket `git add -A` across
+   a mixed tree to find out what is there.
 
-Linked rather than copied on purpose. A copy here would be a fourth place to
-keep in step, and the three that already exist went out of step once.
+Two more that are specific to this repository:
 
-Two additions specific to this repository:
+6. Both READMEs are checked for parity by
+   [`scripts/check-readme-parity.py`](./scripts/check-readme-parity.py). An
+   edit to one needs the matching edit to the other.
+7. Never write to `~/.Jarvis` from inside a consumer project's workflow. This
+   repository is optional for every project; a project that writes here has
+   made it mandatory.
 
-- Both READMEs are checked for parity by
-  [`scripts/check-readme-parity.py`](./scripts/check-readme-parity.py). An edit
-  to one needs the matching edit to the other.
-- Never write to `~/.Jarvis` from inside a consumer project's workflow. This
-  repository is optional for every project; a project that writes here has made
-  it mandatory.
+### Why the Git rules are not in that list
+
+They come with the hooks. `.githooks/` holds byte-identical copies of Friday's,
+so the rules those hooks enforce are Friday's text, and they change when the
+hooks change. Pointing at the source is the honest thing to do -- a copy here
+would be a fourth place to keep in step, and the three that already exist went
+out of step once.
+
+- [safety-boundary.md](https://github.com/ShenYo/Friday/blob/main/payload/.agents/docs/git-guideline/safety-boundary.md)
+  -- which Git and GitHub operations are the agent's own call, which are
+  reserved for a person, and which are prohibited outright even when you are
+  explicitly asked to perform them
+- [git-commit.md](https://github.com/ShenYo/Friday/blob/main/payload/.agents/docs/git-guideline/git-commit.md)
+  -- the commit message format `commit-msg` enforces
+
+Read them before a Git operation here. They are the authority on it; nothing in
+this file overrides them.

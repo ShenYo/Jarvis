@@ -105,9 +105,12 @@ sync-personal-skills.sh      ensures the Claude bridge directory and
 
 [`AGENTS.md`](./AGENTS.md) is where an agent is told what it may not touch
 here: most Skills are vendored and belong to an upstream CLI, two of them
-conflict with the Friday baseline, and the hooks are copies. It links the
-shared working rules rather than copying them -- they live in Friday, which is
-public.
+conflict with the Friday baseline, and the hooks are copies. Its working rules
+are **this repository's own**, written there rather than borrowed, because
+basic discipline should not depend on another repository. The exception is the
+Git rules, which come with the hooks: those are byte-identical copies of
+Friday's, so the rules they enforce are Friday's text and change when the hooks
+change.
 
 `agents/` is the real content. Everything outside this repo is a symlink into
 it, so there is exactly one copy of every skill.
@@ -370,8 +373,9 @@ token: the record is self-contained.
 together.** Friday's payload is nineteen files; this repository takes **three
 of them** — the hooks above — and nothing else: no `.agents/` tree, none of
 Friday's documentation, no `.claude/settings.json`. Its own
-[`AGENTS.md`](./AGENTS.md) is locally written and links Friday's shared rules
-rather than installing them. Friday depends on this repository for nothing in
+[`AGENTS.md`](./AGENTS.md) is locally written and states its own working rules;
+it links Friday only for the rules those three hooks enforce, which are
+Friday's by construction. Friday depends on this repository for nothing in
 return. The two are maintained separately and serve different
 audiences: this one is personal scope, Friday is project scope.
 
