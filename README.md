@@ -333,28 +333,71 @@ sets it again.
 | [`commit-msg`](.githooks/commit-msg) | A subject that is not Conventional Commits, and a larger change with no body saying why it exists. |
 | [`pre-push`](.githooks/pre-push) | Deleting a remote ref, rewriting history (a force-push), and pushing directly to the default branch. It decides from the refs being pushed, not from the command text. |
 
-Two of these are copies of files this platform's sibling repository ships to
-its consumers, at `payload/.agents/githooks/` in
+All three are copies of files this platform's sibling repository ships to its
+consumers, at `payload/.agents/githooks/` in
 [Friday](https://github.com/ShenYo/Friday). This repository is not a Friday
 payload consumer — it has no `.agents/` tree — so `install.sh` cannot wire it
-and the hooks are copied instead. They are kept byte-identical to the payload
-apart from the lines that point at documentation, so
+and the hooks are copied instead. Each is now **byte-identical** to its payload
+counterpart, including `pre-push`: the hooks resolve the guideline path at run
+time rather than hard-coding it, which is what removed the last intended
+difference. So
 
 ```sh
-diff ~/.Friday/payload/.agents/githooks/pre-commit .githooks/pre-commit
-diff ~/.Friday/payload/.agents/githooks/commit-msg .githooks/commit-msg
+for h in pre-commit commit-msg pre-push; do
+  diff ~/.Friday/payload/.agents/githooks/$h .githooks/$h
+done
 ```
 
-shows the whole intended delta, and any drift beyond it. `pre-push` is specific
-to this repository and has no payload counterpart.
+should print nothing at all, and anything it does print is drift.
 
-### Why the push rules live here rather than on GitHub
+### `hooks.json`
 
-Branch protection and rulesets need a paid plan for a private repository, and
-this one is private on the free plan. `pre-push` is the local substitute. It
-protects this clone only, which is why the three operations it refuses are
-also written down as permanently agent-prohibited rather than relying on the
-hook to be present.
+The three hooks above are copies, so something has to notice when one drifts.
+`hooks.json` records the sha256 of each, in the layout `sha256sum -c` reads,
+and [`.github/workflows/hooks-drift.yml`](.github/workflows/hooks-drift.yml)
+checks them on change and once a day. No Friday checkout and no cross-repository
+token: the record is self-contained.
+
+**This repository is not a Friday consumer, and the two are not bound
+together.** Friday's payload is nineteen files; this repository takes **three
+of them** — the hooks above — and nothing else. No `.agents/` tree, no
+`AGENTS.md`, no `.claude/settings.json`. Friday depends on this repository for
+nothing in return. The two are maintained separately and serve different
+audiences: this one is personal scope, Friday is project scope.
+
+That is why the file carries no `friday-` prefix. It is named for the only
+thing it is — a record of the hooks this repository keeps. A *consumer* carries
+`.friday-lock.json` instead; the two never appear together, and `friday-lock`
+refuses a repository holding both.
+
+It exists because the alternative failed. When Friday's `pre-push` changed, the
+copy here was missed — along with the copy in Friday itself — and nothing
+reported either. Keeping mirrors in step was a manual step, and manual steps
+get skipped.
+
+A drift here is repaired with a copy, or, if Friday's payload is what moved,
+carried properly:
+
+```sh
+bash ~/.Friday/bin/friday-propagate ~/.Jarvis
+```
+
+### Why the push rules live here as well as on GitHub
+
+They used to live here *instead*: rulesets need a paid plan for a private
+repository, and this one was private on the free plan. It is public now, so a
+ruleset on `main` is active — it refuses deletion and non-fast-forward pushes
+and requires a pull request, with no bypass actors.
+
+`pre-push` stays, for two reasons. It refuses at the moment of the push rather
+than after a round trip, so an agent gets the reason instead of a rejected
+ref. And it protects this clone even against a remote that has no rules —
+a fork, a mirror, or a ruleset someone later relaxes. The server rule is the
+one that cannot be skipped; the hook is the one that explains itself.
+
+Either way the hook protects this clone only, which is why the three operations
+it refuses are also written down as permanently agent-prohibited rather than
+relying on the hook to be present.
 
 ### If a hook refuses something it should not
 

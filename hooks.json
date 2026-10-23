@@ -4,7 +4,6 @@
     "commit": "c61dd0bd3ee9f0b6f32fb367b4a6d778523695de",
     "synced": "2026-10-23"
   },
-  "managed_core": {},
   "mirrors": {
     ".githooks/commit-msg": {
       "source": ".agents/githooks/commit-msg",

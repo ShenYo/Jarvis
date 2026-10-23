@@ -322,26 +322,64 @@ commit 期與 push 期的檢查。它們是防手滑的護欄，不是伺服器�
 | [`commit-msg`](.githooks/commit-msg) | 主旨不符 Conventional Commits；以及較大的改動沒有內文說明「為什麼」。 |
 | [`pre-push`](.githooks/pre-push) | 刪除 remote ref、改寫歷史（force-push）、以及直接推送 default branch。它是依據被推送的 ref 判斷，不是看指令字串。 |
 
-其中兩個是這個平台的姊妹 repository 發給 consumer 的檔案副本，位於
+這三個都是這個平台的姊妹 repository 發給 consumer 的檔案副本，位於
 [Friday](https://github.com/ShenYo/Friday) 的 `payload/.agents/githooks/`。
 這個 repository 不是 Friday payload consumer —— 它沒有 `.agents/` 樹 ——
-所以 `install.sh` 無法接線，只能用副本。副本與 payload 保持 byte-identical，
-只有指向文件的那幾行不同，因此
+所以 `install.sh` 無法接線，只能用副本。每一個現在都與 payload 的對應檔案
+**逐位元組相同**，`pre-push` 也包含在內：這些 hook 改成在執行期解析指引文件的
+路徑、而不是寫死它，這正是最後一處預期差異消失的原因。因此
 
 ```sh
-diff ~/.Friday/payload/.agents/githooks/pre-commit .githooks/pre-commit
-diff ~/.Friday/payload/.agents/githooks/commit-msg .githooks/commit-msg
+for h in pre-commit commit-msg pre-push; do
+  diff ~/.Friday/payload/.agents/githooks/$h .githooks/$h
+done
 ```
 
-會顯示出完整的預期差異，以及任何超出範圍的走樣。`pre-push` 是這個
-repository 專有的，payload 裡沒有對應檔案。
+應該完全不輸出任何東西；只要有輸出，那就是走樣。
 
-### 為什麼 push 規則放在這裡而不是 GitHub 上
+### `hooks.json`
 
-private repository 的 branch protection 與 ruleset 需要付費方案，而這個
-repository 是免費方案下的 private repo。`pre-push` 是本機的替代品。它只保護
-這一個 clone —— 正因為如此，它拒絕的那三個操作同時也被寫成「對 agent
-永久禁止」，而不是指望這個 hook 一定存在。
+上面三個 hook 都是副本，所以需要有東西在其中之一走樣時發現。`hooks.json`
+以 `sha256sum -c` 能讀的版面記錄每一個的 sha256，而
+[`.github/workflows/hooks-drift.yml`](.github/workflows/hooks-drift.yml)
+會在變更時與每天各檢查一次。不需要 Friday 的 checkout，也不需要跨
+repository 的 token：這份記錄是自給自足的。
+
+**這個 repository 不是 Friday consumer，兩者也沒有互相綁定。** Friday 的
+payload 有十九個檔案；這個 repository 只取其中**三個** —— 上面那些 hook ——
+別的都不取。沒有 `.agents/` 樹、沒有 `AGENTS.md`、沒有 `.claude/settings.json`。
+Friday 也完全不依賴這個 repository。兩者各自維護、服務不同對象：這邊是
+personal scope，Friday 是 project scope。
+
+這也是檔名不帶 `friday-` 前綴的原因。它只以它唯一的身分命名 —— 這個
+repository 所保有的那些 hook 的記錄。**consumer** 帶的是
+`.friday-lock.json`；兩者永不同時出現，而 `friday-lock` 會拒絕同時持有兩者的
+repository。
+
+它之所以存在，是因為另一種做法失敗過：當 Friday 的 `pre-push` 改動時，這裡的
+副本被漏掉了 —— 連 Friday 自己那份也一樣 —— 而且沒有任何東西回報。讓副本保持
+同步曾經是一個手動步驟，而手動步驟會被跳過。
+
+這裡的走樣用複製修復；若是 Friday 的 payload 動了，則照正規路徑帶過來：
+
+```sh
+bash ~/.Friday/bin/friday-propagate ~/.Jarvis
+```
+
+### 為什麼 push 規則放在這裡，也放在 GitHub 上
+
+它們以前是放在這裡**而非** GitHub：private repository 的 ruleset 需要付費
+方案，而這個 repository 當時是免費方案下的 private repo。現在它是 public，
+所以 `main` 上有一個生效中的 ruleset —— 它拒絕刪除與 non-fast-forward push、
+並要求 pull request，且沒有任何 bypass actor。
+
+`pre-push` 保留，有兩個理由。它在推送的那一刻就拒絕，而不是等一趟往返之後，
+所以 agent 得到的是原因而不是一個被拒的 ref。而且它保護這個 clone，即使面對
+一個完全沒有規則的 remote —— 某個 fork、某個 mirror，或是日後被誰放寬的
+ruleset。伺服器端的規則是無法被跳過的那一個；hook 是會解釋自己的那一個。
+
+無論如何，hook 只保護這一個 clone —— 正因為如此，它拒絕的那三個操作同時也被
+寫成「對 agent 永久禁止」，而不是指望這個 hook 一定存在。
 
 ### 如果 hook 擋了不該擋的東西
 
