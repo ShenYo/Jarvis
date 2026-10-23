@@ -131,6 +131,11 @@ ${CODEX_HOME:-$HOME/.codex}/skills/<name>
 `~/.agents` 是那個穩定位址，而 bridge script 則要求這個 repository 必須 clone
 在 `~/.Jarvis`。
 
+上面的 `../../` 是「bridge 目錄位於 `~` 下兩層」時的段數，兩個預設位置都在那個深
+度。腳本會**計算**段數而不是假定它，所以位於其他深度的 `CODEX_HOME` 會得到正確
+的段數，而位於 `$HOME` 之外的則改用經過 `~/.agents` 的絕對路徑。先前假定為二，
+曾讓較深的 `CODEX_HOME` 下每一個 Codex link 都懸空。
+
 ## 沒有東西需要同步
 
 `~/.agents` 是一個 symlink，不是一份副本。`~/.agents/skills/foo/SKILL.md` 和
@@ -183,9 +188,12 @@ Claude/Codex bridge 目錄。
 方便用的 wrapper，用於空白專案的 Friday 採用，並不是這個手動流程、或任何
 consumer project 的前提條件。
 
-每一個 Skill 都被這個 repository 追蹤，所以 clone 加上 bridge 就是完整的設定
-—— 執行期不抓取任何東西，使用它們也不需要 Skills CLI。只有在之後要安裝或更新
-CLI-managed Skill 時才需要它，見[CLI-managed 與本地維護的內容](#cli-managed-與本地維護的內容)。
+每一個 Skill 都被這個 repository 追蹤，所以 clone 加上 bridge 就是完整的設定：執行
+期不需要抓取任何東西才能讓 Skill 可用，執行它們也不需要 Skills CLI。需要它的時機有
+兩個：之後要安裝或更新 CLI-managed Skill 時，見[CLI-managed 與本地維護的內容](#cli-managed-與本地維護的內容)；
+以及某一個 Skill 自己的流程 —— [`find-skills`](./agents/skills/find-skills/) 是去找
+**尚未**安裝的 Skill，所以它會連網，而它的搜尋步驟會執行 `npx skills find`。只有
+clone 的機器可以執行這裡其他每一個 Skill；那一個會停在它的第一步。
 
 這支腳本會在 `~/.agents` 不存在時建立它、確保 Claude bridge 目錄存在，並且只
 在某個 canonical-name entry 缺失或 dangling 時才建立或替換它。當

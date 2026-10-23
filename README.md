@@ -137,6 +137,13 @@ Two hops, and the second one matters: `~/.claude/skills/<name>` resolves
 repo directly. That is deliberate — `~/.agents` is the stable address, while
 the bridge script requires this repository to be cloned at `~/.Jarvis`.
 
+The `../../` above is the count for a bridge directory two levels below `~`,
+which is where both defaults sit. The script computes the count rather than
+assuming it, so a `CODEX_HOME` at any other depth gets the right number of
+hops, and one outside `$HOME` gets an absolute path through `~/.agents`
+instead. Assuming two used to leave every Codex link dangling for a deeper
+`CODEX_HOME`.
+
 ## There is nothing to sync
 
 `~/.agents` is a symlink, not a copy. `~/.agents/skills/foo/SKILL.md` and
@@ -180,10 +187,14 @@ under its own Git history instead.
 ```
 
 Every Skill is tracked in this repository, so the clone and the bridge are the
-whole setup -- nothing is fetched at run time and the Skills CLI is not needed
-to use them. It is needed only to install or update a CLI-managed Skill
-afterwards; see [CLI-managed and locally maintained
-content](#cli-managed-and-locally-maintained-content).
+whole setup: nothing is fetched at run time to make a Skill available, and the
+Skills CLI is not needed to run one. It is needed to install or update a
+CLI-managed Skill afterwards — see [CLI-managed and locally maintained
+content](#cli-managed-and-locally-maintained-content) — and by one Skill's own
+workflow: [`find-skills`](./agents/skills/find-skills/) searches for Skills
+that are *not* installed, so it reaches the network, and its search step runs
+`npx skills find`. A clone-only machine can run every other Skill here; that
+one will stop at its first step.
 
 The bridge command neither installs a runtime nor creates credentials. It is
 safe to omit Jarvis entirely for a project: personal Skills remain optional.
