@@ -100,9 +100,10 @@ sync-personal-skills.sh      ensures the Claude bridge directory and
 ```
 
 [`AGENTS.md`](./AGENTS.md) 是告訴 agent 在這裡不該碰什麼的地方：多數 Skill 是
-vendored、屬於上游的 CLI，其中兩個與 Friday 基線衝突，而那些 hook 是副本。它以
-連結指向共用的工作規則，而不是把它們複製過來 —— 那些規則住在 Friday，而 Friday
-是 public。
+vendored、屬於上游的 CLI，其中兩個與 Friday 基線衝突，而那些 hook 是副本。它的工作
+規則是**這個 repository 自己的**，寫在那裡而不是借來的 —— 基礎紀律不該依賴另一個
+repository。例外是 Git 規則，那些跟著 hook 一起來：那三個 hook 是 Friday 的逐位元組
+副本，所以它們強制的規則就是 Friday 的文字，也隨 hook 一起改變。
 
 `agents/` 才是真正的內容。這個 repo 以外的一切都只是指向它的 symlink，因此每個
 skill 永遠只有一份副本。
@@ -355,9 +356,9 @@ repository 的 token：這份記錄是自給自足的。
 **這個 repository 不是 Friday consumer，兩者也沒有互相綁定。** Friday 的
 payload 有十九個檔案；這個 repository 只取其中**三個** —— 上面那些 hook ——
 別的都不取：沒有 `.agents/` 樹、沒有 Friday 的任何文件、沒有
-`.claude/settings.json`。它自己的 [`AGENTS.md`](./AGENTS.md) 是本地撰寫的，以連結
-指向 Friday 的共用規則，而不是把它們安裝進來。Friday 也完全不依賴這個
-repository。兩者各自維護、服務不同對象：這邊是
+`.claude/settings.json`。它自己的 [`AGENTS.md`](./AGENTS.md) 是本地撰寫的，陳述它
+自己的工作規則；只在那三個 hook 所強制的規則上連結 Friday，而那些規則依其構成本來
+就是 Friday 的。Friday 也完全不依賴這個 repository。兩者各自維護、服務不同對象：這邊是
 personal scope，Friday 是 project scope。
 
 這也是檔名不帶 `friday-` 前綴的原因。它只以它唯一的身分命名 —— 這個
