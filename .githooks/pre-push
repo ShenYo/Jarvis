@@ -22,6 +22,11 @@ set -uo pipefail
 # rather than naming one path is what lets this file be byte-identical
 # everywhere it runs -- see ShenYo/Friday#18. A mirror kept in step by hand
 # was missed entirely the last time the payload moved.
+#
+# The last case used to print "the git guideline for this repository", which
+# in a repository with neither path names nothing that exists -- a refusal
+# that sends the reader looking for a file that is not there. Friday is
+# public, so the fallback is the canonical document's URL.
 doc_of() {
   local rel=$1
   if [ -f ".agents/docs/git-guideline/$rel" ]; then
@@ -29,7 +34,7 @@ doc_of() {
   elif [ -f "payload/.agents/docs/git-guideline/$rel" ]; then
     printf '%s\n' "payload/.agents/docs/git-guideline/$rel"
   else
-    printf '%s\n' "the git guideline for this repository"
+    printf '%s\n' "https://github.com/ShenYo/Friday/blob/main/payload/.agents/docs/git-guideline/$rel"
   fi
 }
 
