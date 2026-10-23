@@ -85,6 +85,38 @@ skills() {
 # Reserved names are directories the tool owns. They are skipped when linking
 # and exempt from the dangling check, so this script never reports on or
 # touches something another tool installed.
+# A bridge link points through ~/.agents rather than at this repository, so it
+# survives the clone moving. That indirection is spelled relatively, which is
+# why it needs the right number of hops: "../../" reaches $HOME only from a
+# directory exactly two levels below it. That holds for ~/.claude/skills and
+# the default ~/.codex/skills, and fails for a CODEX_HOME anywhere else --
+# with CODEX_HOME=~/.config/codex/home every link resolved to
+# ~/.config/codex/.agents/skills/<name> and dangled. The script did report it,
+# loudly, as 36 DANGLING lines and a failed run, but it had already created 36
+# broken links to get there. Count the hops instead of assuming two, and fall
+# back to an absolute path through ~/.agents for a bridge directory outside
+# $HOME, where no number of ".." reaches it.
+agents_prefix() {
+  local dir=$1 rest hops prefix=''
+  dir=$(cd "$dir" && pwd -P) || { printf '%s\n' "$HOME/.agents/skills"; return; }
+  local home
+  home=$(cd "$HOME" && pwd -P) || home=$HOME
+  if [ "$dir" = "$home" ]; then
+    printf '%s\n' ".agents/skills"
+    return
+  fi
+  case $dir in
+    "$home"/*) rest=${dir#"$home"/} ;;
+    *) printf '%s\n' "$HOME/.agents/skills"; return ;;
+  esac
+  hops=$(printf '%s' "$rest" | awk -F/ '{print NF}')
+  while [ "$hops" -gt 0 ]; do
+    prefix="../$prefix"
+    hops=$((hops - 1))
+  done
+  printf '%s\n' "${prefix}.agents/skills"
+}
+
 bridge() {
   local target="$1" label="$2"
   shift 2
@@ -92,12 +124,15 @@ bridge() {
 
   mkdir -p "$target"
 
+  local prefix
+  prefix=$(agents_prefix "$target")
+
   local created=0 rel name link
   while IFS=$'\t' read -r rel name; do
     link="$target/$name"
     # -e is false for a dangling symlink, so a broken link is replaced too.
     if [ ! -e "$link" ]; then
-      ln -sfn "../../.agents/skills/$rel" "$link"
+      ln -sfn "$prefix/$rel" "$link"
       echo "linked   $label: $name"
       created=$((created + 1))
     fi
@@ -134,14 +169,20 @@ bridge "$HOME/.claude/skills" "Claude Code"
 # .codex-system-skills.marker) and codex-primary-runtime; leave both alone.
 #
 # Only bridged when Codex is actually installed, so this stays a no-op on a
-# machine that does not have it.
-CODEX_DIR="${CODEX_HOME:-$HOME/.codex}/skills"
-if [ -d "$CODEX_DIR" ]; then
+# machine that does not have it. Installation is decided by the Codex home
+# itself, not by skills/ inside it: a fresh Codex install has the home but has
+# never created skills/, and testing the inner directory reported "not
+# installed" on a machine that had it — leaving Codex with no skills at all
+# while saying nothing was wrong. The Claude Code branch above creates its
+# target with mkdir -p; this one now does the same through bridge().
+CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
+CODEX_DIR="$CODEX_HOME_DIR/skills"
+if [ -d "$CODEX_HOME_DIR" ]; then
   echo ""
   bridge "$CODEX_DIR" "Codex" ".system" "codex-primary-runtime"
 else
   echo ""
-  echo "Codex: not installed ($CODEX_DIR absent) — skipped."
+  echo "Codex: not installed ($CODEX_HOME_DIR absent) — skipped."
 fi
 
 # A top-level directory that neither is a skill nor groups any is dead weight —
