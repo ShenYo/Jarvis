@@ -348,6 +348,29 @@ diff ~/.Friday/payload/.agents/githooks/commit-msg .githooks/commit-msg
 shows the whole intended delta, and any drift beyond it. `pre-push` is specific
 to this repository and has no payload counterpart.
 
+### `.friday-hooks.json`
+
+The three hooks above are **copies** of files
+[Friday](https://github.com/ShenYo/Friday) ships to its consumers, and
+`.friday-hooks.json` records the sha256 of each so a machine can tell when one
+has drifted. [`.github/workflows/hooks-drift.yml`](.github/workflows/hooks-drift.yml)
+checks them on change and daily.
+
+**This repository is not a Friday consumer**, and the two are not bound
+together. Friday's payload is nineteen files; this repository takes **three of
+them** — the hooks above — and nothing else. No `.agents/` tree, no
+`AGENTS.md`, no `.claude/settings.json`. Friday depends on this repository for
+nothing in return.
+
+The file is named for what it holds rather than for a relationship between
+repositories. A consumer carries `.friday-lock.json`; the two never appear
+together, and the tool refuses a repository holding both.
+
+It exists because the alternative failed: when Friday's `pre-push` changed, the
+copy here was missed, along with the copy in Friday itself, and nothing
+reported either. Keeping mirrors in step was a manual step, and manual steps
+get skipped.
+
 ### Why the push rules live here rather than on GitHub
 
 Branch protection and rulesets need a paid plan for a private repository, and

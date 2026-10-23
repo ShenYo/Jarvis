@@ -336,6 +336,26 @@ diff ~/.Friday/payload/.agents/githooks/commit-msg .githooks/commit-msg
 會顯示出完整的預期差異，以及任何超出範圍的走樣。`pre-push` 是這個
 repository 專有的，payload 裡沒有對應檔案。
 
+### `.friday-hooks.json`
+
+上面那三個 hook 是 [Friday](https://github.com/ShenYo/Friday) 發給 consumer
+的檔案的**副本**，而 `.friday-hooks.json` 記錄每一個的 sha256，讓機器能判斷
+哪一個走樣了。[`.github/workflows/hooks-drift.yml`](.github/workflows/hooks-drift.yml)
+會在變更時與每日檢查它們。
+
+**這個 repository 不是 Friday 的 consumer**，兩者也沒有互相綁定。Friday 的
+payload 有十九個檔案，這個 repository 只拿其中**三個** —— 上面那三個 hook ——
+其餘都沒有：沒有 `.agents/` 樹、沒有 `AGENTS.md`、沒有 `.claude/settings.json`。
+而 Friday 對這個 repository 沒有任何依賴。
+
+檔名取自「它裝了什麼」，而不是「兩個 repo 之間的關係」。consumer 帶的是
+`.friday-lock.json`；兩者永遠不會同時出現，而且工具會拒絕同時持有兩者的
+repository。
+
+它之所以存在，是因為沒有它的時候失敗了：Friday 的 `pre-push` 改動之後，這裡的
+副本被漏掉了，Friday 自己的那份也是，而且沒有任何東西回報。讓 mirror 保持同步
+曾經是一個人工步驟，而人工步驟就是會被跳過。
+
 ### 為什麼 push 規則放在這裡而不是 GitHub 上
 
 private repository 的 branch protection 與 ruleset 需要付費方案，而這個
