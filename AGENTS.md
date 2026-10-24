@@ -2,7 +2,10 @@
 
 This repository is the machine-level home for personal AI-agent Skills. It is
 **personal scope**: a catalog plus the symlink bridge that makes it visible to
-Claude Code and Codex. Read this before changing anything here.
+Claude Code and Codex, the personal instructions linked as
+`~/.claude/CLAUDE.md`, and the Claude Code guard that
+`scripts/apply-claude-guard.sh` copies into `~/.claude/settings.json`. Read
+this before changing anything here.
 
 Nothing in this repository is a dependency of any project. A consumer project
 must build, test, and pass CI on a machine that has no copy of it.

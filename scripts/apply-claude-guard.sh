@@ -97,31 +97,37 @@ result=$(jq -n \
              then ["$defaults"] + ($kept | map(select(. != "$defaults"))) + ($want | map(select(. != "$defaults")))
              else $kept + $want end),
       owned: $owned,
+      either: (($old + $owned) | unique),
       touched: (($have | length) > 0 or ($want | length) > 0) };
-  reduce lists[] as $p ({settings: $cur, owned: {}};
+  reduce lists[] as $p ({settings: $cur, owned: {}, either: {}};
     step($p) as $s |
     if $s.touched
     then .settings |= setpath($p; $s.list) | .owned[$p | join(".")] = $s.owned
+         | .either[$p | join(".")] = $s.either
     else . end) |
   .settings |= (
     if $new.permissions.disableBypassPermissionsMode == null then .
     else .permissions.disableBypassPermissionsMode = $new.permissions.disableBypassPermissionsMode end |
     reduce (($new["$unset"] // [])[]) as $k (.; del(.[$k]))) |
-  {settings, record: {version: 2, owned}}')
+  {settings, record: {version: 2, owned}, pending: {version: 2, owned: .either}}')
 merged=$(jq '.settings' <<<"$result")
 new_record=$(jq '.record' <<<"$result")
+# Written before the settings and replaced after them: if the run stops in
+# between, the next one still counts both the old and the new guard entries as
+# the guard's, and retires whichever it no longer has.
+pending_record=$(jq '.pending' <<<"$result")
 
 record_same=0
 if [ -e "$record" ] && [ "$(jq -S . <<<"$new_record")" = "$(jq -S . "$record")" ]; then
   record_same=1
 fi
 
-write_record() {
-  [ "$record_same" = 1 ] && return 0
+write_record() { # [content], default the final record
+  local content=${1:-$new_record} tmp
+  [ "$#" = 0 ] && [ "$record_same" = 1 ] && return 0
   mkdir -p "$(dirname "$record")"
-  local tmp
   tmp=$(mktemp "$record.XXXXXX")
-  jq . <<<"$new_record" >"$tmp"
+  jq . <<<"$content" >"$tmp"
   mv "$tmp" "$record"
 }
 
@@ -147,6 +153,7 @@ if [ "$(cksum <"$settings" 2>/dev/null || echo absent)" != "$read_sum" ]; then
   die "$settings changed while this ran; nothing was written, run it again"
 fi
 if [ -e "$settings" ]; then cp -p "$settings" "$settings.guard-backup"; fi
+write_record "$pending_record"
 mv "$tmp" "$settings"
-write_record
+write_record "$new_record"
 echo "apply-claude-guard: wrote $settings (previous copy: $settings.guard-backup)"

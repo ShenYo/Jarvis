@@ -28,7 +28,7 @@ Jarvis addresses four related scenarios:
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| **Jarvis** | This machine's canonical personal Skills, bridge script, and personal Skill provenance | A project's `.agents/`, project policy, or personal settings |
+| **Jarvis** | This machine's canonical personal Skills, bridge script, and personal Skill provenance; the personal instructions linked as `~/.claude/CLAUDE.md`; the [Claude Code guard](#claude-code-guard) it copies into `~/.claude/settings.json` | A project's `.agents/`, project policy, or any other personal setting |
 | **Friday** | A reviewed shared baseline that a consumer may pin and adopt | This machine's personal catalog or a consumer's conflict resolution |
 | **Consumer project** | Its `.agents/` seed, overlays, integrations, tests, and recorded Friday provenance | Jarvis's personal Skills or Friday's vendor payload |
 

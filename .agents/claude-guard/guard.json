@@ -79,7 +79,11 @@
       "Bash(git reset --merge*)",
       "Bash(git reset * --merge*)",
       "Bash(git reset --keep*)",
-      "Bash(git reset * --keep*)"
+      "Bash(git reset * --keep*)",
+      "Bash(git checkout --force*)",
+      "Bash(git checkout * --force*)",
+      "Bash(git switch --force*)",
+      "Bash(git switch * --force*)"
     ],
     "ask": [
       "Bash(gh api *APPROVE*)",
@@ -98,12 +102,18 @@
       "Bash(git push * main *)",
       "Bash(git push *:main)",
       "Bash(git push *:main *)",
-      "Bash(git push *:refs/heads/main*)",
       "Bash(git push * master)",
       "Bash(git push * master *)",
       "Bash(git push *:master)",
       "Bash(git push *:master *)",
-      "Bash(git push *:refs/heads/master*)"
+      "Bash(git push *:refs/heads/main)",
+      "Bash(git push *:refs/heads/main *)",
+      "Bash(git push * refs/heads/main)",
+      "Bash(git push * refs/heads/main *)",
+      "Bash(git push *:refs/heads/master)",
+      "Bash(git push *:refs/heads/master *)",
+      "Bash(git push * refs/heads/master)",
+      "Bash(git push * refs/heads/master *)"
     ],
     "disableBypassPermissionsMode": "disable"
   },

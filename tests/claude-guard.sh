@@ -120,6 +120,18 @@ run_with "$later"
 check "dropped list: guard's soft_deny rules retired" q '[.autoMode.soft_deny[] | select(startswith("Human-Review Checkpoint"))] | length == 0'
 check "dropped list: person's soft_deny rule kept" q '(.autoMode.soft_deny | index("Never deploy on Fridays")) != null'
 
+# 4d. A run that stops after writing the settings but before the record
+#     still leaves the next run knowing which entries are the guard's.
+sandbox
+run
+crash=$(alt_guard '.permissions.deny += ["Bash(added-then-dropped *)"]')
+sed -i.orig 's/^write_record "\$new_record"$/exit 3/' "$crash"
+grep -q '^exit 3$' "$crash" || fail "crash: could not build the interrupted script"
+run_with "$crash"
+check "crash: the interrupted run wrote the settings" q '(.permissions.deny | index("Bash(added-then-dropped *)")) != null'
+run
+check "crash: the next run retires what the interrupted one added" q '(.permissions.deny | index("Bash(added-then-dropped *)")) == null'
+
 # 5. A rule the person and the guard share appears once.
 sandbox
 printf '{"permissions": {"deny": [%s]}}\n' "$(jq -n --arg r "$first_deny" '$r')" >"$s"
