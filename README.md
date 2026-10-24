@@ -122,8 +122,8 @@ are [`docs/git.md`](./docs/git.md).
 at the root is for an agent working *in this repository*. The one in
 `.agents/` is for *every project*: [`.agents/AGENTS.md`](./.agents/AGENTS.md)
 holds personal rules, such as replying in the user's language, and the bridge
-links it as `~/.claude/CLAUDE.md`, which Claude Code loads in every session
-wherever it starts. Before it existed, the language rule lived only in two
+links it as `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, which Claude Code
+and Codex load in every session wherever it starts. Before it existed, the language rule lived only in two
 projects' auto memory, so a session started anywhere else replied in English.
 Keep that file short, because it is loaded on every turn of every session, and
 keep a rule about one repository in that repository instead.
@@ -169,6 +169,8 @@ skills inside.
 ${CODEX_HOME:-$HOME/.codex}/skills/<name>
                            -> ../../.agents/skills/<name>
 ~/.claude/CLAUDE.md       -> ../.agents/AGENTS.md
+${CODEX_HOME:-$HOME/.codex}/AGENTS.md
+                           -> ../.agents/AGENTS.md
 ```
 
 Two hops, and the second one matters: `~/.claude/skills/<name>` resolves
@@ -252,6 +254,11 @@ file, because that file holds instructions someone wrote, or a live link
 elsewhere, because that link was put there on purpose. To adopt the link on a
 machine that already has a `~/.claude/CLAUDE.md`, move what it should keep into
 `.agents/AGENTS.md`, remove it, and run the script again.
+
+When Codex is installed, `${CODEX_HOME:-$HOME/.codex}/AGENTS.md` gets the same
+link and the same refusals, so both tools read one file and there is no copy to
+keep in step. Codex reads `AGENTS.override.md` in its home instead of
+`AGENTS.md` when that file is not empty, so the script fails while one exists.
 
 The script creates `~/.agents` if it is missing, ensures the Claude bridge
 directory exists, and creates or replaces a canonical-name entry only when it

@@ -10,6 +10,7 @@
 #   ~/.claude/skills/<name>        -> ../../.agents/skills/<name>
 #   ~/.codex/skills/<name>         -> ../../.agents/skills/<name>
 #   ~/.claude/CLAUDE.md            -> ../.agents/AGENTS.md
+#   ~/.codex/AGENTS.md             -> ../.agents/AGENTS.md
 #
 # Skills may also be grouped one level deep — .agents/skills/git/commit/ links
 # as ~/.claude/skills/git-commit, from that skill's own `name:` field.
@@ -179,21 +180,15 @@ bridge "$HOME/.claude/skills" "Claude Code"
 # this is where a rule meant for all projects belongs -- not a project's auto
 # memory, which only loads for sessions started in that project. The language
 # rule lived only in two projects' memory, so a session started anywhere else
-# never saw it and replied in English.
+# never saw it and replied in English. Codex does the same with
+# $CODEX_HOME/AGENTS.md, so it gets the same link, below.
 #
-# The content lives here, versioned, and ~/.claude/CLAUDE.md is a link to it
-# through ~/.agents, the same stable address the skill links use. Only a missing
-# or dangling link is (re)created. A real file there holds instructions someone
-# wrote, and a live link elsewhere is a choice someone made; either is reported,
-# never replaced.
+# The content lives here, versioned, and each tool's file is a link to it
+# through ~/.agents, the same stable address the skill links use: one file, no
+# copies. Only a missing or dangling link is (re)created. A real file there
+# holds instructions someone wrote, and a live link elsewhere is a choice
+# someone made; either is reported, never replaced.
 GLOBAL_RULES="$CANONICAL_PARENT/AGENTS.md"
-CLAUDE_MD="$HOME/.claude/CLAUDE.md"
-# The link is spelled relatively through ~/.agents, like the skill links, and
-# for the same reason its hops are computed rather than assumed: ~/.claude can
-# itself be a symlink (a dotfiles checkout, say), and "../" then resolves from
-# wherever it really lives. agents_prefix handles that, and falls back to an
-# absolute path through ~/.agents when ~/.claude lives outside $HOME.
-CLAUDE_MD_TARGET="$(agents_prefix "$HOME/.claude" | sed 's|/skills$||')/AGENTS.md"
 # Where a link actually leads, compared as a resolved file rather than as the
 # string readlink returns, so an equivalent spelling of the right target --
 # absolute, or through ~/.agents -- is recognised as correct.
@@ -202,33 +197,49 @@ resolves_to_rules() {
   dest=$(cd -P "$(dirname "$1")" 2>/dev/null && cd -P "$(dirname "$(readlink "$1")")" 2>/dev/null && pwd -P) || return 1
   [ "$dest/$(basename "$(readlink "$1")")" = "$(cd -P "$(dirname "$GLOBAL_RULES")" && pwd -P)/AGENTS.md" ]
 }
+
+# link_rules <link path> <label>
+#
+# The link is spelled relatively through ~/.agents, like the skill links, and
+# for the same reason its hops are computed rather than assumed: ~/.claude can
+# itself be a symlink (a dotfiles checkout, say), and "../" then resolves from
+# wherever it really lives. agents_prefix handles that, and falls back to an
+# absolute path through ~/.agents when the directory lives outside $HOME.
+link_rules() {
+  local link=$1 label=$2 target
+  target="$(agents_prefix "$(dirname "$link")" | sed 's|/skills$||')/AGENTS.md"
+  if [ -L "$link" ] && [ -e "$link" ] && resolves_to_rules "$link"; then
+    echo "$label instructions: $link -> $(readlink "$link")"
+  elif [ -L "$link" ] && [ ! -e "$link" ]; then
+    ln -sfn "$target" "$link"
+    echo "relinked $link -> $target (was dangling)"
+  elif [ -L "$link" ]; then
+    echo "CONFLICT $link -> $(readlink "$link"), which is not $GLOBAL_RULES." >&2
+    echo "         Left alone: a live link elsewhere was put there on purpose." >&2
+    fail=1
+  elif [ -e "$link" ]; then
+    echo "CONFLICT $link is a real file. Left alone: it holds instructions" >&2
+    echo "         someone wrote. Move what it should keep into $GLOBAL_RULES," >&2
+    echo "         remove it, and run this again." >&2
+    fail=1
+  else
+    ln -s "$target" "$link"
+    echo "linked   $link -> $target"
+  fi
+  # Whatever was done above, check where the link really leads: creating one is
+  # not the same as it reaching the rules.
+  if [ -L "$link" ] && ! resolves_to_rules "$link" && [ "$fail" -eq 0 ]; then
+    echo "BROKEN   $link -> $(readlink "$link") does not reach $GLOBAL_RULES" >&2
+    fail=1
+  fi
+}
+
 echo ""
 if [ ! -f "$GLOBAL_RULES" ]; then
   echo "MISSING  $GLOBAL_RULES -- the personal instructions are not in this checkout" >&2
   fail=1
-elif [ -L "$CLAUDE_MD" ] && [ -e "$CLAUDE_MD" ] && resolves_to_rules "$CLAUDE_MD"; then
-  echo "Claude Code instructions: ~/.claude/CLAUDE.md -> $(readlink "$CLAUDE_MD")"
-elif [ -L "$CLAUDE_MD" ] && [ ! -e "$CLAUDE_MD" ]; then
-  ln -sfn "$CLAUDE_MD_TARGET" "$CLAUDE_MD"
-  echo "relinked ~/.claude/CLAUDE.md -> $CLAUDE_MD_TARGET (was dangling)"
-elif [ -L "$CLAUDE_MD" ]; then
-  echo "CONFLICT ~/.claude/CLAUDE.md -> $(readlink "$CLAUDE_MD"), which is not $GLOBAL_RULES." >&2
-  echo "         Left alone: a live link elsewhere was put there on purpose." >&2
-  fail=1
-elif [ -e "$CLAUDE_MD" ]; then
-  echo "CONFLICT ~/.claude/CLAUDE.md is a real file. Left alone: it holds instructions" >&2
-  echo "         someone wrote. Move what it should keep into $GLOBAL_RULES," >&2
-  echo "         remove it, and run this again." >&2
-  fail=1
 else
-  ln -s "$CLAUDE_MD_TARGET" "$CLAUDE_MD"
-  echo "linked   ~/.claude/CLAUDE.md -> $CLAUDE_MD_TARGET"
-fi
-# Whatever was done above, check where the link really leads: creating one is
-# not the same as it reaching the rules.
-if [ -L "$CLAUDE_MD" ] && ! resolves_to_rules "$CLAUDE_MD" && [ "$fail" -eq 0 ]; then
-  echo "BROKEN   ~/.claude/CLAUDE.md -> $(readlink "$CLAUDE_MD") does not reach $GLOBAL_RULES" >&2
-  fail=1
+  link_rules "$HOME/.claude/CLAUDE.md" "Claude Code"
 fi
 
 # Codex reads user skills from $CODEX_HOME/skills. Its own skill-installer says
@@ -249,6 +260,16 @@ CODEX_DIR="$CODEX_HOME_DIR/skills"
 if [ -d "$CODEX_HOME_DIR" ]; then
   echo ""
   bridge "$CODEX_DIR" "Codex" ".system" "codex-primary-runtime"
+  # Codex reads $CODEX_HOME/AGENTS.override.md instead of AGENTS.md when it
+  # exists and is not empty, so an override would silently hide the link.
+  if [ -f "$GLOBAL_RULES" ]; then
+    link_rules "$CODEX_HOME_DIR/AGENTS.md" "Codex"
+    if [ -s "$CODEX_HOME_DIR/AGENTS.override.md" ]; then
+      echo "SHADOWED $CODEX_HOME_DIR/AGENTS.override.md exists, so Codex reads it instead of" >&2
+      echo "         AGENTS.md. Move what it should keep into $GLOBAL_RULES." >&2
+      fail=1
+    fi
+  fi
 else
   echo ""
   echo "Codex: not installed ($CODEX_HOME_DIR absent) — skipped."

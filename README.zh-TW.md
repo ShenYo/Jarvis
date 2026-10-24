@@ -112,8 +112,8 @@ hooks 是這個 repository 自己維護的。它只保留這個 repository 專�
 **有兩個檔案都叫 `AGENTS.md`，範圍不同。** 根目錄那份是給「在這個 repository 裡
 工作」的 agent；`.agents/` 裡那份是給**每一個專案**的：
 [`.agents/AGENTS.md`](./.agents/AGENTS.md) 放的是個人規則（例如回覆語系跟著使用者
-的輸入），bridge 會把它連結成 `~/.claude/CLAUDE.md`，Claude Code 不論從哪裡啟動的
-session 都會載入它。在它出現之前，語系規則只存在兩個專案的 auto memory 裡，所以從
+的輸入），bridge 會把它連結成 `~/.claude/CLAUDE.md` 與 `~/.codex/AGENTS.md`，Claude Code
+與 Codex 不論從哪裡啟動的 session 都會載入它。在它出現之前，語系規則只存在兩個專案的 auto memory 裡，所以從
 其他地方啟動的 session 會用英文回覆。這份檔案要保持精簡（每個 session 的每一回合都
 會載入），只跟單一 repository 有關的規則請放在那個 repository 裡。
 
@@ -156,6 +156,8 @@ container link 了出去，也把真正的 skills 藏在裡面。
 ${CODEX_HOME:-$HOME/.codex}/skills/<name>
                            -> ../../.agents/skills/<name>
 ~/.claude/CLAUDE.md       -> ../.agents/AGENTS.md
+${CODEX_HOME:-$HOME/.codex}/AGENTS.md
+                           -> ../.agents/AGENTS.md
 ```
 
 兩段 hop，而且第二段才是關鍵：`~/.claude/skills/<name>` 把 `../../` 解析回
@@ -230,6 +232,11 @@ clone 的機器可以執行這裡其他每一個 Skill；那一個會停在它�
 別處、仍然有效的 link，因為那是刻意的設定。若要在已經有 `~/.claude/CLAUDE.md` 的
 機器上採用這個 link，先把要保留的內容搬進 `.agents/AGENTS.md`，移除原檔，再重跑
 腳本。
+
+安裝了 Codex 時，`${CODEX_HOME:-$HOME/.codex}/AGENTS.md` 也會得到同樣的 link 與同樣
+的拒絕規則，所以兩個工具讀的是同一份檔案，沒有需要同步的副本。Codex 的 home 裡若有
+非空的 `AGENTS.override.md`，Codex 會改讀它而不讀 `AGENTS.md`，所以只要它存在，腳本
+就會失敗。
 
 這支腳本會在 `~/.agents` 不存在時建立它、確保 Claude bridge 目錄存在，並且只
 在某個 canonical-name entry 缺失或 dangling 時才建立或替換它。當
