@@ -188,18 +188,31 @@ bridge "$HOME/.claude/skills" "Claude Code"
 # never replaced.
 GLOBAL_RULES="$CANONICAL_PARENT/AGENTS.md"
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
-CLAUDE_MD_TARGET=../.agents/AGENTS.md
+# The link is spelled relatively through ~/.agents, like the skill links, and
+# for the same reason its hops are computed rather than assumed: ~/.claude can
+# itself be a symlink (a dotfiles checkout, say), and "../" then resolves from
+# wherever it really lives. agents_prefix handles that, and falls back to an
+# absolute path through ~/.agents when ~/.claude lives outside $HOME.
+CLAUDE_MD_TARGET="$(agents_prefix "$HOME/.claude" | sed 's|/skills$||')/AGENTS.md"
+# Where a link actually leads, compared as a resolved file rather than as the
+# string readlink returns, so an equivalent spelling of the right target --
+# absolute, or through ~/.agents -- is recognised as correct.
+resolves_to_rules() {
+  local dest
+  dest=$(cd -P "$(dirname "$1")" 2>/dev/null && cd -P "$(dirname "$(readlink "$1")")" 2>/dev/null && pwd -P) || return 1
+  [ "$dest/$(basename "$(readlink "$1")")" = "$(cd -P "$(dirname "$GLOBAL_RULES")" && pwd -P)/AGENTS.md" ]
+}
 echo ""
 if [ ! -f "$GLOBAL_RULES" ]; then
   echo "MISSING  $GLOBAL_RULES -- the personal instructions are not in this checkout" >&2
   fail=1
-elif [ -L "$CLAUDE_MD" ] && [ "$(readlink "$CLAUDE_MD")" = "$CLAUDE_MD_TARGET" ] && [ -e "$CLAUDE_MD" ]; then
-  echo "Claude Code instructions: ~/.claude/CLAUDE.md -> $CLAUDE_MD_TARGET"
+elif [ -L "$CLAUDE_MD" ] && [ -e "$CLAUDE_MD" ] && resolves_to_rules "$CLAUDE_MD"; then
+  echo "Claude Code instructions: ~/.claude/CLAUDE.md -> $(readlink "$CLAUDE_MD")"
 elif [ -L "$CLAUDE_MD" ] && [ ! -e "$CLAUDE_MD" ]; then
   ln -sfn "$CLAUDE_MD_TARGET" "$CLAUDE_MD"
   echo "relinked ~/.claude/CLAUDE.md -> $CLAUDE_MD_TARGET (was dangling)"
 elif [ -L "$CLAUDE_MD" ]; then
-  echo "CONFLICT ~/.claude/CLAUDE.md -> $(readlink "$CLAUDE_MD"), not $CLAUDE_MD_TARGET." >&2
+  echo "CONFLICT ~/.claude/CLAUDE.md -> $(readlink "$CLAUDE_MD"), which is not $GLOBAL_RULES." >&2
   echo "         Left alone: a live link elsewhere was put there on purpose." >&2
   fail=1
 elif [ -e "$CLAUDE_MD" ]; then
@@ -210,6 +223,12 @@ elif [ -e "$CLAUDE_MD" ]; then
 else
   ln -s "$CLAUDE_MD_TARGET" "$CLAUDE_MD"
   echo "linked   ~/.claude/CLAUDE.md -> $CLAUDE_MD_TARGET"
+fi
+# Whatever was done above, check where the link really leads: creating one is
+# not the same as it reaching the rules.
+if [ -L "$CLAUDE_MD" ] && ! resolves_to_rules "$CLAUDE_MD" && [ "$fail" -eq 0 ]; then
+  echo "BROKEN   ~/.claude/CLAUDE.md -> $(readlink "$CLAUDE_MD") does not reach $GLOBAL_RULES" >&2
+  fail=1
 fi
 
 # Codex reads user skills from $CODEX_HOME/skills. Its own skill-installer says

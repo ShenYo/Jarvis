@@ -123,6 +123,18 @@ session 都會載入它。在它出現之前，語系規則只存在兩個專案
 bridge 會把仍然指向舊位置 `.Jarvis/agents` 的 `~/.agents` 遷移過去，而且只處理那
 一個確切的 target。
 
+要回退到改名之前的版本，必須先做反向的那一步，因為舊版的 bridge 要求 `~/.agents`
+指向 `.Jarvis/agents`，其他一律拒絕：
+
+```sh
+git -C ~/.Jarvis checkout <older revision>
+ln -sfn .Jarvis/agents ~/.agents
+~/.Jarvis/sync-personal-skills.sh
+```
+
+所有 skill link 都經過 `~/.agents` 解析，所以它們會跟著一起恢復。舊版 bridge 不管理
+`~/.claude/CLAUDE.md`，會留下那個懸空的 link；把它移除，或還原成原本的內容。
+
 `.agents/` 才是真正的內容。這個 repo 以外的一切都只是指向它的 symlink，因此每個
 skill 永遠只有一份副本。
 

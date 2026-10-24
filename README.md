@@ -133,6 +133,19 @@ The directory is `.agents/`, not `agents/`, to match the `~/.agents` name it is
 reached through. The bridge migrates a `~/.agents` still pointing at the old
 `.Jarvis/agents`, and only that exact target.
 
+Rolling back past the rename needs the reverse step first, because an older
+bridge expects `~/.agents` to name `.Jarvis/agents` and refuses anything else:
+
+```sh
+git -C ~/.Jarvis checkout <older revision>
+ln -sfn .Jarvis/agents ~/.agents
+~/.Jarvis/sync-personal-skills.sh
+```
+
+Every skill link resolves through `~/.agents`, so they recover with it. The
+older bridge does not manage `~/.claude/CLAUDE.md` and leaves the link alone,
+dangling. Remove it, or restore whatever was there before.
+
 `.agents/` is the real content. Everything outside this repo is a symlink into
 it, so there is exactly one copy of every skill.
 
