@@ -113,8 +113,10 @@ hooks 是這個 repository 自己維護的。它只保留這個 repository 專�
 工作」的 agent；`.agents/` 裡那份是給**每一個專案**的：
 [`.agents/AGENTS.md`](./.agents/AGENTS.md) 放的是個人規則（例如回覆語系跟著使用者
 的輸入），bridge 會把它連結成 `~/.claude/CLAUDE.md` 與 `~/.codex/AGENTS.md`，Claude Code
-與 Codex 不論從哪裡啟動的 session 都會載入它。在它出現之前，語系規則只存在兩個專案的 auto memory 裡，所以從
-其他地方啟動的 session 會用英文回覆。這份檔案要保持精簡（每個 session 的每一回合都
+與 Codex 不論從哪裡啟動的 session 都會載入它。在它出現之前，語系規則只存在兩個
+專案的 auto memory 裡，所以從其他地方啟動的 session 會用英文回覆。只有部分任務
+才需要的 reference 放在各自的檔案裡，由 pointer 帶過去：dispatch policy、prompt
+templates 與 Codex adapter 在 [`docs/dispatch/`](./docs/dispatch/policy.md)。這份檔案要保持精簡（每個 session 的每一回合都
 會載入），只跟單一 repository 有關的規則請放在那個 repository 裡。
 
 目錄名稱是 `.agents/` 而不是 `agents/`，是為了對齊它被存取時的名稱 `~/.agents`。

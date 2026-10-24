@@ -123,8 +123,11 @@ at the root is for an agent working *in this repository*. The one in
 `.agents/` is for *every project*: [`.agents/AGENTS.md`](./.agents/AGENTS.md)
 holds personal rules, such as replying in the user's language, and the bridge
 links it as `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, which Claude Code
-and Codex load in every session wherever it starts. Before it existed, the language rule lived only in two
-projects' auto memory, so a session started anywhere else replied in English.
+and Codex load in every session wherever it starts. Before it existed, the
+language rule lived only in two projects' auto memory, so a session started
+anywhere else replied in English. Reference it reaches only for some tasks
+lives in its own file, behind a pointer: the dispatch policy, prompt templates
+and Codex adapter are in [`docs/dispatch/`](./docs/dispatch/policy.md).
 Keep that file short, because it is loaded on every turn of every session, and
 keep a rule about one repository in that repository instead.
 
