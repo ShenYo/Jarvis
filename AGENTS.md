@@ -60,31 +60,18 @@ Do not reach for `--no-verify`; the Claude Code guard refuses that flag.
 
 ## Working rules
 
-These are this repository's own, stated here rather than linked. Basic
-discipline should not be something this repository borrows.
+The general rules for how to work -- understand first, nothing speculative,
+surgical changes, verify and say what you ran -- are the personal
+instructions, [`.agents/AGENTS.md`](./.agents/AGENTS.md), which every session
+already loads. These three are this repository's own:
 
-1. **Scope.** Make only the changes the request needs. Report what you noticed
-   rather than fixing it unasked: in a repository that is mostly vendored
-   content, an unasked fix is usually an edit to someone else's file.
-2. **Understand first.** Read the file, and the lock entry or upstream source
-   behind it, before changing it. Where two readings of a request would produce
-   materially different work, say so instead of choosing silently.
-3. **Small and reversible.** Prefer the smallest change that meets the request,
-   in the conventions already here. No speculative abstraction, no unrelated
-   cleanup riding along.
-4. **Verify, and say what you ran.** A claim about behaviour needs a command
-   and its output. State what passed, what you could not check, and why --
-   `UNVERIFIED` is an acceptable answer and a guess is not.
-5. **Scratch files go under `docs/temp/<purpose>/`**, which `.gitignore`
+1. **Scratch files go under `docs/temp/<purpose>/`**, which `.gitignore`
    ignores. Never stage one, and never reach for a blanket `git add -A` across
    a mixed tree to find out what is there.
-
-Two more that are specific to this repository:
-
-6. Both READMEs are checked for parity by
+2. Both READMEs are checked for parity by
    [`scripts/check-readme-parity.py`](./scripts/check-readme-parity.py). An
    edit to one needs the matching edit to the other.
-7. Never write to `~/.Jarvis` from inside a consumer project's workflow. This
+3. Never write to `~/.Jarvis` from inside a consumer project's workflow. This
    repository is optional for every project; a project that writes here has
    made it mandatory.
 

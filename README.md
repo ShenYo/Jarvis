@@ -112,12 +112,11 @@ sync-personal-skills.sh      ensures the Claude bridge directory and
 
 [`AGENTS.md`](./AGENTS.md) is where an agent is told what it may not touch
 here: most Skills are vendored and belong to an upstream CLI, two of them
-conflict with the Friday baseline, and the hooks are copies. Its working rules
-are **this repository's own**, written there rather than borrowed, because
-basic discipline should not depend on another repository. The exception is the
-Git rules, which come with the hooks: those are byte-identical copies of
-Friday's, so the rules they enforce are Friday's text and change when the hooks
-change.
+replace a project's own guards if run in the wrong place, and the Git hooks
+are this repository's own. It keeps only the working rules specific to this
+repository. The general ones, how any agent should work, are in the personal
+instructions, so they apply in every session, not only here. The Git rules
+are [`docs/git.md`](./docs/git.md).
 
 **Two files are called `AGENTS.md`, and they have different scopes.** The one
 at the root is for an agent working *in this repository*. The one in

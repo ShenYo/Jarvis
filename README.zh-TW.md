@@ -104,10 +104,10 @@ sync-personal-skills.sh      ensures the Claude bridge directory and
 ```
 
 [`AGENTS.md`](./AGENTS.md) 是告訴 agent 在這裡不該碰什麼的地方：多數 Skill 是
-vendored、屬於上游的 CLI，其中兩個與 Friday 基線衝突，而那些 hook 是副本。它的工作
-規則是**這個 repository 自己的**，寫在那裡而不是借來的 —— 基礎紀律不該依賴另一個
-repository。例外是 Git 規則，那些跟著 hook 一起來：那三個 hook 是 Friday 的逐位元組
-副本，所以它們強制的規則就是 Friday 的文字，也隨 hook 一起改變。
+vendored、屬於上游的 CLI，其中兩個若在不對的地方執行，會取代專案自己的防護，而 Git
+hooks 是這個 repository 自己維護的。它只保留這個 repository 專屬的工作規則；通用的
+規則，也就是任何 agent 都該怎麼工作，放在個人指示裡，因此在每個 session 都適用，
+而不只在這裡。Git 規則在 [`docs/git.md`](./docs/git.md)。
 
 **有兩個檔案都叫 `AGENTS.md`，範圍不同。** 根目錄那份是給「在這個 repository 裡
 工作」的 agent；`.agents/` 裡那份是給**每一個專案**的：
