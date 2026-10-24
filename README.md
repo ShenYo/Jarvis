@@ -398,7 +398,8 @@ or secrets and are not part of this repository.
 commit-time and push-time checks. They are a guard against mistakes, not a
 server-side control: `core.hooksPath` is per-clone configuration that is never
 cloned, so a fresh clone of this repository runs none of them until someone
-sets it again.
+sets it again. When a hook refuses, it points at [`docs/git.md`](./docs/git.md),
+which holds this repository's Git rules.
 
 | Hook | Refuses |
 | --- | --- |
@@ -406,58 +407,24 @@ sets it again.
 | [`commit-msg`](.githooks/commit-msg) | A subject that is not Conventional Commits, and a larger change with no body saying why it exists. |
 | [`pre-push`](.githooks/pre-push) | Deleting a remote ref, rewriting history (a force-push), and pushing directly to the default branch. It decides from the refs being pushed, not from the command text. |
 
-All three are copies of files this platform's sibling repository ships to its
-consumers, at `payload/.agents/githooks/` in
-[Friday](https://github.com/ShenYo/Friday). This repository is not a Friday
-payload consumer — its `.agents/` holds personal Skills, not Friday's payload
-— so `install.sh` cannot wire it
-and the hooks are copied instead. Each is now **byte-identical** to its payload
-counterpart, including `pre-push`: the hooks resolve the guideline path at run
-time rather than hard-coding it, which is what removed the last intended
-difference. So
+### Owned here
+
+The three hooks are this repository's own. They began as copies of the hooks
+[Friday](https://github.com/ShenYo/Friday) ships to projects, and since
+2026-10-24 they are maintained here on their own: Jarvis and Friday do not
+depend on each other, in either direction. Nothing compares these files with
+Friday's, and a fix made to Friday's hooks reaches this repository only if
+someone ports it deliberately.
+
+What keeps them honest is a behaviour test rather than a comparison.
+[`tests/githooks.sh`](./tests/githooks.sh) runs each hook in a scratch
+repository and checks what it refuses and what it accepts. The
+[`Git hooks`](.github/workflows/githooks.yml) workflow runs it on every change
+to a hook, together with a check that each hook is still executable, because
+git skips a hook that is not and lets the commit through.
 
 ```sh
-for h in pre-commit commit-msg pre-push; do
-  diff ~/.Friday/payload/.agents/githooks/$h .githooks/$h
-done
-```
-
-should print nothing at all, and anything it does print is drift.
-
-### `hooks.json`
-
-The three hooks above are copies, so something has to notice when one drifts.
-`hooks.json` records the sha256 of each, in the layout `sha256sum -c` reads,
-and [`.github/workflows/hooks-drift.yml`](.github/workflows/hooks-drift.yml)
-checks them on change and once a day. No Friday checkout and no cross-repository
-token: the record is self-contained.
-
-**This repository is not a Friday consumer, and the two are not bound
-together.** Friday's payload is nineteen files; this repository takes **three
-of them** — the hooks above — and nothing else: none of Friday's `.agents/`
-payload or documentation, no `.claude/settings.json`. The `.agents/` here is
-this repository's own, holding the personal Skills and instructions. Its own
-[`AGENTS.md`](./AGENTS.md) is locally written and states its own working rules;
-it links Friday only for the rules those three hooks enforce, which are
-Friday's by construction. Friday depends on this repository for nothing in
-return. The two are maintained separately and serve different
-audiences: this one is personal scope, Friday is project scope.
-
-That is why the file carries no `friday-` prefix. It is named for the only
-thing it is — a record of the hooks this repository keeps. A *consumer* carries
-`.friday-lock.json` instead; the two never appear together, and `friday-lock`
-refuses a repository holding both.
-
-It exists because the alternative failed. When Friday's `pre-push` changed, the
-copy here was missed — along with the copy in Friday itself — and nothing
-reported either. Keeping mirrors in step was a manual step, and manual steps
-get skipped.
-
-A drift here is repaired with a copy, or, if Friday's payload is what moved,
-carried properly:
-
-```sh
-bash ~/.Friday/bin/friday-propagate ~/.Jarvis
+bash ~/.Jarvis/tests/githooks.sh
 ```
 
 ### Why the push rules live here as well as on GitHub
@@ -479,7 +446,7 @@ relying on the hook to be present.
 
 ### If a hook refuses something it should not
 
-Do not reach for `--no-verify`; the collaborative Git guard refuses that flag.
+Do not reach for `--no-verify`; the [Claude Code guard](#claude-code-guard) refuses that flag.
 A rule that is wrong should be fixed in the hook, with the reason recorded, or
 the specific line marked with `secret-scan:allow` and justified where it
 appears. That marker is per-line on purpose: there is no file-level or

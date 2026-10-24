@@ -374,7 +374,8 @@ repository。
 `core.hooksPath` 指向 [`.githooks/`](.githooks)，所以這個 clone 會執行三道
 commit 期與 push 期的檢查。它們是防手滑的護欄，不是伺服器端的控制：
 `core.hooksPath` 是 per-clone 設定、永遠不會被 clone 帶走，所以重新 clone
-這個 repository 之後，在有人再次設定之前這三道檢查都不會執行。
+這個 repository 之後，在有人再次設定之前這三道檢查都不會執行。hook 拒絕時會
+指向 [`docs/git.md`](./docs/git.md)，那裡是這個 repository 的 Git 規則。
 
 | Hook | 會拒絕什麼 |
 | --- | --- |
@@ -382,52 +383,22 @@ commit 期與 push 期的檢查。它們是防手滑的護欄，不是伺服器�
 | [`commit-msg`](.githooks/commit-msg) | 主旨不符 Conventional Commits；以及較大的改動沒有內文說明「為什麼」。 |
 | [`pre-push`](.githooks/pre-push) | 刪除 remote ref、改寫歷史（force-push）、以及直接推送 default branch。它是依據被推送的 ref 判斷，不是看指令字串。 |
 
-這三個都是這個平台的姊妹 repository 發給 consumer 的檔案副本，位於
-[Friday](https://github.com/ShenYo/Friday) 的 `payload/.agents/githooks/`。
-這個 repository 不是 Friday payload consumer —— 它的 `.agents/` 放的是個人
-Skills，不是 Friday 的 payload ——
-所以 `install.sh` 無法接線，只能用副本。每一個現在都與 payload 的對應檔案
-**逐位元組相同**，`pre-push` 也包含在內：這些 hook 改成在執行期解析指引文件的
-路徑、而不是寫死它，這正是最後一處預期差異消失的原因。因此
+### 由這裡自己維護
+
+這三個 hook 屬於這個 repository。它們最初是
+[Friday](https://github.com/ShenYo/Friday) 發給專案的 hook 的副本，從
+2026-10-24 起改由這裡自行維護：Jarvis 與 Friday 互不依賴，兩個方向都是。沒有
+任何東西拿這些檔案和 Friday 的比對；Friday 對它自己 hook 的修正，只有在有人刻意
+移植時才會來到這裡。
+
+確保它們可靠的是行為測試，而不是比對。[`tests/githooks.sh`](./tests/githooks.sh)
+在一個暫存 repository 裡執行每一個 hook，檢查它拒絕什麼、接受什麼。
+[`Git hooks`](.github/workflows/githooks.yml) workflow 會在每次修改 hook 時執行
+它，並一併檢查每個 hook 仍是可執行的，因為 git 會略過不可執行的 hook，讓 commit
+直接通過。
 
 ```sh
-for h in pre-commit commit-msg pre-push; do
-  diff ~/.Friday/payload/.agents/githooks/$h .githooks/$h
-done
-```
-
-應該完全不輸出任何東西；只要有輸出，那就是走樣。
-
-### `hooks.json`
-
-上面三個 hook 都是副本，所以需要有東西在其中之一走樣時發現。`hooks.json`
-以 `sha256sum -c` 能讀的版面記錄每一個的 sha256，而
-[`.github/workflows/hooks-drift.yml`](.github/workflows/hooks-drift.yml)
-會在變更時與每天各檢查一次。不需要 Friday 的 checkout，也不需要跨
-repository 的 token：這份記錄是自給自足的。
-
-**這個 repository 不是 Friday consumer，兩者也沒有互相綁定。** Friday 的
-payload 有十九個檔案；這個 repository 只取其中**三個** —— 上面那些 hook ——
-別的都不取：沒有 Friday 的 `.agents/` payload 或任何文件、沒有
-`.claude/settings.json`。這裡的 `.agents/` 是這個 repository 自己的，放的是個人
-Skills 與個人指示。它自己的 [`AGENTS.md`](./AGENTS.md) 是本地撰寫的，陳述它
-自己的工作規則；只在那三個 hook 所強制的規則上連結 Friday，而那些規則依其構成本來
-就是 Friday 的。Friday 也完全不依賴這個 repository。兩者各自維護、服務不同對象：這邊是
-personal scope，Friday 是 project scope。
-
-這也是檔名不帶 `friday-` 前綴的原因。它只以它唯一的身分命名 —— 這個
-repository 所保有的那些 hook 的記錄。**consumer** 帶的是
-`.friday-lock.json`；兩者永不同時出現，而 `friday-lock` 會拒絕同時持有兩者的
-repository。
-
-它之所以存在，是因為另一種做法失敗過：當 Friday 的 `pre-push` 改動時，這裡的
-副本被漏掉了 —— 連 Friday 自己那份也一樣 —— 而且沒有任何東西回報。讓副本保持
-同步曾經是一個手動步驟，而手動步驟會被跳過。
-
-這裡的走樣用複製修復；若是 Friday 的 payload 動了，則照正規路徑帶過來：
-
-```sh
-bash ~/.Friday/bin/friday-propagate ~/.Jarvis
+bash ~/.Jarvis/tests/githooks.sh
 ```
 
 ### 為什麼 push 規則放在這裡，也放在 GitHub 上
@@ -447,7 +418,7 @@ ruleset。伺服器端的規則是無法被跳過的那一個；hook 是會解�
 
 ### 如果 hook 擋了不該擋的東西
 
-不要動用 `--no-verify`，collaborative Git guard 會拒絕這個旗標。規則錯了就該
+不要動用 `--no-verify`，[Claude Code guard](#claude-code-guard) 會拒絕這個旗標。規則錯了就該
 修 hook 並記錄原因，或是在該行標上 `secret-scan:allow` 並就地說明理由。那個
 標記刻意是逐行的：沒有檔案層級或目錄層級的整體豁免。
 

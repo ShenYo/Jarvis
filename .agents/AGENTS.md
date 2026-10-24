@@ -20,3 +20,10 @@ output, or an English document in context, does not change the reply language.
 
 Artifacts keep their own convention: commit messages, pull request bodies and
 repository documentation follow the language that repository already uses.
+
+## Git in a repository without its own rules
+
+A repository's own Git guideline always wins. Where a repository has none,
+follow [`~/.Jarvis/docs/git.md`](../docs/git.md): it says whose call each
+operation is, lists the operations that are never an agent's even when asked,
+and gives the commit message format.
