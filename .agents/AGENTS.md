@@ -27,3 +27,31 @@ A repository's own Git guideline always wins. Where a repository has none,
 follow [`~/.Jarvis/docs/git.md`](../docs/git.md): it says whose call each
 operation is, lists the operations that are never an agent's even when asked,
 and gives the commit message format.
+
+## Hand work to cheaper models, and verify it here
+
+The main session plans, decides, integrates and verifies. Work that is
+explicit, or simple but long, and would take about five or more tool calls or
+a large amount of reading, goes to a subagent on a cheaper model, to save
+tokens and keep this context small. Anything shorter it does itself: a brief
+and a verification cost more than a short task.
+
+| Work | Model |
+| --- | --- |
+| A pure lookup: find where something is, read it back, report | `haiku` |
+| Mechanical work: a change already made elsewhere, batch edits, tests or checks with a known pass condition, searching and summarising | `sonnet` |
+| An independent review of work this session produced | `opus` |
+| Design, judgment, triage of review findings, Git and GitHub operations the safety rules govern, talking to the user | the main session |
+
+Set `model` on every dispatch, and `effort: "lower"` when the brief checks
+itself. Each brief gives the goal and why, the acceptance criteria, and the
+report format, ending with exactly one of `DONE`, `BLOCKED: <blocker>` or
+`UNVERIFIED: <what and why>`. A subagent's report is a claim: check it against
+the criteria before calling the work done.
+
+When a delegated task comes back wrong or blocked twice, take it over here
+with the whole trail of attempts. When it cannot be solved here either, ask
+the user whether to escalate to `fable`; never dispatch `fable` unasked.
+
+A repository's own dispatch policy decides which of its work needs independent
+verification. Which model does the work follows this section.
