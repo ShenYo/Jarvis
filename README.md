@@ -28,7 +28,7 @@ Jarvis addresses four related scenarios:
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| **Jarvis** | This machine's canonical personal Skills, bridge script, and personal Skill provenance | A project's `.agents/`, project policy, or personal settings |
+| **Jarvis** | This machine's canonical personal Skills, bridge script, and personal Skill provenance; the personal instructions linked as `~/.claude/CLAUDE.md`; the [Claude Code guard](#claude-code-guard) it copies into `~/.claude/settings.json` | A project's `.agents/`, project policy, or any other personal setting |
 | **Friday** | A reviewed shared baseline that a consumer may pin and adopt | This machine's personal catalog or a consumer's conflict resolution |
 | **Consumer project** | Its `.agents/` seed, overlays, integrations, tests, and recorded Friday provenance | Jarvis's personal Skills or Friday's vendor payload |
 
@@ -484,6 +484,55 @@ A rule that is wrong should be fixed in the hook, with the reason recorded, or
 the specific line marked with `secret-scan:allow` and justified where it
 appears. That marker is per-line on purpose: there is no file-level or
 directory-level opt-out.
+
+## Claude Code guard
+
+> **繁中摘要**：個人的 Claude Code 防護規則放在
+> `.agents/claude-guard/guard.json`，由 `scripts/apply-claude-guard.sh`
+> 用複製的方式合併進 `~/.claude/settings.json`，不靠 link，所以沒有 Jarvis
+> 的機器上 session 仍有防護。使用者自己寫的規則會保留；guard 退役的規則會在
+> 下次套用時移除。
+
+[`guard.json`](./.agents/claude-guard/guard.json) holds the rules every Claude
+Code session on this machine runs under, whichever repository it starts in:
+
+| Block | What it does |
+| --- | --- |
+| `permissions.deny` | Refuses the permanently prohibited operations: force push, `reset --hard`, `clean`, discarding uncommitted work, deleting branches, tags and refs, recursive deletion, `git rm`, rewriting a remote, GitHub `DELETE`, and skipping hooks. Matched before anything else, in every mode. |
+| `permissions.ask` | Prompts for the human-review checkpoints: merging, closing or reopening a pull request, approving one, `gh repo edit`, and pushing to `main` or `master`. |
+| `autoMode.hard_deny`, `soft_deny` | The same rules for the auto-mode classifier, in prose, so spellings a pattern cannot see (`bash -c`, `git -C`, a script) are judged too. Both keep the built-in rules through `"$defaults"`. |
+| `disableBypassPermissionsMode` | Turns bypass mode off; in bypass mode no ask rule would prompt. |
+
+Apply it, or check whether the settings already carry it:
+
+```sh
+~/.Jarvis/scripts/apply-claude-guard.sh          # merge, keeping a .guard-backup
+~/.Jarvis/scripts/apply-claude-guard.sh --check  # exit 1 when it would change something
+```
+
+The script copies the rules into the settings file rather than linking it
+here, so a session keeps its guard on a machine where this repository is
+missing. It keeps every rule the person wrote, including one that equals a
+guard rule, and records in `~/.claude/claude-guard.applied.json` only the
+entries it added itself. That record is how a rule removed from `guard.json`,
+or a whole list the guard stops managing, leaves the settings on the next run.
+A settings file that is not valid JSON is refused and left as it is, and so
+is one that changes while the script runs.
+
+What this does not do. A deny rule matches the command text, so `bash -c`,
+`git -C <dir>` and a script reach a prohibited operation without matching it;
+in auto mode the classifier is the layer that catches those, and it is not
+deterministic. The built-in auto-mode allow rule for pushes outranks
+`soft_deny`, so a bare `git push` from `main` is caught by a `pre-push` hook
+where one is installed, and by nothing otherwise. `git rm` is refused
+outright, including `--cached`; to take a file back out of the index, use
+`git restore --staged <path>`.
+
+The tests run each case in a sandbox `CLAUDE_CONFIG_DIR`:
+
+```sh
+bash ~/.Jarvis/tests/claude-guard.sh
+```
 
 ## Historical context
 

@@ -28,7 +28,7 @@ Jarvis 處理四個相關情境：
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| **Jarvis** | 這台機器的 canonical 個人 Skills、bridge script，以及個人 Skill 的 provenance | 某個專案的 `.agents/`、專案政策，或個人設定 |
+| **Jarvis** | 這台機器的 canonical 個人 Skills、bridge script，以及個人 Skill 的 provenance；以 `~/.claude/CLAUDE.md` 連結的個人指示；複製進 `~/.claude/settings.json` 的 [Claude Code guard](#claude-code-guard) | 某個專案的 `.agents/`、專案政策，或其他任何個人設定 |
 | **Friday** | 一份經審查、consumer 可以 pin 並採用的共享 baseline | 這台機器的個人目錄，或某個 consumer 的衝突處理 |
 | **Consumer project** | 它自己的 `.agents/` seed、overlays、整合、測試，以及已記錄的 Friday provenance | Jarvis 的個人 Skills，或 Friday 的 vendor payload |
 
@@ -450,6 +450,45 @@ ruleset。伺服器端的規則是無法被跳過的那一個；hook 是會解�
 不要動用 `--no-verify`，collaborative Git guard 會拒絕這個旗標。規則錯了就該
 修 hook 並記錄原因，或是在該行標上 `secret-scan:allow` 並就地說明理由。那個
 標記刻意是逐行的：沒有檔案層級或目錄層級的整體豁免。
+
+## Claude Code guard
+
+[`guard.json`](./.agents/claude-guard/guard.json) 存放這台機器上每個 Claude
+Code session 都要遵守的規則，不論 session 從哪個 repository 啟動：
+
+| 區塊 | 作用 |
+| --- | --- |
+| `permissions.deny` | 拒絕永久禁止的操作：force push、`reset --hard`、`clean`、丟棄未 commit 的修改、刪除 branch／tag／ref、遞迴刪除、`git rm`、改寫 remote、GitHub `DELETE`，以及跳過 hook。它在所有判斷之前比對，所有 mode 都生效。 |
+| `permissions.ask` | 人工審核的關卡會跳出 prompt：merge、關閉或重開 pull request、approve、`gh repo edit`，以及 push 到 `main` 或 `master`。 |
+| `autoMode.hard_deny`、`soft_deny` | 同一組規則以文字寫給 auto-mode classifier，讓 pattern 看不到的寫法（`bash -c`、`git -C`、script）也會被判斷。兩者都透過 `"$defaults"` 保留內建規則。 |
+| `disableBypassPermissionsMode` | 關閉 bypass mode；在 bypass mode 下，ask 規則一條都不會跳出 prompt。 |
+
+套用，或檢查 settings 是否已經帶有 guard：
+
+```sh
+~/.Jarvis/scripts/apply-claude-guard.sh          # 合併，並留下 .guard-backup
+~/.Jarvis/scripts/apply-claude-guard.sh --check  # 會改動任何東西時 exit 1
+```
+
+script 是把規則複製進 settings 檔，而不是 link 到這裡，所以在沒有這個
+repository 的機器上，session 仍然保有 guard。使用者自己寫的規則都會保留，
+即使某條規則和 guard 的規則相同也一樣；`~/.claude/claude-guard.applied.json`
+只記錄 guard 自己加進去的項目。靠這份記錄，從 `guard.json` 移除的規則，或
+guard 不再管理的整個清單，下次執行時才會從 settings 裡拿掉。settings 檔不是
+合法 JSON，或在 script 執行期間被修改時，script 會拒絕並保持原狀。
+
+它做不到的事。deny 規則比對的是指令文字，所以 `bash -c`、`git -C <dir>` 和
+script 都能在不符合任何規則的情況下做到被禁止的操作；在 auto mode 下，接住
+這些寫法的是 classifier，而它的判斷不是確定性的。內建的 auto-mode push allow
+規則優先於 `soft_deny`，所以在 `main` 上直接執行 `git push`，只有裝了
+`pre-push` hook 的地方擋得住，其他地方都擋不住。`git rm` 一律拒絕，包含
+`--cached`；要把檔案從 index 拿出來，請用 `git restore --staged <path>`。
+
+測試會在 sandbox 的 `CLAUDE_CONFIG_DIR` 裡逐一執行每個案例：
+
+```sh
+bash ~/.Jarvis/tests/claude-guard.sh
+```
 
 ## 歷史背景
 
