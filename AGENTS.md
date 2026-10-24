@@ -55,21 +55,20 @@ and a block is a veto no source can lift, so nothing breaks -- but it sets no
 blocks `git push` unconditionally, which contradicts the rule that pushing a
 non-default branch is the agent's own call.
 
-## The Git hooks here are copies
+## The Git hooks are this repository's own
 
-`.githooks/` holds three hooks that are byte-identical to Friday's payload.
-Editing one here is drift, and
-[`.github/workflows/hooks-drift.yml`](.github/workflows/hooks-drift.yml) will
-say so. A rule that needs changing is changed in Friday and carried over with
-`friday-propagate`. See [the README](./README.md#hooksjson).
+`.githooks/` holds three hooks maintained here, independently of Friday's. To
+change a rule, change the hook and [`docs/git.md`](docs/git.md) in the same
+commit, and add a case to [`tests/githooks.sh`](tests/githooks.sh). Done when
+that case fails against the old hook and `bash tests/githooks.sh` reports
+`all … passed`.
 
-Do not reach for `--no-verify`; the guard refuses that flag.
+Do not reach for `--no-verify`; the Claude Code guard refuses that flag.
 
 ## Working rules
 
 These are this repository's own, stated here rather than linked. Basic
-discipline should not be something this repository borrows -- and unlike the
-Git rules below, it does not move when a hook changes.
+discipline should not be something this repository borrows.
 
 1. **Scope.** Make only the changes the request needs. Report what you noticed
    rather than fixing it unasked: in a repository that is mostly vendored
@@ -96,20 +95,13 @@ Two more that are specific to this repository:
    repository is optional for every project; a project that writes here has
    made it mandatory.
 
-### Why the Git rules are not in that list
+### Git
 
-They come with the hooks. `.githooks/` holds byte-identical copies of Friday's,
-so the rules those hooks enforce are Friday's text, and they change when the
-hooks change. Pointing at the source is the honest thing to do -- a copy here
-would be a fourth place to keep in step, and the three that already exist went
-out of step once.
+Read [`docs/git.md`](docs/git.md) before a Git operation here. It sets out:
 
-- [safety-boundary.md](https://github.com/ShenYo/Friday/blob/main/payload/.agents/docs/git-guideline/safety-boundary.md)
-  -- which Git and GitHub operations are the agent's own call, which are
-  reserved for a person, and which are prohibited outright even when you are
-  explicitly asked to perform them
-- [git-commit.md](https://github.com/ShenYo/Friday/blob/main/payload/.agents/docs/git-guideline/git-commit.md)
-  -- the commit message format `commit-msg` enforces
+- which operations are the agent's own call
+- which are reserved for a person
+- which are prohibited even when explicitly asked
+- the commit format the hooks enforce
 
-Read them before a Git operation here. They are the authority on it; nothing in
-this file overrides them.
+It is the authority on Git in this repository.

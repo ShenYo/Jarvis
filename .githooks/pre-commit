@@ -10,7 +10,7 @@
 # Scope is staged content only. A secret already in history is out of reach
 # here and cannot be removed by an agent at all, since that needs a history
 # rewrite and a force push, both permanently prohibited. See
-# the git guideline, resolved at run time by doc_of below.
+# docs/git.md.
 #
 # Note for maintainers: the rule table below is fed straight into a `while`
 # loop. Do not wrap it in `$(...)` — bash scans heredoc bodies for quote pairs
@@ -19,26 +19,11 @@
 
 set -uo pipefail
 
-# Where the guideline lives depends on who is running this file. An installed
-# consumer has it at .agents/docs/; the producer ships it under payload/; a
-# repository that only mirrors these hooks has neither. Resolving it here
-# rather than naming one path is what lets this file be byte-identical
-# everywhere it runs -- see ShenYo/Friday#18. A mirror kept in step by hand
-# was missed entirely the last time the payload moved.
-#
-# The last case used to print "the git guideline for this repository", which
-# in a repository with neither path names nothing that exists -- a refusal
-# that sends the reader looking for a file that is not there. Friday is
-# public, so the fallback is the canonical document's URL.
+# These hooks are Jarvis's own. They began as copies of the hooks Friday
+# ships to projects and are maintained here on their own since 2026-10-24, so
+# a refusal points at this repository's rules, not at another repository's.
 doc_of() {
-  local rel=$1
-  if [ -f ".agents/docs/git-guideline/$rel" ]; then
-    printf '%s\n' ".agents/docs/git-guideline/$rel"
-  elif [ -f "payload/.agents/docs/git-guideline/$rel" ]; then
-    printf '%s\n' "payload/.agents/docs/git-guideline/$rel"
-  else
-    printf '%s\n' "https://github.com/ShenYo/Friday/blob/main/payload/.agents/docs/git-guideline/$rel"
-  fi
+  printf '%s\n' "docs/git.md"
 }
 
 
@@ -81,8 +66,8 @@ staged_diff=$(git diff --cached --no-color --text --diff-filter=ACMRT -U0 \
 # This file is the rule table, so its own added lines are patterns by
 # definition and must not be scanned. Derive the path instead of naming it:
 # core.hooksPath decides where the hook lives -- `.agents/githooks` in a
-# payload consumer, `.githooks` in Jarvis and Friday, `payload/.agents/githooks`
-# if a producer points at what it ships -- and a hardcoded string silently
+# payload consumer, `.githooks` here, `payload/.agents/githooks` in the
+# repository that ships them -- and a hardcoded string silently
 # stops exempting the moment the file sits anywhere else, which makes this
 # file impossible to commit. $0 mirrors how core.hooksPath was set, so an
 # absolute setting needs the repo root stripped. If the path cannot be

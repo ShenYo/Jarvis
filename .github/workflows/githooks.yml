@@ -1,0 +1,38 @@
+name: Git hooks
+
+# Jarvis's three Git hooks are its own, maintained here and compared with
+# nothing else. These tests are what notices a hook that stopped refusing:
+# each case runs the hook in a scratch repository and checks that it refuses
+# or accepts.
+
+on:
+  pull_request:
+    paths:
+      - ".githooks/**"
+      - "tests/githooks.sh"
+      - ".github/workflows/githooks.yml"
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - ".githooks/**"
+      - "tests/githooks.sh"
+      - ".github/workflows/githooks.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  githooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every hook is executable in git
+        run: |
+          fail=0
+          while read -r mode _ _ file; do
+            [ "$mode" = 100755 ] || { echo "MODE  $file is $mode, not 100755 -- git would skip it"; fail=1; }
+          done < <(git ls-files -s -- .githooks)
+          exit "$fail"
+      - name: Each hook refuses what it should and accepts ordinary work
+        run: bash tests/githooks.sh
