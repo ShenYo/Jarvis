@@ -512,10 +512,12 @@ Apply it, or check whether the settings already carry it:
 
 The script copies the rules into the settings file rather than linking it
 here, so a session keeps its guard on a machine where this repository is
-missing. It keeps every rule the person wrote, and records what it applied in
-`~/.claude/claude-guard.applied.json`, which is how a rule removed from
-`guard.json` leaves the settings on the next run. A settings file that is not
-valid JSON is refused and left as it is.
+missing. It keeps every rule the person wrote, including one that equals a
+guard rule, and records in `~/.claude/claude-guard.applied.json` only the
+entries it added itself. That record is how a rule removed from `guard.json`,
+or a whole list the guard stops managing, leaves the settings on the next run.
+A settings file that is not valid JSON is refused and left as it is, and so
+is one that changes while the script runs.
 
 What this does not do. A deny rule matches the command text, so `bash -c`,
 `git -C <dir>` and a script reach a prohibited operation without matching it;

@@ -471,10 +471,11 @@ Code session 都要遵守的規則，不論 session 從哪個 repository 啟動�
 ```
 
 script 是把規則複製進 settings 檔，而不是 link 到這裡，所以在沒有這個
-repository 的機器上，session 仍然保有 guard。使用者自己寫的規則都會保留；
-它把套用過的內容記錄在 `~/.claude/claude-guard.applied.json`，因此從
-`guard.json` 移除的規則，下次執行時會從 settings 裡拿掉。settings 檔不是合法
-JSON 時，script 會拒絕並保持原狀。
+repository 的機器上，session 仍然保有 guard。使用者自己寫的規則都會保留，
+即使某條規則和 guard 的規則相同也一樣；`~/.claude/claude-guard.applied.json`
+只記錄 guard 自己加進去的項目。靠這份記錄，從 `guard.json` 移除的規則，或
+guard 不再管理的整個清單，下次執行時才會從 settings 裡拿掉。settings 檔不是
+合法 JSON，或在 script 執行期間被修改時，script 會拒絕並保持原狀。
 
 它做不到的事。deny 規則比對的是指令文字，所以 `bash -c`、`git -C <dir>` 和
 script 都能在不符合任何規則的情況下做到被禁止的操作；在 auto mode 下，接住

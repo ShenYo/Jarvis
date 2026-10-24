@@ -7,16 +7,17 @@
 # a machine where this repository is absent or broken.
 #
 # The settings file belongs to the person, not to this script. Rules the
-# person added stay. The guard's own rules are tracked in a record of what was
-# applied last (~/.claude/claude-guard.applied.json), which is how a rule
-# retired from guard.json is removed on the next run instead of lingering.
+# person wrote stay, including one that happens to equal a guard rule. The
+# record ~/.claude/claude-guard.applied.json lists the entries the guard
+# itself added, which is how a rule retired from guard.json, or a whole list
+# it stops managing, leaves the settings on the next run instead of lingering.
 #
 # Usage: apply-claude-guard.sh [--check]
 #   --check  change nothing; exit 0 when the settings already carry the guard,
 #            1 when applying would change them, 2 on error.
 set -euo pipefail
 
-usage() { sed -n '14,16s/^# \{0,1\}//p' "$0"; }
+usage() { sed -n '/^# Usage:/,/2 on error/s/^# \{0,1\}//p' "$0"; }
 
 check=0
 case "${1-}" in
@@ -38,13 +39,16 @@ record="$claude_home/claude-guard.applied.json"
 
 jq -e 'type == "object"' "$guard" >/dev/null 2>&1 || die "$guard is not a JSON object"
 
-# Write through a link, so a settings file kept by a dotfiles manager stays
-# where that manager put it.
-if [ -L "$settings" ]; then
+# Write through links, to the end of the chain, so a settings file kept by a
+# dotfiles manager stays where that manager put it.
+hops=0
+while [ -L "$settings" ]; do
+  hops=$((hops + 1))
+  [ "$hops" -le 40 ] || die "$settings: too many levels of links"
   target=$(readlink "$settings")
   case "$target" in /*) ;; *) target="$(dirname "$settings")/$target" ;; esac
   settings="$target"
-fi
+done
 
 if [ -e "$settings" ]; then
   jq -e 'type == "object"' "$settings" >/dev/null 2>&1 ||
@@ -53,6 +57,7 @@ if [ -e "$settings" ]; then
 else
   current='{}'
 fi
+read_sum=$(cksum <"$settings" 2>/dev/null || echo absent)
 
 if [ -e "$record" ]; then
   jq -e 'type == "object"' "$record" >/dev/null 2>&1 ||
@@ -62,33 +67,67 @@ else
   previous='{}'
 fi
 
-# For each list the guard manages: drop what the previous guard added, keep
-# everything else in its order, then append the guard's entries. "$defaults"
-# leads an autoMode list, where the classifier splices in its built-in rules.
-merged=$(jq -n \
+# For each list the guard manages, whether or not this revision still has it:
+#   retire  entries the previous run added that the guard no longer has
+#   keep    everything else already there, in its order
+#   append  the guard's entries not already present
+# An entry counts as the guard's only when the guard added it: one the person
+# already had stays theirs, and is never retired. "$defaults" leads an
+# autoMode list, where the classifier splices in its built-in rules.
+#
+# A record from before ownership was tracked is a copy of the guard it
+# applied; every entry in it counts as the guard's.
+result=$(jq -n \
   --argjson cur "$current" --argjson prev "$previous" --slurpfile g "$guard" '
   $g[0] as $new |
   def lists: [["permissions","deny"], ["permissions","ask"],
               ["autoMode","hard_deny"], ["autoMode","soft_deny"]];
-  def merge_list($p):
+  def has_e($a; $e): ($a | index([$e])) != null;
+  def owned_before($p):
+    if ($prev | has("owned")) then ($prev.owned[$p | join(".")] // [])
+    else (($prev | getpath($p)) // []) end;
+  def step($p):
     (($cur | getpath($p)) // []) as $have |
-    (($prev | getpath($p)) // []) as $old |
+    owned_before($p) as $old |
     (($new | getpath($p)) // []) as $want |
-    ($have | map(select(. as $e | ($old | index([$e])) == null and ($want | index([$e])) == null))) as $kept |
-    if ($want | index(["$defaults"])) != null
-    then ["$defaults"] + ($kept | map(select(. != "$defaults"))) + ($want | map(select(. != "$defaults")))
-    else $kept + $want end;
-  reduce lists[] as $p ($cur;
-    if ($new | getpath($p)) == null then . else setpath($p; merge_list($p)) end) |
-  if $new.permissions.disableBypassPermissionsMode == null then .
-  else .permissions.disableBypassPermissionsMode = $new.permissions.disableBypassPermissionsMode end |
-  reduce (($new["$unset"] // [])[]) as $k (.; del(.[$k]))')
+    ($old | map(select(. as $e | has_e($want; $e) | not))) as $retire |
+    ($have | map(select(. as $e | (has_e($retire; $e) or has_e($want; $e)) | not))) as $kept |
+    ($want | map(select(. != "$defaults" and (. as $e | (has_e($have; $e) | not) or has_e($old; $e))))) as $owned |
+    { list: (if has_e($want; "$defaults")
+             then ["$defaults"] + ($kept | map(select(. != "$defaults"))) + ($want | map(select(. != "$defaults")))
+             else $kept + $want end),
+      owned: $owned,
+      touched: (($have | length) > 0 or ($want | length) > 0) };
+  reduce lists[] as $p ({settings: $cur, owned: {}};
+    step($p) as $s |
+    if $s.touched
+    then .settings |= setpath($p; $s.list) | .owned[$p | join(".")] = $s.owned
+    else . end) |
+  .settings |= (
+    if $new.permissions.disableBypassPermissionsMode == null then .
+    else .permissions.disableBypassPermissionsMode = $new.permissions.disableBypassPermissionsMode end |
+    reduce (($new["$unset"] // [])[]) as $k (.; del(.[$k]))) |
+  {settings, record: {version: 2, owned}}')
+merged=$(jq '.settings' <<<"$result")
+new_record=$(jq '.record' <<<"$result")
+
+record_same=0
+if [ -e "$record" ] && [ "$(jq -S . <<<"$new_record")" = "$(jq -S . "$record")" ]; then
+  record_same=1
+fi
+
+write_record() {
+  [ "$record_same" = 1 ] && return 0
+  mkdir -p "$(dirname "$record")"
+  local tmp
+  tmp=$(mktemp "$record.XXXXXX")
+  jq . <<<"$new_record" >"$tmp"
+  mv "$tmp" "$record"
+}
 
 if [ "$(jq -S . <<<"$current")" = "$(jq -S . <<<"$merged")" ]; then
   echo "apply-claude-guard: $settings already carries the guard"
-  if [ "$check" = 0 ] && ! cmp -s "$guard" "$record" 2>/dev/null; then
-    cp "$guard" "$record"
-  fi
+  [ "$check" = 1 ] || write_record
   exit 0
 fi
 
@@ -99,9 +138,15 @@ if [ "$check" = 1 ]; then
 fi
 
 mkdir -p "$(dirname "$settings")"
-[ -e "$settings" ] && cp -p "$settings" "$settings.guard-backup"
 tmp=$(mktemp "$settings.XXXXXX")
-jq . <<<"$merged" > "$tmp"
+jq . <<<"$merged" >"$tmp"
+# Someone may have saved the file since it was read; writing now would drop
+# their change.
+if [ "$(cksum <"$settings" 2>/dev/null || echo absent)" != "$read_sum" ]; then
+  rm -f "$tmp"
+  die "$settings changed while this ran; nothing was written, run it again"
+fi
+if [ -e "$settings" ]; then cp -p "$settings" "$settings.guard-backup"; fi
 mv "$tmp" "$settings"
-cp "$guard" "$record"
+write_record
 echo "apply-claude-guard: wrote $settings (previous copy: $settings.guard-backup)"
