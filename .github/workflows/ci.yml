@@ -56,6 +56,7 @@ jobs:
           echo "skills=$n claude=$claude codex=$codex"
           [ "$n" -gt 0 ] && [ "$claude" = "$n" ] && [ "$codex" = "$n" ]
           [ "$(readlink "$home/.claude/CLAUDE.md")" = "../.agents/AGENTS.md" ]
+          [ "$(readlink "$home/.codex/AGENTS.md")" = "../.agents/AGENTS.md" ]
 
   gitleaks:
     runs-on: ubuntu-latest
