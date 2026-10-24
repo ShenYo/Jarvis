@@ -21,8 +21,8 @@ Jarvis 處理四個相關情境：
 - **Claude/Codex bridge 檢查：** 這支腳本確保 Claude bridge 目錄存在，並建立
   或替換缺失或 dangling 的 canonical-name links；其他 dangling 的
   non-reserved bridge entries 會明顯失敗。
-- **Friday 採用：** 一個本機 wrapper 會先預覽，並在取得全新明確授權後，才將
-  已 pin 的 Friday baseline 採用到一個空白專案中。
+- **Claude Code guard：** 一份受版本控管的規則，複製進
+  `~/.claude/settings.json`，在這台機器的每個專案裡拒絕破壞性的 Git 與檔案操作。
 
 ## 範圍與擁有權
 
@@ -66,9 +66,9 @@ Skill Phase B 整體上仍屬 **UNVERIFIED**；不要從個別探測或 bridge e
 
 ## 目前盤點
 
-**盤點觀察，2026-10-22：** 這個 checkout 有 36 個 canonical `SKILL.md`
-檔案、36 個 Claude bridge links、36 個 Codex bridge links，以及 35 筆 lock
-entries。每個 canonical Skill 在兩個工具中都可被存取。
+**盤點觀察，2026-10-24：** 這個 checkout 有 35 個 canonical `SKILL.md`
+檔案、35 個 Claude bridge links、35 個 Codex bridge links，以及 35 筆 lock
+entries。每個 canonical Skill 都是 CLI-managed，在兩個工具中都可被存取。
 
 `orca-cli` 與 `orchestration` 曾短暫無法存取：`skills` CLI 會寫入 canonical
 副本與 lock entry，但不會建立 bridge，因此它安裝的 Skill 在
@@ -78,8 +78,6 @@ bridge。
 
 Claude bridge 目錄中另有一個 `synced` 項目。它是真實目錄而非 symlink，屬於
 其他工具，因此 bridge 腳本刻意不去動它。
-[`setup-project-agents`](./.agents/skills/setup-project-agents/) 則是唯一沒有
-lock entry 的 canonical Skill。
 
 ```sh
 find ~/.Jarvis/.agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f | wc -l
@@ -215,12 +213,9 @@ checkout 上面再 clone 一次。既有的 checkout 應該在它自己的 Git h
 [驗證](#驗證) 小節裡的唯讀檢查，確認 canonical symlink 以及任何已安裝的
 Claude/Codex bridge 目錄。
 
-對於新專案，請從另外一份經過審查、乾淨的 Friday checkout 來 bootstrap 這份
-可攜式 baseline；不要把 Jarvis 的 Skills 複製進專案裡。位於 `~/.agents` 下的
-可選 Skill
-[`setup-project-agents`](./.agents/skills/setup-project-agents/) 只是一個
-方便用的 wrapper，用於空白專案的 Friday 採用，並不是這個手動流程、或任何
-consumer project 的前提條件。
+新專案的 baseline，從維護那份 baseline 的地方取得，並依照該來源自己的採用指南。
+不要把 Jarvis 的 Skills 複製進專案：它們是個人的，而專案必須在沒有它們的機器上
+也能運作。
 
 每一個 Skill 都被這個 repository 追蹤，所以 clone 加上 bridge 就是完整的設定：執行
 期不需要抓取任何東西才能讓 Skill 可用，執行它們也不需要 Skills CLI。需要它的時機有
@@ -320,41 +315,6 @@ ln -s .Jarvis/.agents ~/.agents
 ~/.Jarvis/sync-personal-skills.sh
 ```
 
-## Friday 採用 wrapper
-
-[`setup-matt-pocock-skills`](./.agents/skills/setup-matt-pocock-skills/) 是
-third-party/CLI-managed 的。**不要為了專案 setup 去修改它。**請改用本地維護
-的 [`setup-project-agents`](./.agents/skills/setup-project-agents/) wrapper。
-它刻意設計得很窄：它採用的是 Friday 的共享 baseline，不是個人 Skills、
-consumer overlays，也不是衝突處理。
-
-只在一個空白的 Git repository 裡，使用 `$setup-project-agents` 來預覽並採用
-一個已 pin 的 Friday baseline：
-
-```text
-$setup-project-agents target=/absolute/path/to/repository friday=/absolute/path/to/Friday
-```
-
-兩個路徑都是必需的。這個 skill 會將它們 canonicalize，要求 `target` 必須是
-一個 Git repository root，`friday` 必須是另一個乾淨、擁有正常 `install.sh` 與
-`payload` 路徑的 Git worktree，然後記錄 Friday 的完整 SHA 與 target 的 Git
-狀態。它在取得授權之前唯一會做的動作是：
-
-```sh
-bash "$friday/install.sh" --check "$target"
-```
-
-把那個經過審查的 Friday SHA 記錄為 pin。任何衝突或預覽失敗，都會停止這個
-工作流程，交由 consumer 自行調解；這個 wrapper 和 Friday 都不是 update
-engine。要進行安裝，需要一次全新、明確的授權，同時指名 canonical target 以及
-那個確切已 pin 的 SHA。只有到那時，這個 skill 才會執行 Friday 的 installer、
-再次預覽、執行 consumer 的 checker，並回報 target 的狀態與 diff 檢查結果。
-
-不要手動複製 baseline 檔案、修改 Friday 或它的 vendor payload，也不要為了
-這個工作流程去更動任何 lock file。這個 skill 不會建立任何 commit 或 push；
-consumer 要依照自己經過審查的慣例，記錄已 pin 的 provenance 以及任何原子性的
-採用 commit。
-
 ## CLI-managed 與本地維護的內容
 
 [`.agents/.skill-lock.json`](./.agents/.skill-lock.json) 記錄了 Skills CLI
@@ -363,11 +323,11 @@ third-party/CLI-managed：不要隨意修改它們的內容，也不要為了讓
 不一樣而改寫這份 lock。缺少 lock entry，只代表那個 CLI 沒有記錄那個 Skill；
 並不會讓某個 canonical Skill 失效。
 
-Jarvis 的 bridge script、這份 README，以及
-[`setup-project-agents`](./.agents/skills/setup-project-agents/) 都是本地
-維護的。個人設定則刻意被排除在外：`~/.claude/settings.json` 與
-`~/.codex/config.toml` 可能包含本機路徑或機密資訊，目前並不屬於這個
-repository。
+這裡的每個 Skill 都是 CLI-managed。本地維護的是 bridge script、個人指示、
+Claude Code guard、Git hooks 與它們的規則，以及這份 README。設定檔本身不屬於這個
+repository，因為 `~/.claude/settings.json` 與 `~/.codex/config.toml` 可能包含本機
+路徑或機密資訊。guard 由它的 apply script 合併進 `~/.claude/settings.json`，那份
+檔案裡其他的內容都不是來自這裡。
 
 ## 本機 Git hooks
 
