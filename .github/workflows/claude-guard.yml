@@ -1,0 +1,34 @@
+name: Claude guard
+
+# scripts/apply-claude-guard.sh rewrites the person's ~/.claude/settings.json.
+# A merge that drops a rule they wrote, or keeps one the guard retired, would
+# go unnoticed until the rule mattered, so every change to it runs the tests.
+
+on:
+  pull_request:
+    paths:
+      - ".agents/claude-guard/**"
+      - "scripts/apply-claude-guard.sh"
+      - "tests/claude-guard.sh"
+      - ".github/workflows/claude-guard.yml"
+  push:
+    branches-ignore:
+      - main
+    paths:
+      - ".agents/claude-guard/**"
+      - "scripts/apply-claude-guard.sh"
+      - "tests/claude-guard.sh"
+      - ".github/workflows/claude-guard.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: guard.json is valid JSON
+        run: jq -e 'type == "object"' .agents/claude-guard/guard.json
+      - name: Apply script keeps the person's rules and retires the guard's
+        run: bash tests/claude-guard.sh
