@@ -31,6 +31,7 @@ alt_guard() {
   local alt="$root/alt-$n"
   mkdir -p "$alt/scripts" "$alt/.agents/claude-guard"
   cp "$apply" "$alt/scripts/"
+  cp "$repo/.agents/claude-guard/bash-guard.py" "$alt/.agents/claude-guard/"
   jq "$1" "$guard" >"$alt/.agents/claude-guard/guard.json"
   echo "$alt/scripts/apply-claude-guard.sh"
 }
@@ -48,6 +49,8 @@ run; rc=$?
 check "fresh: exit 0" test "$rc" = 0
 check "fresh: every deny rule present" q "(.permissions.deny | sort) == ($(jq -c '.permissions.deny | sort' "$guard"))"
 check "fresh: bypass mode disabled" q '.permissions.disableBypassPermissionsMode == "disable"'
+check "fresh: hook installed" cmp -s "$repo/.agents/claude-guard/bash-guard.py" "$dir/hooks/claude-guard.py"
+check "fresh: hook entry fails closed" q '.hooks.PreToolUse[-1].matcher == "Bash" and .hooks.PreToolUse[-1].hooks[0].onFailure == "block"'
 check "fresh: record lists the guard's deny rules as its own" q_file "(.owned[\"permissions.deny\"] | sort) == ($(jq -c '.permissions.deny | sort' "$guard"))" "$r"
 
 # 2. Existing settings: everything the person wrote survives.
@@ -56,13 +59,15 @@ cat >"$s" <<'EOF'
 {
   "model": "opus",
   "skipDangerousModePermissionPrompt": true,
-  "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "true"}]}]},
+  "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "true"}]}],
+            "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "other-tool"}]}]},
   "permissions": {"defaultMode": "auto", "deny": ["Bash(user-rule *)"], "allow": ["Bash(npm test)"]},
   "autoMode": {"environment": ["Source control: example"]}
 }
 EOF
 run
 check "keep: unrelated keys untouched" q '.model == "opus" and .hooks.Stop[0].hooks[0].command == "true" and .permissions.defaultMode == "auto"'
+check "keep: another tool's PreToolUse hook stays first" q '.hooks.PreToolUse[0].hooks[0].command == "other-tool" and (.hooks.PreToolUse | length) == 2'
 check "keep: person's deny and allow rules stay" q '(.permissions.deny | index("Bash(user-rule *)")) != null and .permissions.allow == ["Bash(npm test)"]'
 check "keep: person's rule stays ahead of the guard's" q '.permissions.deny[0] == "Bash(user-rule *)"'
 check "keep: autoMode environment untouched" q '.autoMode.environment == ["Source control: example"]'
@@ -87,6 +92,15 @@ snapshot >"$dir/snap.after"
 check "idempotent: --check leaves an old record alone" cmp -s "$dir/snap.before" "$dir/snap.after"
 run
 check "idempotent: a run upgrades the old record" q_file '.version == 2' "$r"
+
+# 3b. A hook edited in place is drift, and a run puts it back.
+cp "$s" "$dir/before"
+echo "# edited" >>"$dir/hooks/claude-guard.py"
+run --check; rc=$?
+check "hook drift: --check exit 1" test "$rc" = 1
+run
+check "hook drift: run restores the hook" cmp -s "$repo/.agents/claude-guard/bash-guard.py" "$dir/hooks/claude-guard.py"
+check "hook drift: settings untouched" cmp -s "$s" "$dir/before"
 
 # 4. A rule the previous guard added, and this one no longer has, is retired.
 #    A person's rule that happens to look similar is not.
