@@ -13,7 +13,7 @@ responsible for.
 
 <!-- Responsibility: how every session behaves, whatever the task: the reply
 language, which source wins, and who does the work. Written out: every turn
-needs it. -->
+needs it; the dispatch detail is in docs/dispatch/, behind its pointer. -->
 
 ### Reply in the user's language
 
@@ -65,7 +65,13 @@ When a delegated task comes back wrong or blocked twice, take it over here
 with the whole trail of attempts. When it cannot be solved here either, ask
 the user whether to escalate to `fable`; never dispatch `fable` unasked.
 
-A repository's own dispatch policy decides which of its work needs independent
+Before writing a brief, read
+[`~/.Jarvis/docs/dispatch/policy.md`](../docs/dispatch/policy.md): the roles,
+the report contract, file ownership and escalation, with task-shaped briefs in
+`prompt-templates.md` beside it. In Codex, also read `codex.md` there: its
+models and collaboration tools.
+
+A repository's own rules decide which of its work needs independent
 verification. Which model does the work follows this section.
 
 ## Coding
