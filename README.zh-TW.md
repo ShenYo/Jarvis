@@ -28,7 +28,7 @@ Jarvis 處理四個相關情境：
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| **Jarvis** | 這台機器的 canonical 個人 Skills、bridge script，以及個人 Skill 的 provenance | 某個專案的 `.agents/`、專案政策，或個人設定 |
+| **Jarvis** | 這台機器的 canonical 個人 Skills、bridge script，以及個人 Skill 的 provenance；以 `~/.claude/CLAUDE.md` 連結的個人指示；複製進 `~/.claude/settings.json` 的 [Claude Code guard](#claude-code-guard) | 某個專案的 `.agents/`、專案政策，或其他任何個人設定 |
 | **Friday** | 一份經審查、consumer 可以 pin 並採用的共享 baseline | 這台機器的個人目錄，或某個 consumer 的衝突處理 |
 | **Consumer project** | 它自己的 `.agents/` seed、overlays、整合、測試，以及已記錄的 Friday provenance | Jarvis 的個人 Skills，或 Friday 的 vendor payload |
 
