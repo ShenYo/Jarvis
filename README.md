@@ -489,8 +489,8 @@ directory-level opt-out.
 
 > **繁中摘要**：個人的 Claude Code 防護規則放在
 > `.agents/claude-guard/guard.json`，由 `scripts/apply-claude-guard.sh`
-> 用複製的方式合併進 `~/.claude/settings.json`，不靠 link，所以沒有 Jarvis
-> 的機器上 session 仍有防護。使用者自己寫的規則會保留；guard 退役的規則會在
+> 用複製的方式合併進 `~/.claude/settings.json`，並安裝一支解析指令的
+> PreToolUse hook；兩者都不靠 link，所以沒有 Jarvis 的機器上 session 仍有防護。使用者自己寫的規則會保留；guard 退役的規則會在
 > 下次套用時移除。
 
 [`guard.json`](./.agents/claude-guard/guard.json) holds the rules every Claude
@@ -501,6 +501,7 @@ Code session on this machine runs under, whichever repository it starts in:
 | `permissions.deny` | Refuses the permanently prohibited operations: force push, `reset --hard`, `clean`, discarding uncommitted work, deleting branches, tags and refs, recursive deletion, `git rm`, rewriting a remote, GitHub `DELETE`, and skipping hooks. Matched before anything else, in every mode. |
 | `permissions.ask` | Prompts for the human-review checkpoints: merging, closing or reopening a pull request, approving one, `gh repo edit`, and pushing to `main` or `master`. |
 | `autoMode.hard_deny`, `soft_deny` | The same rules for the auto-mode classifier, in prose, so spellings a pattern cannot see (`bash -c`, `git -C`, a script) are judged too. Both keep the built-in rules through `"$defaults"`. |
+| `hooks.PreToolUse` | Runs [`bash-guard.py`](./.agents/claude-guard/bash-guard.py) on every Bash call. It parses the command rather than matching its text, so it sees through `git -C <dir>`, `-c` options, a path such as `/usr/bin/git`, `bash -c` and `eval`, `$(...)`, a heredoc fed to a shell, `env`, `xargs` and `timeout`, flag clusters such as `-an` and `-vrf`, and git aliases. It denies the same operations and asks at the same checkpoints, including a bare `git push` from the default branch. It fails closed: if it cannot start, the Bash call is blocked. |
 | `disableBypassPermissionsMode` | Turns bypass mode off; in bypass mode no ask rule would prompt. |
 
 Apply it, or check whether the settings already carry it:
@@ -510,26 +511,28 @@ Apply it, or check whether the settings already carry it:
 ~/.Jarvis/scripts/apply-claude-guard.sh --check  # exit 1 when it would change something
 ```
 
-The script copies the rules into the settings file rather than linking it
-here, so a session keeps its guard on a machine where this repository is
-missing. It keeps every rule the person wrote, and records what it applied in
+The script copies the rules into the settings file, and the hook to
+`~/.claude/hooks/claude-guard.py`, rather than linking either here, so a
+session keeps its guard on a machine where this repository is missing. It keeps every rule the person wrote, and records what it applied in
 `~/.claude/claude-guard.applied.json`, which is how a rule removed from
 `guard.json` leaves the settings on the next run. A settings file that is not
 valid JSON is refused and left as it is.
 
-What this does not do. A deny rule matches the command text, so `bash -c`,
-`git -C <dir>` and a script reach a prohibited operation without matching it;
-in auto mode the classifier is the layer that catches those, and it is not
-deterministic. The built-in auto-mode allow rule for pushes outranks
-`soft_deny`, so a bare `git push` from `main` is caught by a `pre-push` hook
-where one is installed, and by nothing otherwise. `git rm` is refused
-outright, including `--cached`; to take a file back out of the index, use
-`git restore --staged <path>`.
+What this does not do. The hook reads the command it is given, not a script
+that command runs, and not a command a program builds at run time; in auto
+mode the classifier is the layer for those, and it is not deterministic. It
+reads `python -c`, `node -e` and similar code only for directory-tree deletion
+and for strings that are themselves git, gh or rm commands. `git rm` is
+refused outright, including `--cached`; to take a file back out of the index,
+use `git restore --staged <path>`.
 
-The tests run each case in a sandbox `CLAUDE_CONFIG_DIR`:
+The tests run in sandboxes and never touch the real `~/.claude`. The first
+covers the merge; the second is the hook's probe corpus, including every
+spelling an independent review found getting past the text rules:
 
 ```sh
 bash ~/.Jarvis/tests/claude-guard.sh
+bash ~/.Jarvis/tests/bash-guard.sh
 ```
 
 ## Historical context

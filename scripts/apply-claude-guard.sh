@@ -2,9 +2,11 @@
 # Merge the personal Claude Code guard into ~/.claude/settings.json.
 #
 # The guard is .agents/claude-guard/guard.json: permission deny and ask rules,
-# auto-mode classifier rules, and settings it sets or removes. It is copied
-# into the settings file, never linked, so a Claude session keeps its guard on
-# a machine where this repository is absent or broken.
+# auto-mode classifier rules, a PreToolUse hook entry, and settings it sets or
+# removes. The hook itself, bash-guard.py, is installed as
+# ~/.claude/hooks/claude-guard.py. Both are copied, never linked, so a Claude
+# session keeps its guard on a machine where this repository is absent or
+# broken.
 #
 # The settings file belongs to the person, not to this script. Rules the
 # person added stay. The guard's own rules are tracked in a record of what was
@@ -16,7 +18,7 @@
 #            1 when applying would change them, 2 on error.
 set -euo pipefail
 
-usage() { sed -n '14,16s/^# \{0,1\}//p' "$0"; }
+usage() { sed -n '/^# Usage:/,/2 on error/s/^# \{0,1\}//p' "$0"; }
 
 check=0
 case "${1-}" in
@@ -35,8 +37,11 @@ guard="$here/.agents/claude-guard/guard.json"
 claude_home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 settings="$claude_home/settings.json"
 record="$claude_home/claude-guard.applied.json"
+hook_src="$here/.agents/claude-guard/bash-guard.py"
+hook_dst="$claude_home/hooks/claude-guard.py"
 
 jq -e 'type == "object"' "$guard" >/dev/null 2>&1 || die "$guard is not a JSON object"
+[ -f "$hook_src" ] || die "$hook_src is missing"
 
 # Write through a link, so a settings file kept by a dotfiles manager stays
 # where that manager put it.
@@ -69,7 +74,8 @@ merged=$(jq -n \
   --argjson cur "$current" --argjson prev "$previous" --slurpfile g "$guard" '
   $g[0] as $new |
   def lists: [["permissions","deny"], ["permissions","ask"],
-              ["autoMode","hard_deny"], ["autoMode","soft_deny"]];
+              ["autoMode","hard_deny"], ["autoMode","soft_deny"],
+              ["hooks","PreToolUse"]];
   def merge_list($p):
     (($cur | getpath($p)) // []) as $have |
     (($prev | getpath($p)) // []) as $old |
@@ -84,18 +90,38 @@ merged=$(jq -n \
   else .permissions.disableBypassPermissionsMode = $new.permissions.disableBypassPermissionsMode end |
   reduce (($new["$unset"] // [])[]) as $k (.; del(.[$k]))')
 
-if [ "$(jq -S . <<<"$current")" = "$(jq -S . <<<"$merged")" ]; then
-  echo "apply-claude-guard: $settings already carries the guard"
-  if [ "$check" = 0 ] && ! cmp -s "$guard" "$record" 2>/dev/null; then
-    cp "$guard" "$record"
-  fi
-  exit 0
-fi
+settings_same=0
+[ "$(jq -S . <<<"$current")" = "$(jq -S . <<<"$merged")" ] && settings_same=1
+hook_same=0
+cmp -s "$hook_src" "$hook_dst" && hook_same=1
 
 if [ "$check" = 1 ]; then
-  echo "apply-claude-guard: $settings differs from the guard:"
-  diff <(jq -S . <<<"$current") <(jq -S . <<<"$merged") || true
+  [ "$settings_same" = 1 ] && [ "$hook_same" = 1 ] && {
+    echo "apply-claude-guard: $settings and $hook_dst already carry the guard"
+    exit 0
+  }
+  if [ "$settings_same" = 0 ]; then
+    echo "apply-claude-guard: $settings differs from the guard:"
+    diff <(jq -S . <<<"$current") <(jq -S . <<<"$merged") || true
+  fi
+  [ "$hook_same" = 0 ] && echo "apply-claude-guard: $hook_dst differs from $hook_src"
   exit 1
+fi
+
+# The hook goes in before the settings that name it: a hook entry whose file
+# is missing blocks every Bash call, because it fails closed.
+if [ "$hook_same" = 0 ]; then
+  mkdir -p "$(dirname "$hook_dst")"
+  tmp=$(mktemp "$hook_dst.XXXXXX")
+  cp "$hook_src" "$tmp"
+  mv "$tmp" "$hook_dst"
+  echo "apply-claude-guard: wrote $hook_dst"
+fi
+
+if [ "$settings_same" = 1 ]; then
+  echo "apply-claude-guard: $settings already carries the guard"
+  cmp -s "$guard" "$record" 2>/dev/null || cp "$guard" "$record"
+  exit 0
 fi
 
 mkdir -p "$(dirname "$settings")"

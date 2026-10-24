@@ -29,8 +29,6 @@
       "Bash(git clean*)",
       "Bash(git commit * --no-veri*)",
       "Bash(git commit --no-veri*)",
-      "Bash(git config *core.hooksPath*)",
-      "Bash(git config *core.hookspath*)",
       "Bash(git push * +*)",
       "Bash(git push * --delete*)",
       "Bash(git push * --force*)",
@@ -117,6 +115,21 @@
     "soft_deny": [
       "$defaults",
       "Human-Review Checkpoint [must name: the exact operation and its target PR, branch or setting]: merging a pull request, enabling auto-merge or enqueueing into a merge queue, closing or reopening a pull request, posting a ChatOps merge comment (/merge, bors r+, @dependabot merge), pushing directly to the repository's default branch (main or master unless the transcript shows otherwise, including HEAD:main and other refspecs onto it), and changing branch protection, rulesets, required checks, collaborators, deploy keys, webhooks, environments, visibility, the default branch or other repository settings. Blocked by every route: gh, a path-qualified gh, bash -c or eval, the REST API (PUT .../pulls/N/merge, PATCH repos/{owner}/{repo}, writes under .../protection, .../rulesets, .../collaborators, .../environments) or the GraphQL API (mergePullRequest, enablePullRequestAutoMerge, enqueuePullRequest, updateRepository, createBranchProtectionRule, updateBranchProtectionRule). This rule takes precedence over the Git Push Destination exception for the default branch and over the --auto carve-out in Merge Without Review. However many checks the PR passed, the decision belongs to a person: it clears only when the most recent user message itself names that exact operation and target; a proposal from the agent answered with a bare yes does not clear it."
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py=/usr/bin/python3; [ -x \"$py\" ] || py=python3; exec \"$py\" -I \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/claude-guard.py\"",
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      }
     ]
   }
 }

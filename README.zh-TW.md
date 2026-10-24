@@ -461,6 +461,7 @@ Code session 都要遵守的規則，不論 session 從哪個 repository 啟動�
 | `permissions.deny` | 拒絕永久禁止的操作：force push、`reset --hard`、`clean`、丟棄未 commit 的修改、刪除 branch／tag／ref、遞迴刪除、`git rm`、改寫 remote、GitHub `DELETE`，以及跳過 hook。它在所有判斷之前比對，所有 mode 都生效。 |
 | `permissions.ask` | 人工審核的關卡會跳出 prompt：merge、關閉或重開 pull request、approve、`gh repo edit`，以及 push 到 `main` 或 `master`。 |
 | `autoMode.hard_deny`、`soft_deny` | 同一組規則以文字寫給 auto-mode classifier，讓 pattern 看不到的寫法（`bash -c`、`git -C`、script）也會被判斷。兩者都透過 `"$defaults"` 保留內建規則。 |
+| `hooks.PreToolUse` | 每次執行 Bash 都會跑 [`bash-guard.py`](./.agents/claude-guard/bash-guard.py)。它解析指令，而不是比對文字，所以 `git -C <dir>`、`-c` 選項、`/usr/bin/git` 這類路徑、`bash -c` 和 `eval`、`$(...)`、餵給 shell 的 heredoc、`env`、`xargs` 和 `timeout`、`-an`、`-vrf` 這類合併的 flag，以及 git alias，它都看得穿。它拒絕的操作和跳出 prompt 的關卡都與上面相同，包括在 default branch 上直接執行 `git push`。它採 fail closed：hook 無法啟動時，Bash 呼叫會被擋下。 |
 | `disableBypassPermissionsMode` | 關閉 bypass mode；在 bypass mode 下，ask 規則一條都不會跳出 prompt。 |
 
 套用，或檢查 settings 是否已經帶有 guard：
@@ -470,23 +471,26 @@ Code session 都要遵守的規則，不論 session 從哪個 repository 啟動�
 ~/.Jarvis/scripts/apply-claude-guard.sh --check  # 會改動任何東西時 exit 1
 ```
 
-script 是把規則複製進 settings 檔，而不是 link 到這裡，所以在沒有這個
+script 把規則複製進 settings 檔，把 hook 複製到
+`~/.claude/hooks/claude-guard.py`，兩者都不 link 到這裡，所以在沒有這個
 repository 的機器上，session 仍然保有 guard。使用者自己寫的規則都會保留；
 它把套用過的內容記錄在 `~/.claude/claude-guard.applied.json`，因此從
 `guard.json` 移除的規則，下次執行時會從 settings 裡拿掉。settings 檔不是合法
 JSON 時，script 會拒絕並保持原狀。
 
-它做不到的事。deny 規則比對的是指令文字，所以 `bash -c`、`git -C <dir>` 和
-script 都能在不符合任何規則的情況下做到被禁止的操作；在 auto mode 下，接住
-這些寫法的是 classifier，而它的判斷不是確定性的。內建的 auto-mode push allow
-規則優先於 `soft_deny`，所以在 `main` 上直接執行 `git push`，只有裝了
-`pre-push` hook 的地方擋得住，其他地方都擋不住。`git rm` 一律拒絕，包含
-`--cached`；要把檔案從 index 拿出來，請用 `git restore --staged <path>`。
+它做不到的事。hook 讀的是交給它的那條指令，不會讀那條指令執行的 script，
+也看不到程式在執行時才組出來的指令；在 auto mode 下，負責這些的是
+classifier，而它的判斷不是確定性的。對 `python -c`、`node -e` 這類程式碼，
+它只檢查會刪除整個目錄樹的呼叫，以及內容本身就是 git、gh 或 rm 指令的字串。
+`git rm` 一律拒絕，包含 `--cached`；要把檔案從 index 拿出來，請用
+`git restore --staged <path>`。
 
-測試會在 sandbox 的 `CLAUDE_CONFIG_DIR` 裡逐一執行每個案例：
+測試都在 sandbox 裡執行，不會碰到真正的 `~/.claude`。第一支測合併；第二支是
+hook 的 probe corpus，包含獨立審查找到、能繞過文字規則的每一種寫法：
 
 ```sh
 bash ~/.Jarvis/tests/claude-guard.sh
+bash ~/.Jarvis/tests/bash-guard.sh
 ```
 
 ## 歷史背景

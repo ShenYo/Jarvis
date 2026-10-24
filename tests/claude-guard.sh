@@ -35,6 +35,8 @@ check "fresh: exit 0" test "$rc" = 0
 check "fresh: every deny rule present" q "(.permissions.deny | sort) == ($(jq -c '.permissions.deny | sort' "$guard"))"
 check "fresh: bypass mode disabled" q '.permissions.disableBypassPermissionsMode == "disable"'
 check "fresh: record equals guard" cmp -s "$guard" "$r"
+check "fresh: hook installed" cmp -s "$repo/.agents/claude-guard/bash-guard.py" "$dir/hooks/claude-guard.py"
+check "fresh: hook entry fails closed" q '.hooks.PreToolUse[-1].matcher == "Bash" and .hooks.PreToolUse[-1].hooks[0].onFailure == "block"'
 
 # 2. Existing settings: everything the person wrote survives.
 sandbox
@@ -42,13 +44,15 @@ cat >"$s" <<'EOF'
 {
   "model": "opus",
   "skipDangerousModePermissionPrompt": true,
-  "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "true"}]}]},
+  "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "true"}]}],
+            "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "other-tool"}]}]},
   "permissions": {"defaultMode": "auto", "deny": ["Bash(user-rule *)"], "allow": ["Bash(npm test)"]},
   "autoMode": {"environment": ["Source control: example"]}
 }
 EOF
 run
 check "keep: unrelated keys untouched" q '.model == "opus" and .hooks.Stop[0].hooks[0].command == "true" and .permissions.defaultMode == "auto"'
+check "keep: another tool's PreToolUse hook stays first" q '.hooks.PreToolUse[0].hooks[0].command == "other-tool" and (.hooks.PreToolUse | length) == 2'
 check "keep: person's deny and allow rules stay" q '(.permissions.deny | index("Bash(user-rule *)")) != null and .permissions.allow == ["Bash(npm test)"]'
 check "keep: person's rule stays ahead of the guard's" q '.permissions.deny[0] == "Bash(user-rule *)"'
 check "keep: autoMode environment untouched" q '.autoMode.environment == ["Source control: example"]'
@@ -63,6 +67,14 @@ check "idempotent: exit 0" test "$rc" = 0
 check "idempotent: file unchanged" cmp -s "$s" "$dir/before"
 run --check; rc=$?
 check "idempotent: --check exit 0" test "$rc" = 0
+
+# 3b. A hook edited in place is drift, and a run puts it back.
+echo "# edited" >>"$dir/hooks/claude-guard.py"
+run --check; rc=$?
+check "hook drift: --check exit 1" test "$rc" = 1
+run
+check "hook drift: run restores the hook" cmp -s "$repo/.agents/claude-guard/bash-guard.py" "$dir/hooks/claude-guard.py"
+check "hook drift: settings untouched" cmp -s "$s" "$dir/before"
 
 # 4. A rule the previous guard added, and this one no longer has, is retired.
 #    A person's rule that happens to look similar is not.
