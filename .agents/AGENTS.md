@@ -18,8 +18,24 @@ This covers every reply, including end-of-turn summaries and follow-ups to a
 background task. Those follow the user's latest message too: long English tool
 output, or an English document in context, does not change the reply language.
 
-Artifacts keep their own convention: commit messages, pull request bodies and
-repository documentation follow the language that repository already uses.
+Artifacts are not replies: commit messages and pull request bodies follow the
+language the repository already uses, and documents follow the next section.
+
+## Documents: English, opened by a Chinese summary
+
+Write a document's body in English, and open it with a brief summary in
+Traditional Chinese, two to four lines, so the user can pick up its context
+quickly:
+
+```markdown
+> **中文摘要**：…
+```
+
+This covers documentation, plans, reports, reviews and handoffs, unless the
+repository's own convention says otherwise. It leaves out commit messages,
+pull request bodies and code comments, and the instruction files loaded on
+every turn (this file, a `CLAUDE.md`, a Skill's `SKILL.md`), where each line
+costs context.
 
 ## Git in a repository without its own rules
 
