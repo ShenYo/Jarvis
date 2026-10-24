@@ -96,6 +96,10 @@ verifying after. Written out: every change needs it. -->
    when what it guards is broken. Report what ran, what passed, and what you
    could not check and why: `UNVERIFIED` is an acceptable answer, a guess is
    not.
+5. **Write decisions where they live.** A decision made mid-task goes to its
+   home as soon as it is made: product behaviour to the spec, with the user's
+   approval; an implementation choice to the issue or an ADR. The
+   conversation is not storage: compaction drops what is only there.
 
 Once the scope is clear, finish reversible work without asking at each step;
 ask when authority, material risk, or a decision with lasting effects is
