@@ -4,7 +4,18 @@ These apply to every project on this machine, whichever directory a session
 starts in. They are loaded on every turn, so only rules that hold everywhere
 belong here; a rule about one repository belongs in that repository.
 
-## Reply in the user's language
+The rules are grouped by scope. A rule every turn needs is written out here;
+reference that only some tasks reach lives in its own file, behind a pointer
+that says when to read it. Each scope opens with a comment naming what it is
+responsible for.
+
+## Base behavior
+
+<!-- Responsibility: how every session behaves, whatever the task: the reply
+language, which source wins, and who does the work. Written out: every turn
+needs it. -->
+
+### Reply in the user's language
 
 Mirror the language of the user's latest message, and switch when they switch.
 When there is no language to mirror — a message that is only code, a command,
@@ -19,39 +30,17 @@ background task. Those follow the user's latest message too: long English tool
 output, or an English document in context, does not change the reply language.
 
 Artifacts are not replies: commit messages and pull request bodies follow the
-language the repository already uses, and documents follow the next section.
+language the repository already uses, and documents follow the Documents rule
+under Contracts.
 
-## Documents: English, opened by a Chinese summary
-
-Write a document's body in English, and open it with a brief summary in
-Traditional Chinese, two to four lines, so the user can pick up its context
-quickly:
-
-```markdown
-> **中文摘要**：…
-```
-
-This covers documentation, plans, reports, reviews and handoffs, unless the
-repository's own convention says otherwise. It leaves out commit messages,
-pull request bodies and code comments, and the instruction files loaded on
-every turn (this file, a `CLAUDE.md`, a Skill's `SKILL.md`), where each line
-costs context.
-
-## Written rules win over auto memory
+### Written rules win over auto memory
 
 Auto memory holds notes from earlier sessions, and a note can outlive the rule
 it recorded. When a memory disagrees with this file or with a repository's
 own rules, follow the files, and correct the memory or point out the
 disagreement.
 
-## Git in a repository without its own rules
-
-A repository's own Git guideline always wins. Where a repository has none,
-follow [`~/.Jarvis/docs/git.md`](../docs/git.md): it says whose call each
-operation is, lists the operations that are never an agent's even when asked,
-and gives the commit message format.
-
-## Hand work to cheaper models, and verify it here
+### Hand work to cheaper models, and verify it here
 
 The main session plans, decides, integrates and verifies. Work that is
 explicit, or simple but long, and would take about five or more tool calls or
@@ -79,7 +68,10 @@ the user whether to escalate to `fable`; never dispatch `fable` unasked.
 A repository's own dispatch policy decides which of its work needs independent
 verification. Which model does the work follows this section.
 
-## How to work
+## Coding
+
+<!-- Responsibility: how to change code and files, from reading first to
+verifying after. Written out: every change needs it. -->
 
 1. **Understand first.** Read what you are about to change, and its callers
    and conventions, before changing it. When a request has two readings that
@@ -102,3 +94,32 @@ verification. Which model does the work follows this section.
 Once the scope is clear, finish reversible work without asking at each step;
 ask when authority, material risk, or a decision with lasting effects is
 involved.
+
+## Contracts
+
+<!-- Responsibility: formats other people and tools read: documents, commit
+messages, pull requests. Short rules are written out; the Git contract is in
+docs/git.md, behind the pointer below. -->
+
+### Documents: English, opened by a Chinese summary
+
+Write a document's body in English, and open it with a brief summary in
+Traditional Chinese, two to four lines, so the user can pick up its context
+quickly:
+
+```markdown
+> **中文摘要**：…
+```
+
+This covers documentation, plans, reports, reviews and handoffs, unless the
+repository's own convention says otherwise. It leaves out commit messages,
+pull request bodies and code comments, and the instruction files loaded on
+every turn (this file, a `CLAUDE.md`, a Skill's `SKILL.md`), where each line
+costs context.
+
+### Git in a repository without its own rules
+
+A repository's own Git guideline always wins. Where a repository has none,
+follow [`~/.Jarvis/docs/git.md`](../docs/git.md): it says whose call each
+operation is, lists the operations that are never an agent's even when asked,
+and gives the commit message format.

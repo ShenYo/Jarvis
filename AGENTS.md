@@ -63,7 +63,7 @@ Do not reach for `--no-verify`; the Claude Code guard refuses that flag.
 The general rules for how to work -- understand first, nothing speculative,
 surgical changes, verify and say what you ran -- are the personal
 instructions, [`.agents/AGENTS.md`](./.agents/AGENTS.md), which every session
-already loads. These three are this repository's own:
+already loads. These four are this repository's own:
 
 1. **Scratch files go under `docs/temp/<purpose>/`**, which `.gitignore`
    ignores. Never stage one, and never reach for a blanket `git add -A` across
@@ -74,6 +74,12 @@ already loads. These three are this repository's own:
 3. Never write to `~/.Jarvis` from inside a consumer project's workflow. This
    repository is optional for every project; a project that writes here has
    made it mandatory.
+4. `.agents/AGENTS.md` is grouped by scope -- base behavior, coding,
+   contracts -- and each scope opens with a comment naming what it is
+   responsible for. A new rule goes under its scope. Write it out only when
+   every turn needs it; reference that only some tasks reach goes in its own
+   file under `docs/`, with a pointer that says when to read it. Codex does
+   not expand `@` imports, so a rule behind one never reaches Codex.
 
 ### Git
 
