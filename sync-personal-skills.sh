@@ -1,13 +1,15 @@
 #!/bin/bash
 # Rebuild the symlink bridges that let AI tools discover the skills in
-# agents/skills/. Idempotent — run it any time, especially after adding or
-# removing a skill.
+# .agents/skills/, and the personal instructions in .agents/AGENTS.md.
+# Idempotent — run it any time, especially after adding or removing a skill.
 #
 # Layout:
-#   ~/.Jarvis/agents/skills/<name>/  canonical content (this repo)
-#   ~/.agents                     -> .Jarvis/agents
-#   ~/.claude/skills/<name>      -> ../../.agents/skills/<name>
-#   ~/.codex/skills/<name>       -> ../../.agents/skills/<name>
+#   ~/.Jarvis/.agents/skills/<name>/  canonical content (this repo)
+#   ~/.Jarvis/.agents/AGENTS.md       personal rules for every project
+#   ~/.agents                      -> .Jarvis/.agents
+#   ~/.claude/skills/<name>        -> ../../.agents/skills/<name>
+#   ~/.codex/skills/<name>         -> ../../.agents/skills/<name>
+#   ~/.claude/CLAUDE.md            -> ../.agents/AGENTS.md
 #
 # Skills may also be grouped one level deep — .agents/skills/git/commit/ links
 # as ~/.claude/skills/git-commit, from that skill's own `name:` field.
@@ -18,7 +20,7 @@
 # and the checks below make it visible.
 set -euo pipefail
 
-CANONICAL="$HOME/.Jarvis/agents/skills"
+CANONICAL="$HOME/.Jarvis/.agents/skills"
 
 if [ ! -d "$CANONICAL" ]; then
   echo "error: $CANONICAL not found — is this repo cloned at ~/.Jarvis?" >&2
@@ -27,12 +29,22 @@ fi
 
 # ~/.agents is the path every other symlink resolves through, and it has to stay
 # a symlink into this repo. There is normally no syncing to do — ~/.agents and
-# .Jarvis/agents are the same bytes, same inode, so they cannot drift. The one
+# .Jarvis/.agents are the same bytes, same inode, so they cannot drift. The one
 # way this layout breaks is if something replaces that symlink with a real
 # directory: then two copies of every skill exist, edits land in whichever one
 # the tool happened to open, and nothing says so. Check for it loudly.
 AGENTS_LINK="$HOME/.agents"
 CANONICAL_PARENT=$(cd "$CANONICAL/.." && pwd -P)
+
+# The canonical directory was renamed from agents/ to .agents/, to match the
+# ~/.agents name it is reached through. A link still naming the old directory
+# is migrated -- that exact target only, so a link someone pointed elsewhere on
+# purpose is still reported rather than rewritten.
+if [ -L "$AGENTS_LINK" ] && [ "$(readlink "$AGENTS_LINK")" = .Jarvis/agents ] \
+   && [ ! -e "$HOME/.Jarvis/agents" ]; then
+  ln -sfn .Jarvis/.agents "$AGENTS_LINK"
+  echo "migrated ~/.agents -> .Jarvis/.agents (was .Jarvis/agents)"
+fi
 
 if [ -L "$AGENTS_LINK" ]; then
   resolved=$(cd -P "$AGENTS_LINK" 2>/dev/null && pwd -P) || resolved=""
@@ -52,8 +64,8 @@ elif [ -e "$AGENTS_LINK" ]; then
   echo "error: ~/.agents exists but is neither a symlink nor a directory." >&2
   exit 1
 else
-  ln -s .Jarvis/agents "$AGENTS_LINK"
-  echo "created  ~/.agents -> .Jarvis/agents"
+  ln -s .Jarvis/.agents "$AGENTS_LINK"
+  echo "created  ~/.agents -> .Jarvis/.agents"
 fi
 
 fail=0
@@ -161,6 +173,44 @@ bridge() {
 }
 
 bridge "$HOME/.claude/skills" "Claude Code"
+
+# Personal instructions for every project. Claude Code loads ~/.claude/CLAUDE.md
+# in every session wherever it starts, alongside a project's own CLAUDE.md, so
+# this is where a rule meant for all projects belongs -- not a project's auto
+# memory, which only loads for sessions started in that project. The language
+# rule lived only in two projects' memory, so a session started anywhere else
+# never saw it and replied in English.
+#
+# The content lives here, versioned, and ~/.claude/CLAUDE.md is a link to it
+# through ~/.agents, the same stable address the skill links use. Only a missing
+# or dangling link is (re)created. A real file there holds instructions someone
+# wrote, and a live link elsewhere is a choice someone made; either is reported,
+# never replaced.
+GLOBAL_RULES="$CANONICAL_PARENT/AGENTS.md"
+CLAUDE_MD="$HOME/.claude/CLAUDE.md"
+CLAUDE_MD_TARGET=../.agents/AGENTS.md
+echo ""
+if [ ! -f "$GLOBAL_RULES" ]; then
+  echo "MISSING  $GLOBAL_RULES -- the personal instructions are not in this checkout" >&2
+  fail=1
+elif [ -L "$CLAUDE_MD" ] && [ "$(readlink "$CLAUDE_MD")" = "$CLAUDE_MD_TARGET" ] && [ -e "$CLAUDE_MD" ]; then
+  echo "Claude Code instructions: ~/.claude/CLAUDE.md -> $CLAUDE_MD_TARGET"
+elif [ -L "$CLAUDE_MD" ] && [ ! -e "$CLAUDE_MD" ]; then
+  ln -sfn "$CLAUDE_MD_TARGET" "$CLAUDE_MD"
+  echo "relinked ~/.claude/CLAUDE.md -> $CLAUDE_MD_TARGET (was dangling)"
+elif [ -L "$CLAUDE_MD" ]; then
+  echo "CONFLICT ~/.claude/CLAUDE.md -> $(readlink "$CLAUDE_MD"), not $CLAUDE_MD_TARGET." >&2
+  echo "         Left alone: a live link elsewhere was put there on purpose." >&2
+  fail=1
+elif [ -e "$CLAUDE_MD" ]; then
+  echo "CONFLICT ~/.claude/CLAUDE.md is a real file. Left alone: it holds instructions" >&2
+  echo "         someone wrote. Move what it should keep into $GLOBAL_RULES," >&2
+  echo "         remove it, and run this again." >&2
+  fail=1
+else
+  ln -s "$CLAUDE_MD_TARGET" "$CLAUDE_MD"
+  echo "linked   ~/.claude/CLAUDE.md -> $CLAUDE_MD_TARGET"
+fi
 
 # Codex reads user skills from $CODEX_HOME/skills. Its own skill-installer says
 # so ("Install Codex skills into $CODEX_HOME/skills"), and its list-skills.py

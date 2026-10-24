@@ -3,7 +3,7 @@
 **English** · [繁體中文](./README.zh-TW.md)
 
 > **繁中摘要**：Jarvis 是這台機器的個人 AI agent Skills 版本庫。它讓
-> `~/.Jarvis/agents` 成為唯一 canonical copy，透過 `~/.agents` 與 Claude
+> `~/.Jarvis/.agents` 成為唯一 canonical copy，透過 `~/.agents` 與 Claude
 > Code／Codex 的 symlink 共用；它也提供 Friday 基線的安全採用 wrapper。專案
 > 本身必須不依賴 Jarvis 仍可重現。
 
@@ -49,7 +49,7 @@ on this machine, and an agent working here may rely on it.
 
 Jarvis remains the personal, optional layer; a project-required outcome must
 live in project-controlled documentation, tests, or automation.
-[TDD](./agents/skills/tdd/), [Wayfinder](./agents/skills/wayfinder/), and
+[TDD](./.agents/skills/tdd/), [Wayfinder](./.agents/skills/wayfinder/), and
 comparable personal helpers may assist work, but their absence
 must not block a consumer project.
 
@@ -81,20 +81,20 @@ normal order of operations, not a fault -- install with the CLI, then bridge.
 
 A `synced` entry also sits in the Claude bridge directory. It is a real
 directory rather than a symlink, so it belongs to another tool and the bridge
-script deliberately leaves it alone. [`setup-project-agents`](./agents/skills/setup-project-agents/) is
+script deliberately leaves it alone. [`setup-project-agents`](./.agents/skills/setup-project-agents/) is
 the canonical Skill without a lock entry.
 These are observations, not enduring facts; recount rather than treating this
 README as a cache:
 
 ```sh
-find ~/.Jarvis/agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f | wc -l
+find ~/.Jarvis/.agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f | wc -l
 find ~/.claude/skills -maxdepth 1 -type l | wc -l
 find "${CODEX_HOME:-$HOME/.codex}/skills" -maxdepth 1 -type l | wc -l
-jq '.skills | length' ~/.Jarvis/agents/.skill-lock.json
+jq '.skills | length' ~/.Jarvis/.agents/.skill-lock.json
 comm -23 \
-  <(find ~/.Jarvis/agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f \
+  <(find ~/.Jarvis/.agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f \
     -exec sed -n 's/^name:[[:space:]]*//p' {} \; | sort) \
-  <(jq -r '.skills | keys[]' ~/.Jarvis/agents/.skill-lock.json | sort)
+  <(jq -r '.skills | keys[]' ~/.Jarvis/.agents/.skill-lock.json | sort)
 ```
 
 ## Architecture and layout
@@ -102,7 +102,8 @@ comm -23 \
 ```
 AGENTS.md                    rules for an agent working in this repository
 CLAUDE.md                    a pointer that imports AGENTS.md
-agents/
+.agents/                     reached as ~/.agents
+  AGENTS.md                  personal instructions for every project
   skills/<name>/SKILL.md     canonical skill content
   .skill-lock.json           what the skills CLI installed, and from where
 sync-personal-skills.sh      ensures the Claude bridge directory and
@@ -118,17 +119,31 @@ Git rules, which come with the hooks: those are byte-identical copies of
 Friday's, so the rules they enforce are Friday's text and change when the hooks
 change.
 
-`agents/` is the real content. Everything outside this repo is a symlink into
+**Two files are called `AGENTS.md`, and they have different scopes.** The one
+at the root is for an agent working *in this repository*. The one in
+`.agents/` is for *every project*: [`.agents/AGENTS.md`](./.agents/AGENTS.md)
+holds personal rules, such as replying in the user's language, and the bridge
+links it as `~/.claude/CLAUDE.md`, which Claude Code loads in every session
+wherever it starts. Before it existed, the language rule lived only in two
+projects' auto memory, so a session started anywhere else replied in English.
+Keep that file short, because it is loaded on every turn of every session, and
+keep a rule about one repository in that repository instead.
+
+The directory is `.agents/`, not `agents/`, to match the `~/.agents` name it is
+reached through. The bridge migrates a `~/.agents` still pointing at the old
+`.Jarvis/agents`, and only that exact target.
+
+`.agents/` is the real content. Everything outside this repo is a symlink into
 it, so there is exactly one copy of every skill.
 
-`~/.agents` **must be a symlink to `~/.Jarvis/agents`**. It is the stable
+`~/.agents` **must be a symlink to `~/.Jarvis/.agents`**. It is the stable
 address through which the Claude and Codex bridge links resolve.
 
 A skill is a directory containing `SKILL.md` — not merely a directory. Skills
 may be grouped one level deep under a container that has no `SKILL.md` of its
 own; the container is not linked, the skills inside it are. The link name comes
 from each skill's `name:` frontmatter, which is what the tools match on, so
-`agents/skills/git/commit/` with `name: git-commit` links as
+`.agents/skills/git/commit/` with `name: git-commit` links as
 `~/.claude/skills/git-commit`. Nothing here is nested today; the support exists
 because pet_care groups its four git skills that way, and a script that assumed
 one directory per skill both linked the unloadable container and hid the real
@@ -137,10 +152,11 @@ skills inside.
 ## The symlink chain
 
 ```
-~/.agents                 -> .Jarvis/agents
+~/.agents                 -> .Jarvis/.agents
 ~/.claude/skills/<name>   -> ../../.agents/skills/<name>
 ${CODEX_HOME:-$HOME/.codex}/skills/<name>
                            -> ../../.agents/skills/<name>
+~/.claude/CLAUDE.md       -> ../.agents/AGENTS.md
 ```
 
 Two hops, and the second one matters: `~/.claude/skills/<name>` resolves
@@ -158,7 +174,7 @@ instead. Assuming two used to leave every Codex link dangling for a deeper
 ## There is nothing to sync
 
 `~/.agents` is a symlink, not a copy. `~/.agents/skills/foo/SKILL.md` and
-`~/.Jarvis/agents/skills/foo/SKILL.md` are the same inode — one file with two
+`~/.Jarvis/.agents/skills/foo/SKILL.md` are the same inode — one file with two
 names. Editing through either path edits the same bytes, and `git status` in
 this repo sees it immediately. The two cannot drift, because there is only one
 of them.
@@ -202,7 +218,7 @@ whole setup: nothing is fetched at run time to make a Skill available, and the
 Skills CLI is not needed to run one. It is needed to install or update a
 CLI-managed Skill afterwards — see [CLI-managed and locally maintained
 content](#cli-managed-and-locally-maintained-content) — and by one Skill's own
-workflow: [`find-skills`](./agents/skills/find-skills/) searches for Skills
+workflow: [`find-skills`](./.agents/skills/find-skills/) searches for Skills
 that are *not* installed, so it reaches the network, and its search step runs
 `npx skills find`. A clone-only machine can run every other Skill here; that
 one will stop at its first step.
@@ -214,10 +230,18 @@ canonical symlink and any already-installed Claude/Codex bridge directories.
 
 For a new project, bootstrap the portable baseline from a separately reviewed,
 clean Friday checkout; do not copy Jarvis Skills into the project. The optional
-[`setup-project-agents`](./agents/skills/setup-project-agents/) Skill under
+[`setup-project-agents`](./.agents/skills/setup-project-agents/) Skill under
 `~/.agents` is a convenience wrapper for a
 blank-project Friday adoption, not a prerequisite for this manual workflow or
 for any consumer project.
+
+The script also links `~/.claude/CLAUDE.md` to the personal instructions in
+`.agents/AGENTS.md`. It creates that link when it is missing and replaces it when
+it dangles. It refuses, and changes nothing, when `~/.claude/CLAUDE.md` is a real
+file, because that file holds instructions someone wrote, or a live link
+elsewhere, because that link was put there on purpose. To adopt the link on a
+machine that already has a `~/.claude/CLAUDE.md`, move what it should keep into
+`.agents/AGENTS.md`, remove it, and run the script again.
 
 The script creates `~/.agents` if it is missing, ensures the Claude bridge
 directory exists, and creates or replaces a canonical-name entry only when it
@@ -236,7 +260,7 @@ non-zero if these checks fail. Re-run it after adding or removing a skill.
 
 ### Add
 
-Add a directory containing `SKILL.md` under `agents/skills/` (or one level
+Add a directory containing `SKILL.md` under `.agents/skills/` (or one level
 below a grouping directory). Give it a unique `name:` frontmatter field when
 the bridge name should differ from the directory name, then run the bridge
 script and review:
@@ -251,7 +275,7 @@ git -C ~/.Jarvis status --short
 
 For locally maintained content, edit the tracked files, review the diff, and
 run the bridge script. For a CLI-managed Skill, inspect
-[`agents/.skill-lock.json`](./agents/.skill-lock.json) for its source and verify that the named upstream
+[`.agents/.skill-lock.json`](./.agents/.skill-lock.json) for its source and verify that the named upstream
 Skill still exists before using its owning CLI to update that named Skill.
 
 Do not use a blanket `npx skills update -g` as routine maintenance. Upstream
@@ -278,8 +302,8 @@ Running [`~/.Jarvis/sync-personal-skills.sh`](./sync-personal-skills.sh) is the 
 read-only inspection, use:
 
 ```sh
-test -L ~/.agents && test "$(cd -P ~/.agents && pwd)" = "$(cd -P ~/.Jarvis/agents && pwd)"
-find ~/.Jarvis/agents/skills -mindepth 1 -maxdepth 2 -type f -name SKILL.md | sort
+test -L ~/.agents && test "$(cd -P ~/.agents && pwd)" = "$(cd -P ~/.Jarvis/.agents && pwd)"
+find ~/.Jarvis/.agents/skills -mindepth 1 -maxdepth 2 -type f -name SKILL.md | sort
 find ~/.claude/skills -maxdepth 1 -type l -print | sort
 CODEX_SKILLS="${CODEX_HOME:-$HOME/.codex}/skills"
 [ ! -d "$CODEX_SKILLS" ] || find "$CODEX_SKILLS" -maxdepth 1 -type l -print | sort
@@ -291,7 +315,7 @@ Stop if the script says `~/.agents` is a real directory or resolves elsewhere.
 Compare it with the canonical directory first and decide which copy is current:
 
 ```sh
-diff -ru ~/.agents ~/.Jarvis/agents
+diff -ru ~/.agents ~/.Jarvis/.agents
 ```
 
 After that comparison, preserve the conflicting directory under a dated backup
@@ -300,16 +324,16 @@ without a backup can discard uncommitted Skills.
 
 ```sh
 mv ~/.agents "$HOME/.agents.conflict-$(date +%Y%m%d-%H%M%S)"
-ln -s .Jarvis/agents ~/.agents
+ln -s .Jarvis/.agents ~/.agents
 ~/.Jarvis/sync-personal-skills.sh
 ```
 
 ## Friday adoption wrapper
 
-[`setup-matt-pocock-skills`](./agents/skills/setup-matt-pocock-skills/) is
+[`setup-matt-pocock-skills`](./.agents/skills/setup-matt-pocock-skills/) is
 third-party/CLI-managed. **Do not modify it for
 project setup.** Use the locally maintained
-[`setup-project-agents`](./agents/skills/setup-project-agents/) wrapper
+[`setup-project-agents`](./.agents/skills/setup-project-agents/) wrapper
 instead. It is deliberately narrow: it adopts Friday's shared baseline, not
 personal Skills, consumer overlays, or conflicts.
 
@@ -343,14 +367,14 @@ its own reviewed convention.
 
 ## CLI-managed and locally maintained content
 
-[`agents/.skill-lock.json`](./agents/.skill-lock.json) records Skills installed by the Skills CLI, including
+[`.agents/.skill-lock.json`](./.agents/.skill-lock.json) records Skills installed by the Skills CLI, including
 their source, path, hash, and timestamps. Treat those as third-party/
 CLI-managed: do not casually patch their contents or rewrite the lock to make
 an installation look different. A missing lock entry means the CLI did not
 record that Skill; it does not make a canonical Skill invalid.
 
 Jarvis's bridge script, this README, and
-[`setup-project-agents`](./agents/skills/setup-project-agents/) are locally
+[`setup-project-agents`](./.agents/skills/setup-project-agents/) are locally
 maintained. Personal settings are intentionally excluded:
 `~/.claude/settings.json` and `~/.codex/config.toml` may contain local paths
 or secrets and are not part of this repository.
@@ -372,7 +396,8 @@ sets it again.
 All three are copies of files this platform's sibling repository ships to its
 consumers, at `payload/.agents/githooks/` in
 [Friday](https://github.com/ShenYo/Friday). This repository is not a Friday
-payload consumer — it has no `.agents/` tree — so `install.sh` cannot wire it
+payload consumer — its `.agents/` holds personal Skills, not Friday's payload
+— so `install.sh` cannot wire it
 and the hooks are copied instead. Each is now **byte-identical** to its payload
 counterpart, including `pre-push`: the hooks resolve the guideline path at run
 time rather than hard-coding it, which is what removed the last intended
@@ -396,8 +421,9 @@ token: the record is self-contained.
 
 **This repository is not a Friday consumer, and the two are not bound
 together.** Friday's payload is nineteen files; this repository takes **three
-of them** — the hooks above — and nothing else: no `.agents/` tree, none of
-Friday's documentation, no `.claude/settings.json`. Its own
+of them** — the hooks above — and nothing else: none of Friday's `.agents/`
+payload or documentation, no `.claude/settings.json`. The `.agents/` here is
+this repository's own, holding the personal Skills and instructions. Its own
 [`AGENTS.md`](./AGENTS.md) is locally written and states its own working rules;
 it links Friday only for the rules those three hooks enforce, which are
 Friday's by construction. Friday depends on this repository for nothing in
@@ -478,7 +504,7 @@ above into a precedence rule; they are what was seen.
   repository reported `code-review`, `tdd`, `research`, `writing-for-agents`
   and `setup-project-agents` as available, resolving through
   `~/.claude/skills/<name>` into `~/.agents/skills` with `~/.agents` →
-  `.Jarvis/agents`. So the centralization here does reach a working session,
+  `.Jarvis/.agents`. So the centralization here does reach a working session,
   not just the filesystem.
 - **On a same-name collision, the personal Skill was the one present, and the
   project copy was not listed at all.** A fixture carried a project skill at
@@ -523,14 +549,14 @@ Avoid a blanket `npx skills update -g`: a 2026-09-07 audit found that upstream
 had removed Skills that were still locally installed. Use
 `npx skills update -g <name>` only after checking that specific upstream Skill,
 then review the diff. The existing global lock filename is
-[`agents/.skill-lock.json`](./agents/.skill-lock.json); `skills-lock.json` is project scope. Missing
+[`.agents/.skill-lock.json`](./.agents/.skill-lock.json); `skills-lock.json` is project scope. Missing
 `agents/openai.yaml` descriptors are not, by themselves, a reason to reinstall.
 
 ## Troubleshooting
 
 ```sh
 # Confirm the required canonical symlink and its resolved destination.
-ls -ld ~/.agents ~/.Jarvis/agents
+ls -ld ~/.agents ~/.Jarvis/.agents
 readlink ~/.agents
 
 # Ensure bridge directories and missing/dangling canonical-name links; report
@@ -543,12 +569,12 @@ CODEX_SKILLS="${CODEX_HOME:-$HOME/.codex}/skills"
 [ ! -d "$CODEX_SKILLS" ] || find "$CODEX_SKILLS" -maxdepth 1 -type l ! -exec test -e {} \; -print
 
 # Show canonical names that determine bridge entry names.
-find ~/.Jarvis/agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f \
+find ~/.Jarvis/.agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f \
   -exec sed -n 's/^name:[[:space:]]*//p' {} \; | sort
 
 # Inspect CLI provenance when jq is available.
 jq -r '.skills | to_entries[] | "\(.key)\t\(.value.source)\t\(.value.skillPath)"' \
-  ~/.Jarvis/agents/.skill-lock.json | sort
+  ~/.Jarvis/.agents/.skill-lock.json | sort
 ```
 
 Do not solve a bridge failure by making a second real copy of `~/.agents`,
