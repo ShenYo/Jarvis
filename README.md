@@ -521,6 +521,13 @@ list the guard stops managing, leaves the settings on the next run. A
 settings file that is not valid JSON is refused and left as it is, and so is
 one that changes while the script runs.
 
+For a push, the hook works out where it goes the way git would: the
+`--repo` option, `pushRemote` and `pushDefault`, `pushurl`, `push.default`
+and configured push refspecs, and the remote's own default branch. A push to
+a repository in a scratch directory on this machine skips the checkpoint.
+When the hook cannot tell where a push goes, because the directory, the
+branch or the configuration is unknown, it asks.
+
 What this does not do. The hook reads the command it is given, not a script
 that command runs, and not a command a program builds at run time; in auto
 mode the classifier is the layer for those, and it is not deterministic. It

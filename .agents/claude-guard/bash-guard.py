@@ -25,8 +25,16 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
+import time
 
 MAX_DEPTH = 6
+MAX_ALIAS_DEPTH = 8
+
+# Every git lookup shares one budget, well inside the hook's 10 s timeout: a
+# hook that times out blocks the call, which is safe but unhelpful. A lookup
+# that runs out of budget answers "unknown", and unknown asks.
+DEADLINE = time.monotonic() + 6
 
 PROHIBITED = (
     "This is permanently prohibited for agents, even when the user asks. "
@@ -51,8 +59,29 @@ class Result:
 
 
 class Ctx:
-    def __init__(self, cwd):
+    """The shell's working directory as far as the analysis can follow it.
+    None means unknown: a bare push from an unknown place asks."""
+
+    def __init__(self, cwd, prev=None, stack=None):
         self.cwd = cwd
+        self.prev = prev
+        self.stack = list(stack or [])
+
+    def copy(self):
+        return Ctx(self.cwd, self.prev, self.stack)
+
+    def resolve(self, target):
+        if target in ("$OLDPWD", "${OLDPWD}"):
+            return self.prev
+        target = re.sub(r"^\$(HOME|\{HOME\})", "~", target)
+        if self.cwd is None and not target.startswith(("/", "~")):
+            return None
+        if "__SUBST__" in target or "$" in target or "`" in target:
+            return None
+        return os.path.normpath(os.path.join(self.cwd or "/", os.path.expanduser(target)))
+
+    def go(self, target):
+        self.prev, self.cwd = self.cwd, self.resolve(target)
 
 
 # --- reading the command --------------------------------------------------
@@ -111,6 +140,18 @@ def cut_substitutions(text, subs):
             out.append(text[i:i + 2])
             i += 2
             continue
+        if quote is None and text.startswith("$'", i):
+            j, raw = i + 2, []
+            while j < n and text[j] != "'":
+                step = 2 if text[j] == "\\" and j + 1 < n else 1
+                raw.append(text[j:j + step])
+                j += step
+            out.append(shlex.quote(ansi_c("".join(raw))))
+            i = j + 1
+            continue
+        if quote is None and text.startswith('$"', i):
+            i += 1  # a locale string reads as a plain double-quoted one
+            continue
         if quote is None and c == "'":
             quote = "'"
             out.append(c)
@@ -164,37 +205,78 @@ def cut_substitutions(text, subs):
     return "".join(out)
 
 
+def ansi_c(raw):
+    """Decode the body of a bash $'...' string the way bash would."""
+    try:
+        import codecs
+        return codecs.decode(raw.replace("\\'", "'").replace("\\e", "\\x1b"),
+                             "unicode_escape")
+    except Exception:
+        return raw
+
+
 SEPARATORS = {";", ";;", "&&", "||", "|", "|&", "&", "(", ")", "{", "}", "!"}
 REDIRECTS = {">", ">>", "<", "<>", ">&", "<&", "&>", "&>>", ">|"}
 KEYWORDS = {"then", "do", "else", "elif", "if", "while", "until", "time", "!"}
 
 
+OPERATORS = sorted(SEPARATORS | REDIRECTS | {"<<<"}, key=len, reverse=True)
+
+
+def split_operators(tokens):
+    """shlex returns a run of punctuation as one token: `);` or `)|`. Split
+    such a run into the operators it is made of, longest first."""
+    out = []
+    for t in tokens:
+        if t and not t.strip(";&|()<>") and t not in OPERATORS:
+            while t:
+                op = next((o for o in OPERATORS if t.startswith(o)), t[0])
+                out.append(op)
+                t = t[len(op):]
+        else:
+            out.append(t)
+    return out
+
+
 def segments(text):
+    """Split into simple commands. Yields (operator before it, words); a
+    subshell's parentheses come through as their own ("(", None) and
+    (")", None) so the caller can scope a cd inside one."""
     lex = shlex.shlex(text, posix=True, punctuation_chars=";&|()<>")
     lex.whitespace_split = True
     lex.commenters = ""
-    seg, segs = [], []
-    tokens = list(lex)
+    tokens = split_operators(list(lex))
+    seg, op, out = [], None, []
     k = 0
     while k < len(tokens):
         t = tokens[k]
+        nxt = tokens[k + 1] if k + 1 < len(tokens) else None
         if t in SEPARATORS:
             if seg:
-                segs.append(seg)
+                out.append((op, seg))
             seg = []
+            if t in ("(", ")"):
+                out.append((t, None))
+                op = None
+            else:
+                op = t
+        elif t.isdigit() and nxt in REDIRECTS:
+            pass  # the fd number in 2>/dev/null is not a word of the command
+        elif t == "<" and nxt is not None:
+            seg += ["__STDIN_FILE__", nxt]
+            k += 1
         elif t in REDIRECTS:
             k += 1  # its target
         elif t == "<<<":
-            if k + 1 < len(tokens):
-                seg.append("__HERESTRING__")
-                seg.append(tokens[k + 1])
+            if nxt is not None:
+                seg += ["__HERESTRING__", nxt]
             k += 1
         else:
             seg.append(t)
         k += 1
     if seg:
-        segs.append(seg)
-    return segs
+        out.append((op, seg))
+    return out
 
 
 def analyze_text(text, ctx, res, depth=0, bodies=None):
@@ -212,9 +294,52 @@ def analyze_text(text, ctx, res, depth=0, bodies=None):
     subs = []
     text = cut_substitutions(text, subs)
     for sub in subs:
-        analyze_text(sub, ctx, res, depth + 1, bodies)
-    for seg in segments(text):
-        analyze_argv(seg, ctx, res, depth, bodies)
+        analyze_text(sub, ctx.copy(), res, depth + 1, bodies)
+    outer, prev = [], None
+    for op, seg in segments(text):
+        if op == "(":
+            outer.append(ctx)
+            ctx, prev = ctx.copy(), None
+            continue
+        if op == ")":
+            ctx, prev = (outer.pop() if outer else ctx), None
+            continue
+        piped = piped_text(prev, ctx, bodies) if op in ("|", "|&") and prev else []
+        analyze_argv(seg, ctx, res, depth, bodies, piped)
+        prev = seg
+
+
+def piped_text(seg, ctx, bodies):
+    """What a command writes to the next one in a pipeline, where it can be
+    read without running anything: a heredoc, echo or printf arguments, or
+    the files cat reads."""
+    out = list(heredoc_bodies(seg, bodies)) + stdin_files(seg, ctx)
+    try:
+        argv = unwrap(plain_args(seg), Result())
+    except ValueError:
+        return out
+    if not argv:
+        return out
+    name, args = os.path.basename(argv[0]), argv[1:]
+    if name == "echo":
+        out.append(" ".join(a for a in args if not re.match(r"^-[neE]+$", a)))
+    elif name == "printf":
+        out.extend(a.replace("\\n", "\n") for a in args)
+    elif name == "cat":
+        for a in args:
+            if not a.startswith("-"):
+                body = read_small(a, ctx.cwd)
+                out.append(body if body is not None else "")
+    return out
+
+
+def stdin_files(seg, ctx):
+    out = []
+    for k, a in enumerate(seg):
+        if a == "__STDIN_FILE__" and k + 1 < len(seg):
+            body = read_small(seg[k + 1], ctx.cwd)
+            out.append(body if body is not None else "")
+    return out
 
 
 # --- commands ---------------------------------------------------------------
@@ -252,13 +377,73 @@ def plain_args(argv):
         if skip:
             skip = False
             continue
-        if a == "__HERESTRING__":
+        if a in ("__HERESTRING__", "__STDIN_FILE__"):
             skip = True
             continue
         if re.match(r"^__HEREDOC_\d+__$", a):
             continue
         out.append(a)
     return out
+
+
+# Wrappers that run the command after their own options, and which of those
+# options take a value (short options may also carry it attached: -n1, -oL).
+WRAPPERS = {
+    "command": ("", ()), "builtin": ("", ()), "nohup": ("", ()),
+    "noglob": ("", ()), "time": ("", ()),
+    "exec": ("a", ()),
+    "sudo": ("ugCDhprtUTR", ("--user", "--group", "--close-from", "--chdir", "--host",
+                             "--prompt", "--role", "--type", "--other-user",
+                             "--command-timeout", "--chroot")),
+    "doas": ("uC", ()),
+    "nice": ("n", ("--adjustment",)),
+    "timeout": ("sk", ("--signal", "--kill-after")),
+    "stdbuf": ("ioe", ("--input", "--output", "--error")),
+    "xargs": ("InPLdEsa", ("--max-args", "--max-procs", "--max-lines", "--delimiter",
+                            "--eof", "--max-chars", "--arg-file", "--replace", "--process-slot-var")),
+    "env": ("uCS", ("--unset", "--chdir", "--split-string")),
+}
+
+
+def strip_options(name, argv, res):
+    """Drop a wrapper's own options; return (rest, value of env -S or None)."""
+    short_vals, long_vals = WRAPPERS[name]
+    split = None
+    while argv:
+        a = argv[0]
+        if a == "--":
+            return argv[1:], split
+        if name == "env" and a == "-":
+            argv = argv[1:]
+            continue
+        if name == "env" and ASSIGN.match(a):
+            m = ASSIGN.match(a)
+            check_assignment(m.group(1), m.group(2), res)
+            argv = argv[1:]
+            continue
+        if name == "nice" and re.match(r"^-\d+$", a):
+            argv = argv[1:]
+            continue
+        if a.startswith("--") and len(a) > 2:
+            opt, eq, val = a.partition("=")
+            if opt in long_vals and not eq:
+                val, argv = (argv[1] if len(argv) > 1 else ""), argv[1:]
+            if opt == "--split-string":
+                split = val
+            argv = argv[1:]
+            continue
+        if a.startswith("-") and len(a) > 1:
+            letter = a[1]
+            if letter in short_vals:
+                val = a[2:] if len(a) > 2 else (argv[1] if len(argv) > 1 else "")
+                argv = argv[1:] if len(a) > 2 else argv[2:]
+                if letter == "S" and name == "env":
+                    split = val
+            else:
+                argv = argv[1:]
+            continue
+        return argv, split
+    return argv, split
 
 
 def unwrap(argv, res):
@@ -270,82 +455,46 @@ def unwrap(argv, res):
             argv = argv[1:]
             continue
         name = os.path.basename(argv[0])
-        if name in ("command", "builtin", "exec", "nohup", "noglob", "time", "sudo", "doas"):
-            argv = argv[1:]
-            while argv and argv[0].startswith("-"):
-                if name in ("sudo", "doas") and argv[0] in ("-u", "-g", "-C", "-D", "-h", "-p", "-r", "-t"):
-                    argv = argv[1:]
-                argv = argv[1:]
-            continue
-        if name == "env":
-            argv = argv[1:]
-            while argv:
-                a = argv[0]
-                if a in ("-u", "--unset", "-C", "--chdir"):
-                    argv = argv[2:]
-                elif a in ("-S", "--split-string") and len(argv) > 1:
-                    return shlex.split(argv[1]) + argv[2:]
-                elif a.startswith("-"):
-                    argv = argv[1:]
-                elif ASSIGN.match(a):
-                    mm = ASSIGN.match(a)
-                    check_assignment(mm.group(1), mm.group(2), res)
-                    argv = argv[1:]
-                else:
-                    break
-            continue
-        if name == "nice":
-            argv = argv[1:]
-            if argv and argv[0] == "-n":
-                argv = argv[2:]
-            elif argv and re.match(r"^-\d+$", argv[0]):
-                argv = argv[1:]
-            continue
-        if name == "timeout":
-            argv = argv[1:]
-            while argv and argv[0].startswith("-"):
-                argv = argv[2:] if argv[0] in ("-s", "--signal", "-k", "--kill-after") else argv[1:]
+        if name not in WRAPPERS:
+            return argv
+        argv, split = strip_options(name, argv[1:], res)
+        if split is not None:
+            argv = shlex.split(split) + argv  # and unwrap what it split, too
+        if name == "timeout" and argv:
             argv = argv[1:]  # the duration
-            continue
-        if name == "stdbuf":
-            argv = argv[1:]
-            while argv and argv[0].startswith("-"):
-                argv = argv[2:] if argv[0] in ("-i", "-o", "-e") else argv[1:]
-            continue
-        if name == "xargs":
-            argv = argv[1:]
-            while argv and argv[0].startswith("-"):
-                takes = argv[0] in ("-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a")
-                argv = argv[2:] if takes else argv[1:]
-            continue
-        return argv
+        if argv and argv[0].startswith("-"):
+            raise ValueError("unrecognised %s option %s" % (name, argv[0]))
     return argv
 
 
-def analyze_argv(argv, ctx, res, depth, bodies):
+def analyze_argv(argv, ctx, res, depth, bodies, piped=()):
     while argv and argv[0] in KEYWORDS:
         argv = argv[1:]
     if not argv or argv[0] in ("for", "case", "select", "function"):
         return
-    attached = heredoc_bodies(argv, bodies)
+    stdin = heredoc_bodies(argv, bodies) + stdin_files(argv, ctx) + list(piped)
     argv = unwrap(plain_args(argv), res)
     if not argv:
         return
     name = os.path.basename(argv[0])
     args = argv[1:]
 
-    if name == "cd":
-        target = args[0] if args else os.path.expanduser("~")
-        if target != "-":
-            ctx.cwd = os.path.normpath(os.path.join(ctx.cwd, os.path.expanduser(target)))
+    if name in ("cd", "pushd", "popd"):
+        follow_cd(name, [a for a in args if a not in ("-P", "-L", "-e", "-@")], ctx)
         return
     if name in SHELLS:
-        code = shell_c(args)
-        for text in ([code] if code is not None else []) + (attached if code is None else []):
-            analyze_text(text, ctx, res, depth + 1)
+        mode, code = shell_mode(args)
+        texts = [code] if mode == "c" else (stdin if mode == "stdin" else [])
+        for text in texts:
+            analyze_text(text, ctx.copy(), res, depth + 1)
         return
-    if name in ("eval", "trap"):
-        analyze_text(args[0] if name == "trap" and args else " ".join(args), ctx, res, depth + 1)
+    if name == "eval":
+        analyze_text(" ".join(args), ctx, res, depth + 1)
+        return
+    if name == "trap":
+        action = [a for a in args if a != "--" and not re.match(r"^-[lp]$", a)]
+        if action:
+            analyze_text(action[0], ctx.copy(), res, depth + 1)
         return
     if name in ("export", "declare", "typeset", "local", "readonly"):
         for a in args:
@@ -354,29 +503,63 @@ def analyze_argv(argv, ctx, res, depth, bodies):
                 check_assignment(m.group(1), m.group(2), res)
         return
     if INTERPRETERS.match(name):
-        for code in interpreter_code(args) + attached:
+        inline = interpreter_code(args)
+        reads_stdin = not inline and not [a for a in args if not a.startswith("-")] or "-" in args
+        for code in inline + (stdin if reads_stdin else []):
             analyze_code(code, ctx, res, depth + 1)
         return
     if name == "git":
         analyze_git(args, ctx, res, depth)
     elif name == "gh":
-        analyze_gh(args, ctx, res)
+        analyze_gh(args, ctx, res, stdin)
     elif name == "rm":
         analyze_rm(args, res)
     elif name == "find":
         analyze_find(args, ctx, res, depth, bodies)
 
 
-def shell_c(args):
-    for k, a in enumerate(args):
+def follow_cd(name, args, ctx):
+    if name == "popd":
+        ctx.prev, ctx.cwd = ctx.cwd, (ctx.stack.pop() if ctx.stack else None)
+    elif name == "pushd":
+        if not args or args[0].startswith(("+", "-")):
+            ctx.prev, ctx.cwd = ctx.cwd, None  # a rotation the analysis does not follow
+        else:
+            ctx.stack.append(ctx.cwd)
+            ctx.go(args[0])
+    elif not args:
+        ctx.go("~")
+    elif args[0] == "-":
+        ctx.prev, ctx.cwd = ctx.cwd, ctx.prev
+    else:
+        ctx.go(args[0])
+
+
+SHELL_VALUE_OPTIONS = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
+
+
+def shell_mode(args):
+    """("c", code) for sh -c CODE, ("stdin", None) when the shell reads its
+    commands from standard input, ("script", path) when it runs a file."""
+    k = 0
+    while k < len(args):
+        a = args[k]
+        if a in SHELL_VALUE_OPTIONS:
+            k += 2
+            continue
         if a == "--":
-            return None
+            return ("script", args[k + 1]) if k + 1 < len(args) else ("stdin", None)
         if re.match(r"^-[A-Za-z]*c[A-Za-z]*$", a):
-            rest = [x for x in args[k + 1:] if not x.startswith("-")]
-            return rest[0] if rest else None
+            j = k + 1
+            while j < len(args) and args[j].startswith(("-", "+")):
+                j += 2 if args[j] in SHELL_VALUE_OPTIONS else 1
+            return ("c", args[j]) if j < len(args) else ("stdin", None)
+        if re.match(r"^-[A-Za-z]*s[A-Za-z]*$", a):
+            return "stdin", None
         if not a.startswith(("-", "+")):
-            return None
-    return None
+            return "script", a
+        k += 1
+    return "stdin", None
 
 
 def interpreter_code(args):
@@ -512,16 +695,25 @@ def git_config_key(key, res, persistent=False, unset=False):
 
 
 def run_git(directory, *args):
+    left = DEADLINE - time.monotonic()
+    if directory is None or left <= 0:
+        return None
     try:
         p = subprocess.run(["git", "-C", directory] + list(args),
-                           capture_output=True, text=True, timeout=3)
+                           capture_output=True, text=True, timeout=min(2.0, left))
         return p.stdout.strip() if p.returncode == 0 else None
     except Exception:
         return None
 
 
-def analyze_git(args, ctx, res, depth, alias_depth=0):
+def git_lines(directory, *args):
+    out = run_git(directory, *args)
+    return [line for line in (out or "").split("\n") if line]
+
+
+def analyze_git(args, ctx, res, depth, alias_depth=0, overrides=None):
     directory = ctx.cwd
+    overrides = dict(overrides or {})  # -c settings, which aliases can come from
     k = 0
     while k < len(args) and args[k].startswith("-"):
         a = args[k]
@@ -530,9 +722,11 @@ def analyze_git(args, ctx, res, depth, alias_depth=0):
             val = args[k + 1] if k + 1 < len(args) else ""
             k += 1
         if name == "-C":
-            directory = os.path.normpath(os.path.join(directory, os.path.expanduser(val)))
+            directory = Ctx(directory).resolve(val)
         elif name == "-c":
-            git_config_key(val.partition("=")[0], res)
+            key, _, value = val.partition("=")
+            overrides[key.lower()] = value
+            git_config_key(key, res)
         elif name == "--config-env":
             git_config_key(val.partition("=")[0], res)
         k += 1
@@ -541,13 +735,20 @@ def analyze_git(args, ctx, res, depth, alias_depth=0):
     sub, rest = args[k], args[k + 1:]
 
     if sub not in GIT_BUILTINS:
-        alias = run_git(directory, "config", "--get", "alias." + sub)
-        if alias and alias_depth < 4:
-            if alias.startswith("!"):
-                analyze_text(alias[1:] + " " + " ".join(shlex.quote(r) for r in rest),
-                             Ctx(directory), res, depth + 1)
-            else:
-                analyze_git(shlex.split(alias) + rest, Ctx(directory), res, depth, alias_depth + 1)
+        key = "alias." + sub.lower()
+        alias = overrides[key] if key in overrides else run_git(directory, "config", "--get", key)
+        if not alias:
+            return
+        if alias_depth >= MAX_ALIAS_DEPTH:
+            res.no("git alias %s is %d aliases deep, deeper than the guard follows"
+                   % (sub, alias_depth))
+            return
+        if alias.startswith("!"):
+            analyze_text(alias[1:] + " " + " ".join(shlex.quote(r) for r in rest),
+                         Ctx(directory), res, depth + 1)
+        else:
+            analyze_git(shlex.split(alias) + rest, Ctx(directory), res, depth,
+                        alias_depth + 1, overrides)
         return
 
     o = parse(rest, *GIT_VALUES.get(sub, ("", ())))
@@ -588,7 +789,9 @@ def push_rule(o, directory, res):
         res.no("git push --delete deletes a remote ref")
     if has_long(o, "--prune", len("--pru")):
         res.no("git push --prune deletes remote refs")
-    refspecs = o.pos[1:]
+    repo_opt = [v for n, v in o.long if n == "--repo" and v]
+    remote = repo_opt[-1] if repo_opt else (o.pos[0] if o.pos else None)
+    refspecs = o.pos if repo_opt else o.pos[1:]
     if has_long(o, "--dry-run", 4) or "n" in o.short:
         return  # a dry run sends nothing
     for spec in refspecs:
@@ -596,45 +799,97 @@ def push_rule(o, directory, res):
             res.no("a +refspec force-pushes")
         if spec.startswith(":"):
             res.no("pushing an empty source deletes the remote ref %s" % spec[1:])
-    if local_remote(directory, o.pos[0] if o.pos else None):
-        return  # the checkpoint guards a shared remote, not a sandbox on this disk
-    defaults = default_branches(directory)
+    current = run_git(directory, "symbolic-ref", "--short", "-q", "HEAD")
+    if remote is None:
+        remote = push_remote(directory, current)
+    if sandbox_remote(directory, remote):
+        return  # the checkpoint guards a shared remote, not a scratch repo
+    defaults = default_branches(directory, remote)
     if has_long(o, "--all", len("--al")) or has_long(o, "--branches", len("--br")):
         res.check("git push --all pushes the default branch too")
-    if not refspecs:
-        current = run_git(directory, "symbolic-ref", "--short", "-q", "HEAD")
-        if current is None or current in defaults:
-            res.check("a bare git push from %s pushes the default branch"
-                      % (current or "an unknown branch"))
         return
+    if not refspecs:
+        refspecs = bare_push_refspecs(directory, remote, current)
+        if refspecs is None:
+            res.check("a bare git push from %s may push the default branch"
+                      % (current or "an unknown branch"))
+            return
     for spec in refspecs:
         dest = spec.lstrip("+").split(":")[-1]
-        if dest == "HEAD":
-            dest = run_git(directory, "symbolic-ref", "--short", "-q", "HEAD") or "HEAD"
+        if dest in ("HEAD", "@"):
+            dest = current or "HEAD"
         dest = re.sub(r"^refs/heads/", "", dest)
-        if dest in defaults:
-            res.check("git push to the default branch %s bypasses the pull request" % dest)
+        if dest in defaults or dest in ("HEAD", "") or "*" in dest:
+            res.check("git push to %s may update the default branch, which bypasses "
+                      "the pull request" % (dest or "every matching branch"))
 
 
-def local_remote(directory, remote):
-    """True when the push goes to a repository on this machine."""
-    if remote is None:
-        branch = run_git(directory, "symbolic-ref", "--short", "-q", "HEAD")
-        remote = (branch and run_git(directory, "config", "--get", "branch.%s.remote" % branch)) or "origin"
-    url = run_git(directory, "config", "--get", "remote.%s.url" % remote) or remote
-    if url.startswith("file://"):
-        return True
-    if re.match(r"^[\w.+-]+://", url) or re.match(r"^[^/]*@[^/]*:", url):
-        return False
-    path = os.path.join(directory, os.path.expanduser(url))
-    return os.path.isdir(path)
+def push_remote(directory, branch):
+    """The remote a bare push goes to, in git's order of precedence."""
+    for key in (["branch.%s.pushRemote" % branch] if branch else []) + ["remote.pushDefault"] + (
+            ["branch.%s.remote" % branch] if branch else []):
+        value = run_git(directory, "config", "--get", key)
+        if value:
+            return value
+    return "origin"
 
 
-def default_branches(directory):
+def bare_push_refspecs(directory, remote, current):
+    """The refspecs a push with none on the command line uses, or None when
+    the analysis cannot tell."""
+    configured = git_lines(directory, "config", "--get-all", "remote.%s.push" % remote)
+    if configured:
+        return configured
+    mode = run_git(directory, "config", "--get", "push.default") or "simple"
+    if mode == "nothing":
+        return []
+    if current is None:
+        return None
+    if mode == "matching":
+        return [":"]
+    if mode in ("upstream", "tracking"):
+        merge = run_git(directory, "config", "--get", "branch.%s.merge" % current)
+        return [current + ":" + merge] if merge else None
+    return [current]
+
+
+SCRATCH_ROOTS = None
+
+
+def scratch_roots():
+    global SCRATCH_ROOTS
+    if SCRATCH_ROOTS is None:
+        roots = {tempfile.gettempdir(), os.environ.get("TMPDIR") or "",
+                 os.environ.get("CLAUDE_JOB_DIR") or "", "/tmp", "/var/tmp",
+                 "/private/tmp", "/private/var/folders", "/var/folders"}
+        SCRATCH_ROOTS = {os.path.realpath(r) for r in roots if r}
+    return SCRATCH_ROOTS
+
+
+def sandbox_remote(directory, remote):
+    """True when every URL the push goes to is a repository in a scratch
+    directory on this machine. A path elsewhere on disk may be a shared
+    mount, and is treated like any other remote."""
+    urls = git_lines(directory, "config", "--get-all", "remote.%s.pushurl" % remote) or \
+        git_lines(directory, "config", "--get-all", "remote.%s.url" % remote) or [remote]
+    for url in urls:
+        path = url[len("file://"):] if url.startswith("file://") else url
+        if re.match(r"^[\w.+-]+://", path) or re.match(r"^[^/]*@[^/]*:", path) or directory is None:
+            return False
+        path = os.path.realpath(os.path.join(directory, os.path.expanduser(path)))
+        if not os.path.isdir(path):
+            return False
+        if not any(path == r or path.startswith(r + os.sep) for r in scratch_roots()):
+            return False
+    return True
+
+
+def default_branches(directory, remote="origin"):
     names = {"main", "master"}
-    head = run_git(directory, "symbolic-ref", "-q", "refs/remotes/origin/HEAD")
-    if head:
-        names.add(head.split("/")[-1])
+    prefix = "refs/remotes/%s/" % remote
+    head = run_git(directory, "symbolic-ref", "-q", prefix + "HEAD")
+    if head and head.startswith(prefix):
+        names.add(head[len(prefix):])
     return names
 
 
@@ -725,6 +980,17 @@ def config_rule(o, directory, res):
     write = unset or verb in ("set", "rename-section") or any(
         n in ("--replace-all", "--add", "--rename-section") for n, _ in o.long) or (
         verb is None and len(keys) >= 2)
+    if verb == "edit" or "e" in o.short or has_long(o, "--edit", 4):
+        res.check("editing the Git config by hand can change hooks or remotes")
+    section_op = verb in ("rename-section", "remove-section") or any(
+        n in ("--rename-section", "--remove-section") for n, _ in o.long)
+    if section_op and keys:
+        section = keys[0].lower()
+        if section == "core":
+            res.no("removing or renaming the core section unsets core.hooksPath")
+        elif section.startswith(("remote.", "url.")) or section in ("remote", "url"):
+            res.no("removing or renaming a remote or url section rewrites a remote")
+        return
     if write and keys:
         value = keys[1] if len(keys) > 1 else ""
         off = value in ("/dev/null", "") and not unset
@@ -764,7 +1030,7 @@ GIT_RULES = {
 
 # --- gh -----------------------------------------------------------------------
 
-GRAPHQL_DENY = re.compile(r"\b(deleteRef|deleteRepository|deleteBranchProtectionRule)\b")
+GRAPHQL_DENY = re.compile(r"\bdelete[A-Z]\w*")
 GRAPHQL_ASK = re.compile(
     r"\b(mergePullRequest|enablePullRequestAutoMerge|enqueuePullRequest|"
     r"closePullRequest|reopenPullRequest|updateRepository|"
@@ -775,7 +1041,7 @@ REPO_SETTINGS = re.compile(
     r"actions/permissions|transfer|topics|branches/[^/]+/(protection|rename))(/.*)?)?$")
 
 
-def analyze_gh(args, ctx, res):
+def analyze_gh(args, ctx, res, stdin=()):
     o = parse(args, "RXfFHqtpb", ("--repo", "--method", "--field", "--raw-field",
                                     "--header", "--input", "--jq", "--template",
                                     "--hostname", "--body", "--body-file", "--subject",
@@ -808,7 +1074,7 @@ def analyze_gh(args, ctx, res):
     elif group == "workflow" and action == "disable":
         res.check("gh workflow disable turns a check off")
     elif group == "api":
-        analyze_gh_api(args, o, res)
+        analyze_gh_api(args, o, res, ctx, stdin)
 
 
 def gh_short_value(args, flag):
@@ -818,9 +1084,10 @@ def gh_short_value(args, flag):
     return ""
 
 
-def analyze_gh_api(args, o, res):
+def analyze_gh_api(args, o, res, ctx, stdin=()):
     method = None
     fields = []
+    unread = []
     k = 0
     while k < len(args):
         a = args[k]
@@ -837,17 +1104,31 @@ def analyze_gh_api(args, o, res):
             k += 1
         elif a.startswith(("--field=", "--raw-field=")):
             fields.append(a.split("=", 1)[1])
-        elif a == "--input":
-            fields.append(read_small(nxt))
-            k += 1
+        elif a == "--input" or a.startswith("--input="):
+            path = nxt if a == "--input" else a.split("=", 1)[1]
+            k += 1 if a == "--input" else 0
+            body = "\n".join(stdin) if path == "-" else read_small(path, ctx.cwd)
+            if body is None or (path == "-" and not stdin):
+                unread.append(path)
+            fields.append(body or "")
         k += 1
+    for k, f in enumerate(fields):
+        name, eq, value = f.partition("=")
+        if eq and value.startswith("@"):
+            body = "\n".join(stdin) if value == "@-" else read_small(value[1:], ctx.cwd)
+            if body is None:
+                unread.append(value[1:])
+            fields[k] = name + "=" + (body or "")
     method = (method or ("POST" if fields else "GET")).upper()
     endpoint = o.pos[1] if len(o.pos) > 1 else ""
     endpoint = endpoint.lstrip("/").split("?")[0]
-    body = "\n".join(f if not f.startswith("query=@") else read_small(f[7:]) for f in fields)
+    body = "\n".join(fields)
     if method == "DELETE":
         res.no("a GitHub API DELETE request")
         return
+    if unread and (endpoint == "graphql" or method != "GET"):
+        res.check("the request body (%s) could not be read, so it was not checked"
+                  % ", ".join(unread))
     if endpoint == "graphql":
         if GRAPHQL_DENY.search(body):
             res.no("the GraphQL mutation deletes a ref, repository or protection rule")
@@ -866,18 +1147,23 @@ def analyze_gh_api(args, o, res):
         res.check("the API call closes or reopens a pull request")
     if re.search(r"git/refs/", endpoint) and re.search(r"force=true", body):
         res.no("the API call force-updates a ref")
+    if re.search(r"git/refs/heads/(main|master)$", endpoint):
+        res.check("the API call updates the default branch directly")
     if REPO_SETTINGS.match(endpoint):
         res.check("the API call changes repository settings or protection")
 
 
-def read_small(path):
+def read_small(path, cwd=None):
+    """The file's text, or None when it cannot be read or is too large to
+    be a request body: the caller decides what not knowing means."""
     try:
-        if os.path.getsize(path) < 262144:
-            with open(path, encoding="utf-8", errors="replace") as fh:
+        full = os.path.join(cwd or os.getcwd(), os.path.expanduser(path))
+        if os.path.getsize(full) < 262144:
+            with open(full, encoding="utf-8", errors="replace") as fh:
                 return fh.read()
     except Exception:
         pass
-    return ""
+    return None
 
 
 # --- rm, find -----------------------------------------------------------------

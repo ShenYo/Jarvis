@@ -479,6 +479,12 @@ repository 的機器上，session 仍然保有 guard。使用者自己寫的規�
 guard 不再管理的整個清單，下次執行時才會從 settings 裡拿掉。settings 檔不是
 合法 JSON，或在 script 執行期間被修改時，script 會拒絕並保持原狀。
 
+遇到 push 時，hook 會用 git 自己的方式判斷它推到哪裡：`--repo` 選項、
+`pushRemote` 與 `pushDefault`、`pushurl`、`push.default` 與設定好的 push
+refspec，以及 remote 自己的 default branch。推到這台機器暫存目錄裡的
+repository 不需要經過關卡。如果目錄、branch 或設定無法確定，hook 就判斷不出
+push 的去向，這時它會跳出 prompt。
+
 它做不到的事。hook 讀的是交給它的那條指令，不會讀那條指令執行的 script，
 也看不到程式在執行時才組出來的指令；在 auto mode 下，負責這些的是
 classifier，而它的判斷不是確定性的。對 `python -c`、`node -e` 這類程式碼，
