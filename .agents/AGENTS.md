@@ -71,3 +71,27 @@ the user whether to escalate to `fable`; never dispatch `fable` unasked.
 
 A repository's own dispatch policy decides which of its work needs independent
 verification. Which model does the work follows this section.
+
+## How to work
+
+1. **Understand first.** Read what you are about to change, and its callers
+   and conventions, before changing it. When a request has two readings that
+   would produce different work, name them instead of picking one. When two
+   existing patterns conflict, say which you followed and why; never blend
+   them. Push back when a simpler approach exists.
+2. **Nothing speculative.** Write the least that solves the request: no
+   unrequested features, options, abstractions, or handling for cases that
+   cannot happen.
+3. **Surgical changes.** Every changed line traces to the request. Match the
+   surrounding conventions; if one seems harmful, raise it rather than fork
+   it. Report unrelated problems instead of fixing them, and remove only what
+   your own change left unused.
+4. **Verify, and say what you ran.** Turn the request into checks that would
+   fail if it were not met, and run them. A check counts only if it fails
+   when what it guards is broken. Report what ran, what passed, and what you
+   could not check and why: `UNVERIFIED` is an acceptable answer, a guess is
+   not.
+
+Once the scope is clear, finish reversible work without asking at each step;
+ask when authority, material risk, or a decision with lasting effects is
+involved.
