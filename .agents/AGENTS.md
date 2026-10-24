@@ -37,6 +37,13 @@ pull request bodies and code comments, and the instruction files loaded on
 every turn (this file, a `CLAUDE.md`, a Skill's `SKILL.md`), where each line
 costs context.
 
+## Written rules win over auto memory
+
+Auto memory holds notes from earlier sessions, and a note can outlive the rule
+it recorded. When a memory disagrees with this file or with a repository's
+own rules, follow the files, and correct the memory or point out the
+disagreement.
+
 ## Git in a repository without its own rules
 
 A repository's own Git guideline always wins. Where a repository has none,
