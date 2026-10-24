@@ -3,7 +3,7 @@
 [English](./README.md) · **繁體中文**
 
 > **繁中摘要**：Jarvis 是這台機器的個人 AI agent Skills 版本庫。它讓
-> `~/.Jarvis/agents` 成為唯一 canonical copy，透過 `~/.agents` 與 Claude
+> `~/.Jarvis/.agents` 成為唯一 canonical copy，透過 `~/.agents` 與 Claude
 > Code／Codex 的 symlink 共用；它也提供 Friday 基線的安全採用 wrapper。專案
 > 本身必須不依賴 Jarvis 仍可重現。
 
@@ -47,7 +47,7 @@ runner 或別人的筆電上沒有這個 repository 的副本。因此專案所�
 > 名稱的個人 Skill 優先只屬 owner policy，不能當作任何 runtime 的載入保證。
 
 Jarvis 始終是個人、可選的那一層；專案必需的成果必須活在專案自身控制的文件、
-測試或自動化裡。[TDD](./agents/skills/tdd/)、[Wayfinder](./agents/skills/wayfinder/)
+測試或自動化裡。[TDD](./.agents/skills/tdd/)、[Wayfinder](./.agents/skills/wayfinder/)
 及其他類似的個人 helper 可以協助工作，但它們的缺席絕不能阻擋 consumer
 project。
 
@@ -78,18 +78,18 @@ bridge。
 
 Claude bridge 目錄中另有一個 `synced` 項目。它是真實目錄而非 symlink，屬於
 其他工具，因此 bridge 腳本刻意不去動它。
-[`setup-project-agents`](./agents/skills/setup-project-agents/) 則是唯一沒有
+[`setup-project-agents`](./.agents/skills/setup-project-agents/) 則是唯一沒有
 lock entry 的 canonical Skill。
 
 ```sh
-find ~/.Jarvis/agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f | wc -l
+find ~/.Jarvis/.agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f | wc -l
 find ~/.claude/skills -maxdepth 1 -type l | wc -l
 find "${CODEX_HOME:-$HOME/.codex}/skills" -maxdepth 1 -type l | wc -l
-jq '.skills | length' ~/.Jarvis/agents/.skill-lock.json
+jq '.skills | length' ~/.Jarvis/.agents/.skill-lock.json
 comm -23 \
-  <(find ~/.Jarvis/agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f \
+  <(find ~/.Jarvis/.agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f \
     -exec sed -n 's/^name:[[:space:]]*//p' {} \; | sort) \
-  <(jq -r '.skills | keys[]' ~/.Jarvis/agents/.skill-lock.json | sort)
+  <(jq -r '.skills | keys[]' ~/.Jarvis/.agents/.skill-lock.json | sort)
 ```
 
 ## 架構與版面配置
@@ -97,7 +97,8 @@ comm -23 \
 ```
 AGENTS.md                    rules for an agent working in this repository
 CLAUDE.md                    a pointer that imports AGENTS.md
-agents/
+.agents/                     reached as ~/.agents
+  AGENTS.md                  personal instructions for every project
   skills/<name>/SKILL.md     canonical skill content
   .skill-lock.json           what the skills CLI installed, and from where
 sync-personal-skills.sh      ensures the Claude bridge directory and
@@ -110,16 +111,40 @@ vendored、屬於上游的 CLI，其中兩個與 Friday 基線衝突，而那些
 repository。例外是 Git 規則，那些跟著 hook 一起來：那三個 hook 是 Friday 的逐位元組
 副本，所以它們強制的規則就是 Friday 的文字，也隨 hook 一起改變。
 
-`agents/` 才是真正的內容。這個 repo 以外的一切都只是指向它的 symlink，因此每個
+**有兩個檔案都叫 `AGENTS.md`，範圍不同。** 根目錄那份是給「在這個 repository 裡
+工作」的 agent；`.agents/` 裡那份是給**每一個專案**的：
+[`.agents/AGENTS.md`](./.agents/AGENTS.md) 放的是個人規則（例如回覆語系跟著使用者
+的輸入），bridge 會把它連結成 `~/.claude/CLAUDE.md`，Claude Code 不論從哪裡啟動的
+session 都會載入它。在它出現之前，語系規則只存在兩個專案的 auto memory 裡，所以從
+其他地方啟動的 session 會用英文回覆。這份檔案要保持精簡（每個 session 的每一回合都
+會載入），只跟單一 repository 有關的規則請放在那個 repository 裡。
+
+目錄名稱是 `.agents/` 而不是 `agents/`，是為了對齊它被存取時的名稱 `~/.agents`。
+bridge 會把仍然指向舊位置 `.Jarvis/agents` 的 `~/.agents` 遷移過去，而且只處理那
+一個確切的 target。
+
+要回退到改名之前的版本，必須先做反向的那一步，因為舊版的 bridge 要求 `~/.agents`
+指向 `.Jarvis/agents`，其他一律拒絕：
+
+```sh
+git -C ~/.Jarvis checkout <older revision>
+ln -sfn .Jarvis/agents ~/.agents
+~/.Jarvis/sync-personal-skills.sh
+```
+
+所有 skill link 都經過 `~/.agents` 解析，所以它們會跟著一起恢復。舊版 bridge 不管理
+`~/.claude/CLAUDE.md`，會留下那個懸空的 link；把它移除，或還原成原本的內容。
+
+`.agents/` 才是真正的內容。這個 repo 以外的一切都只是指向它的 symlink，因此每個
 skill 永遠只有一份副本。
 
-`~/.agents` **必須是指向 `~/.Jarvis/agents` 的 symlink**。它是 Claude 與 Codex
+`~/.agents` **必須是指向 `~/.Jarvis/.agents` 的 symlink**。它是 Claude 與 Codex
 bridge links 解析時所依賴的穩定位址。
 
 一個 skill 是「包含 `SKILL.md` 的目錄」——不只是任何目錄。Skills 可以被歸在
 一個本身沒有 `SKILL.md` 的 container 下方、低一層的位置；這個 container 不會
 被 link，但裡面的 skills 會。link 的名稱來自各個 skill 的 `name:` frontmatter，
-也是工具用來比對的依據，所以 `agents/skills/git/commit/`（`name: git-commit`）
+也是工具用來比對的依據，所以 `.agents/skills/git/commit/`（`name: git-commit`）
 會被 link 成 `~/.claude/skills/git-commit`。目前這個 repo 裡沒有任何巢狀結構；
 之所以支援這種寫法，是因為 pet_care 用這種方式把它的四個 git skills 分組，而
 曾經有一支假設「一個 skill 對應一個目錄」的腳本，結果同時把那個無法載入的
@@ -128,10 +153,11 @@ container link 了出去，也把真正的 skills 藏在裡面。
 ## Symlink 鏈
 
 ```
-~/.agents                 -> .Jarvis/agents
+~/.agents                 -> .Jarvis/.agents
 ~/.claude/skills/<name>   -> ../../.agents/skills/<name>
 ${CODEX_HOME:-$HOME/.codex}/skills/<name>
                            -> ../../.agents/skills/<name>
+~/.claude/CLAUDE.md       -> ../.agents/AGENTS.md
 ```
 
 兩段 hop，而且第二段才是關鍵：`~/.claude/skills/<name>` 把 `../../` 解析回
@@ -147,7 +173,7 @@ ${CODEX_HOME:-$HOME/.codex}/skills/<name>
 ## 沒有東西需要同步
 
 `~/.agents` 是一個 symlink，不是一份副本。`~/.agents/skills/foo/SKILL.md` 和
-`~/.Jarvis/agents/skills/foo/SKILL.md` 是同一個 inode——一份檔案有兩個名字。
+`~/.Jarvis/.agents/skills/foo/SKILL.md` 是同一個 inode——一份檔案有兩個名字。
 透過任一路徑編輯都是在編輯同一批 bytes，而這個 repo 裡的 `git status` 會立刻
 看到。兩者不可能漂移，因為本來就只有一份。
 
@@ -192,16 +218,23 @@ Claude/Codex bridge 目錄。
 對於新專案，請從另外一份經過審查、乾淨的 Friday checkout 來 bootstrap 這份
 可攜式 baseline；不要把 Jarvis 的 Skills 複製進專案裡。位於 `~/.agents` 下的
 可選 Skill
-[`setup-project-agents`](./agents/skills/setup-project-agents/) 只是一個
+[`setup-project-agents`](./.agents/skills/setup-project-agents/) 只是一個
 方便用的 wrapper，用於空白專案的 Friday 採用，並不是這個手動流程、或任何
 consumer project 的前提條件。
 
 每一個 Skill 都被這個 repository 追蹤，所以 clone 加上 bridge 就是完整的設定：執行
 期不需要抓取任何東西才能讓 Skill 可用，執行它們也不需要 Skills CLI。需要它的時機有
 兩個：之後要安裝或更新 CLI-managed Skill 時，見[CLI-managed 與本地維護的內容](#cli-managed-與本地維護的內容)；
-以及某一個 Skill 自己的流程 —— [`find-skills`](./agents/skills/find-skills/) 是去找
+以及某一個 Skill 自己的流程 —— [`find-skills`](./.agents/skills/find-skills/) 是去找
 **尚未**安裝的 Skill，所以它會連網，而它的搜尋步驟會執行 `npx skills find`。只有
 clone 的機器可以執行這裡其他每一個 Skill；那一個會停在它的第一步。
+
+這支腳本也會把 `~/.claude/CLAUDE.md` 連結到 `.agents/AGENTS.md` 的個人指示：link
+不存在時建立，懸空時替換。在兩種情況下它會拒絕，而且什麼都不改：一是
+`~/.claude/CLAUDE.md` 是一個真正的檔案，因為那裡有人寫好的指示；二是它是一個指向
+別處、仍然有效的 link，因為那是刻意的設定。若要在已經有 `~/.claude/CLAUDE.md` 的
+機器上採用這個 link，先把要保留的內容搬進 `.agents/AGENTS.md`，移除原檔，再重跑
+腳本。
 
 這支腳本會在 `~/.agents` 不存在時建立它、確保 Claude bridge 目錄存在，並且只
 在某個 canonical-name entry 缺失或 dangling 時才建立或替換它。當
@@ -219,7 +252,7 @@ canonical-name entry 會被保留不動，也不會被偵測出來。這些檢�
 
 ### 新增
 
-在 `agents/skills/` 底下（或某個 grouping directory 低一層的位置）新增一個
+在 `.agents/skills/` 底下（或某個 grouping directory 低一層的位置）新增一個
 包含 `SKILL.md` 的目錄。當 bridge 名稱需要和目錄名稱不同時，給它一個獨一無二
 的 `name:` frontmatter 欄位，然後執行 bridge script 並檢查結果：
 
@@ -233,7 +266,7 @@ git -C ~/.Jarvis status --short
 
 對於本地維護的內容，直接編輯受追蹤的檔案、檢查 diff，再執行 bridge script。
 對於 CLI-managed 的 Skill，先檢查
-[`agents/.skill-lock.json`](./agents/.skill-lock.json) 裡記錄的來源，確認那個
+[`.agents/.skill-lock.json`](./.agents/.skill-lock.json) 裡記錄的來源，確認那個
 指名的上游 Skill 仍然存在，才使用它的 owning CLI 去更新那個指名的 Skill。
 
 不要把 `npx skills update -g` 這種大範圍更新當成例行維護。上游有可能刪除
@@ -261,8 +294,8 @@ CODEX_SKILLS="${CODEX_HOME:-$HOME/.codex}/skills"
 bridge 檢查。若要做唯讀檢查，可以使用：
 
 ```sh
-test -L ~/.agents && test "$(cd -P ~/.agents && pwd)" = "$(cd -P ~/.Jarvis/agents && pwd)"
-find ~/.Jarvis/agents/skills -mindepth 1 -maxdepth 2 -type f -name SKILL.md | sort
+test -L ~/.agents && test "$(cd -P ~/.agents && pwd)" = "$(cd -P ~/.Jarvis/.agents && pwd)"
+find ~/.Jarvis/.agents/skills -mindepth 1 -maxdepth 2 -type f -name SKILL.md | sort
 find ~/.claude/skills -maxdepth 1 -type l -print | sort
 CODEX_SKILLS="${CODEX_HOME:-$HOME/.codex}/skills"
 [ ! -d "$CODEX_SKILLS" ] || find "$CODEX_SKILLS" -maxdepth 1 -type l -print | sort
@@ -274,7 +307,7 @@ CODEX_SKILLS="${CODEX_HOME:-$HOME/.codex}/skills"
 它跟 canonical 目錄比較，再決定哪一份副本是目前有效的版本：
 
 ```sh
-diff -ru ~/.agents ~/.Jarvis/agents
+diff -ru ~/.agents ~/.Jarvis/.agents
 ```
 
 完成比較之後，把有衝突的那個目錄保留成一份有日期標記的備份，重新建立所需的
@@ -283,15 +316,15 @@ Skills。
 
 ```sh
 mv ~/.agents "$HOME/.agents.conflict-$(date +%Y%m%d-%H%M%S)"
-ln -s .Jarvis/agents ~/.agents
+ln -s .Jarvis/.agents ~/.agents
 ~/.Jarvis/sync-personal-skills.sh
 ```
 
 ## Friday 採用 wrapper
 
-[`setup-matt-pocock-skills`](./agents/skills/setup-matt-pocock-skills/) 是
+[`setup-matt-pocock-skills`](./.agents/skills/setup-matt-pocock-skills/) 是
 third-party/CLI-managed 的。**不要為了專案 setup 去修改它。**請改用本地維護
-的 [`setup-project-agents`](./agents/skills/setup-project-agents/) wrapper。
+的 [`setup-project-agents`](./.agents/skills/setup-project-agents/) wrapper。
 它刻意設計得很窄：它採用的是 Friday 的共享 baseline，不是個人 Skills、
 consumer overlays，也不是衝突處理。
 
@@ -324,14 +357,14 @@ consumer 要依照自己經過審查的慣例，記錄已 pin 的 provenance 以
 
 ## CLI-managed 與本地維護的內容
 
-[`agents/.skill-lock.json`](./agents/.skill-lock.json) 記錄了 Skills CLI
+[`.agents/.skill-lock.json`](./.agents/.skill-lock.json) 記錄了 Skills CLI
 安裝過的 Skills，包括它們的來源、路徑、hash 與時間戳記。請把它們當成
 third-party/CLI-managed：不要隨意修改它們的內容，也不要為了讓某次安裝看起來
 不一樣而改寫這份 lock。缺少 lock entry，只代表那個 CLI 沒有記錄那個 Skill；
 並不會讓某個 canonical Skill 失效。
 
 Jarvis 的 bridge script、這份 README，以及
-[`setup-project-agents`](./agents/skills/setup-project-agents/) 都是本地
+[`setup-project-agents`](./.agents/skills/setup-project-agents/) 都是本地
 維護的。個人設定則刻意被排除在外：`~/.claude/settings.json` 與
 `~/.codex/config.toml` 可能包含本機路徑或機密資訊，目前並不屬於這個
 repository。
@@ -351,7 +384,8 @@ commit 期與 push 期的檢查。它們是防手滑的護欄，不是伺服器�
 
 這三個都是這個平台的姊妹 repository 發給 consumer 的檔案副本，位於
 [Friday](https://github.com/ShenYo/Friday) 的 `payload/.agents/githooks/`。
-這個 repository 不是 Friday payload consumer —— 它沒有 `.agents/` 樹 ——
+這個 repository 不是 Friday payload consumer —— 它的 `.agents/` 放的是個人
+Skills，不是 Friday 的 payload ——
 所以 `install.sh` 無法接線，只能用副本。每一個現在都與 payload 的對應檔案
 **逐位元組相同**，`pre-push` 也包含在內：這些 hook 改成在執行期解析指引文件的
 路徑、而不是寫死它，這正是最後一處預期差異消失的原因。因此
@@ -374,8 +408,9 @@ repository 的 token：這份記錄是自給自足的。
 
 **這個 repository 不是 Friday consumer，兩者也沒有互相綁定。** Friday 的
 payload 有十九個檔案；這個 repository 只取其中**三個** —— 上面那些 hook ——
-別的都不取：沒有 `.agents/` 樹、沒有 Friday 的任何文件、沒有
-`.claude/settings.json`。它自己的 [`AGENTS.md`](./AGENTS.md) 是本地撰寫的，陳述它
+別的都不取：沒有 Friday 的 `.agents/` payload 或任何文件、沒有
+`.claude/settings.json`。這裡的 `.agents/` 是這個 repository 自己的，放的是個人
+Skills 與個人指示。它自己的 [`AGENTS.md`](./AGENTS.md) 是本地撰寫的，陳述它
 自己的工作規則；只在那三個 hook 所強制的規則上連結 Friday，而那些規則依其構成本來
 就是 Friday 的。Friday 也完全不依賴這個 repository。兩者各自維護、服務不同對象：這邊是
 personal scope，Friday 是 project scope。
@@ -448,7 +483,7 @@ prompt 一定會載入某個特定 Skill。
 - **這個 bridge 確實能到達消費端 repo 的 session。** 一個根在其他 repository
   的 session 回報 `code-review`、`tdd`、`research`、`writing-for-agents` 與
   `setup-project-agents` 皆為可用，解析路徑是 `~/.claude/skills/<name>` →
-  `~/.agents/skills`，而 `~/.agents` → `.Jarvis/agents`。所以這裡的集中化確實
+  `~/.agents/skills`，而 `~/.agents` → `.Jarvis/.agents`。所以這裡的集中化確實
   會到達一個運作中的 session，不只是存在於檔案系統上。
 - **同名碰撞時，出現的是個人版，而專案版完全沒有被列出。** 一個 fixture 在
   `.claude/skills/research/` 放了專案版 skill，與這個 repository 的個人
@@ -488,7 +523,7 @@ Gemini 目前沒有由這支腳本建立的 bridge。它的 discovery 與 runtim
 避免大範圍使用 `npx skills update -g`：2026-09-07 的一次稽核發現，上游曾經
 移除過一些仍在本地安裝的 Skills。只有在先檢查過某個特定上游 Skill 之後，才
 使用 `npx skills update -g <name>`，然後再檢查 diff。目前全域 lock 的檔名是
-[`agents/.skill-lock.json`](./agents/.skill-lock.json)；`skills-lock.json`
+[`.agents/.skill-lock.json`](./.agents/.skill-lock.json)；`skills-lock.json`
 則是 project scope 的。缺少 `agents/openai.yaml` descriptors，本身並不是
 重新安裝的理由。
 
@@ -496,7 +531,7 @@ Gemini 目前沒有由這支腳本建立的 bridge。它的 discovery 與 runtim
 
 ```sh
 # Confirm the required canonical symlink and its resolved destination.
-ls -ld ~/.agents ~/.Jarvis/agents
+ls -ld ~/.agents ~/.Jarvis/.agents
 readlink ~/.agents
 
 # Ensure bridge directories and missing/dangling canonical-name links; report
@@ -509,12 +544,12 @@ CODEX_SKILLS="${CODEX_HOME:-$HOME/.codex}/skills"
 [ ! -d "$CODEX_SKILLS" ] || find "$CODEX_SKILLS" -maxdepth 1 -type l ! -exec test -e {} \; -print
 
 # Show canonical names that determine bridge entry names.
-find ~/.Jarvis/agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f \
+find ~/.Jarvis/.agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f \
   -exec sed -n 's/^name:[[:space:]]*//p' {} \; | sort
 
 # Inspect CLI provenance when jq is available.
 jq -r '.skills | to_entries[] | "\(.key)\t\(.value.source)\t\(.value.skillPath)"' \
-  ~/.Jarvis/agents/.skill-lock.json | sort
+  ~/.Jarvis/.agents/.skill-lock.json | sort
 ```
 
 不要用「再建立一份真正的 `~/.agents` 副本」「把每個 Skill 手動複製進某個

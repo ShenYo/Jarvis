@@ -9,9 +9,9 @@ must build, test, and pass CI on a machine that has no copy of it.
 
 ## Most of this repository is not ours to edit
 
-35 of the 36 Skills under `agents/skills/` are installed by a CLI from an
+35 of the 36 Skills under `.agents/skills/` are installed by a CLI from an
 upstream repository, recorded in
-[`agents/.skill-lock.json`](./agents/.skill-lock.json) with the upstream tree
+[`.agents/.skill-lock.json`](./.agents/.skill-lock.json) with the upstream tree
 hash. As of 2026-10-24 every one of them is byte-identical to the tree recorded
 at install time; keep it that way.
 
@@ -24,7 +24,7 @@ at install time; keep it that way.
   [`sync-personal-skills.sh`](./sync-personal-skills.sh) -- the CLI writes the
   canonical copy and the lock entry but not the bridge, so a Skill it installs
   stays invisible until the bridge runs.
-- [`agents/skills/setup-project-agents/`](./agents/skills/setup-project-agents/)
+- [`.agents/skills/setup-project-agents/`](./.agents/skills/setup-project-agents/)
   is the one locally authored Skill. It is ours.
 
 ## Two vendored Skills conflict with the Friday baseline
