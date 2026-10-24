@@ -63,10 +63,17 @@ EOF
 fails=0
 total=0
 probe() { # expected, command, [cwd]
-  local want=$1 cmd=$2 dir=${3:-$feat} got
-  got=$(jq -n --arg c "$cmd" --arg d "$dir" '{tool_name: "Bash", tool_input: {command: $c}, cwd: $d}' |
-    "$py" -I "$hook" | jq -r '.hookSpecificOutput.permissionDecision // empty')
-  got=${got:-allow}
+  local want=$1 cmd=$2 dir=${3:-$feat} got out rc
+  # A hook that does not answer within 5 s is a failure of its own: in a real
+  # session it trips the hook timeout and blocks the call.
+  jq -n --arg c "$cmd" --arg d "$dir" '{tool_name: "Bash", tool_input: {command: $c}, cwd: $d}' >"$root/in.json"
+  out=$(perl -e 'alarm 5; exec @ARGV' "$py" -I "$hook" <"$root/in.json"); rc=$?
+  if [ "$rc" = 142 ]; then
+    got=hang
+  else
+    got=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.permissionDecision // empty')
+    got=${got:-allow}
+  fi
   total=$((total + 1))
   if [ "$got" = "$want" ]; then
     printf 'ok   %-5s %s\n' "$want" "${cmd//$'\n'/⏎}"
@@ -250,6 +257,8 @@ probe allow 'gh api graphql -f query="query { viewer { login } }"'
 probe allow 'gh api -X POST repos/o/r/pulls/12/comments/1/replies -f body=thanks'
 probe allow 'python3 -c "import json; print(json.dumps({\"git\": 1}))"'
 probe allow 'ls -la ~/.claude'
+probe allow 'tr -dc A-Za-z0-9 </dev/urandom | head -c 8'
+probe allow 'cat < /dev/zero | head -c 8'
 probe allow 'git config get core.hooksPath'
 probe allow "$(printf 'python3 - doc.md <<'"'"'PY'"'"'\ns = open("doc.md").read()\ns = s.replace("git rm", "git restore --staged")\nprint("rm -rf and git push --force are refused")\nPY')"
 probe allow "$(printf 'python3 - <<'"'"'PY'"'"'\nprint("shutil.rmtree is refused")\nPY')"
