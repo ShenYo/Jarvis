@@ -1,0 +1,75 @@
+name: CI
+
+# Runs on every pull request, with no path filter, so it can be a required
+# check: a filtered workflow that does not run leaves a required check
+# waiting forever. Nothing here needs a secret.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every Git hook is executable in git
+        run: |
+          fail=0
+          while read -r mode _ _ file; do
+            [ "$mode" = 100755 ] || { echo "MODE  $file is $mode, not 100755 -- git would skip it"; fail=1; }
+          done < <(git ls-files -s -- .githooks)
+          exit "$fail"
+      - name: The guard's apply script keeps the person's rules
+        run: bash tests/claude-guard.sh
+      - name: The guard hook refuses every probed spelling and passes ordinary work
+        run: bash tests/bash-guard.sh
+      - name: The Git hooks refuse what they should
+        run: bash tests/githooks.sh
+      - name: The two READMEs agree
+        run: python3 scripts/check-readme-parity.py README.md README.zh-TW.md scripts/readme-stale-terms.txt
+
+  skills:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every vendored Skill matches its lock entry
+        run: bash scripts/check-skill-lock.sh
+      - name: The bridge links every Skill in a fresh home
+        run: |
+          home="$RUNNER_TEMP/home"
+          mkdir -p "$home/.codex"
+          ln -s "$GITHUB_WORKSPACE" "$home/.Jarvis"
+          HOME="$home" CODEX_HOME="$home/.codex" bash "$home/.Jarvis/sync-personal-skills.sh"
+          n=$(find "$GITHUB_WORKSPACE/.agents/skills" -mindepth 1 -maxdepth 2 -name SKILL.md -type f | wc -l)
+          claude=$(find "$home/.claude/skills" -maxdepth 1 -type l | wc -l)
+          codex=$(find "$home/.codex/skills" -maxdepth 1 -type l | wc -l)
+          echo "skills=$n claude=$claude codex=$codex"
+          [ "$n" -gt 0 ] && [ "$claude" = "$n" ] && [ "$codex" = "$n" ]
+          [ "$(readlink "$home/.claude/CLAUDE.md")" = "../.agents/AGENTS.md" ]
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks 8.30.1, checksum verified
+        run: |
+          v=8.30.1
+          f="gitleaks_${v}_linux_x64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$f" "https://github.com/gitleaks/gitleaks/releases/download/v${v}/$f"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/$f" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$f" -C "$RUNNER_TEMP" gitleaks
+      - name: No secret anywhere in the history
+        run: |
+          "$RUNNER_TEMP/gitleaks" git . --no-banner --redact --exit-code 1

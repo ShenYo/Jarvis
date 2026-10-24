@@ -353,7 +353,7 @@ commit 期與 push 期的檢查。它們是防手滑的護欄，不是伺服器�
 
 確保它們可靠的是行為測試，而不是比對。[`tests/githooks.sh`](./tests/githooks.sh)
 在一個暫存 repository 裡執行每一個 hook，檢查它拒絕什麼、接受什麼。
-[`Git hooks`](.github/workflows/githooks.yml) workflow 會在每次修改 hook 時執行
+[`CI`](.github/workflows/ci.yml) workflow 會在每個 pull request 上執行
 它，並一併檢查每個 hook 仍是可執行的，因為 git 會略過不可執行的 hook，讓 commit
 直接通過。
 

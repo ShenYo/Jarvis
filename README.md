@@ -382,8 +382,7 @@ someone ports it deliberately.
 What keeps them honest is a behaviour test rather than a comparison.
 [`tests/githooks.sh`](./tests/githooks.sh) runs each hook in a scratch
 repository and checks what it refuses and what it accepts. The
-[`Git hooks`](.github/workflows/githooks.yml) workflow runs it on every change
-to a hook, together with a check that each hook is still executable, because
+[`CI`](.github/workflows/ci.yml) workflow runs it on every pull request, together with a check that each hook is still executable, because
 git skips a hook that is not and lets the commit through.
 
 ```sh
