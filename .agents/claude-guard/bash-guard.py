@@ -23,6 +23,7 @@ import json
 import os
 import re
 import shlex
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1154,11 +1155,14 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
 
 
 def read_small(path, cwd=None):
-    """The file's text, or None when it cannot be read or is too large to
-    be a request body: the caller decides what not knowing means."""
+    """The file's text, or None when it cannot be read, is not a regular
+    file, or is too large to be a request body: the caller decides what not
+    knowing means. A device such as /dev/urandom reports size 0 and never
+    ends, so size alone is not a bound."""
     try:
         full = os.path.join(cwd or os.getcwd(), os.path.expanduser(path))
-        if os.path.getsize(full) < 262144:
+        st = os.stat(full)
+        if stat.S_ISREG(st.st_mode) and st.st_size < 262144:
             with open(full, encoding="utf-8", errors="replace") as fh:
                 return fh.read()
     except Exception:
