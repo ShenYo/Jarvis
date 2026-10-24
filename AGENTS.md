@@ -12,8 +12,8 @@ must build, test, and pass CI on a machine that has no copy of it.
 
 ## Most of this repository is not ours to edit
 
-35 of the 36 Skills under `.agents/skills/` are installed by a CLI from an
-upstream repository, recorded in
+Every Skill under `.agents/skills/` is installed by a CLI from an upstream
+repository, recorded in
 [`.agents/.skill-lock.json`](./.agents/.skill-lock.json) with the upstream tree
 hash. As of 2026-10-24 every one of them is byte-identical to the tree recorded
 at install time; keep it that way.
@@ -27,33 +27,26 @@ at install time; keep it that way.
   [`sync-personal-skills.sh`](./sync-personal-skills.sh) -- the CLI writes the
   canonical copy and the lock entry but not the bridge, so a Skill it installs
   stays invisible until the bridge runs.
-- [`.agents/skills/setup-project-agents/`](./.agents/skills/setup-project-agents/)
-  is the one locally authored Skill. It is ours.
 
-## Two vendored Skills conflict with the Friday baseline
+## Two vendored Skills replace a project's own guards
 
-Both are upstream's and stay as they are. Neither may be run in a repository
-that has adopted the [Friday](https://github.com/ShenYo/Friday) baseline --
-pet_care and Finance today, identifiable by a `.friday-lock.json` at the root.
+Both are upstream's and stay as they are. Before running either in a project,
+look at what that project already has.
 
-**`setup-pre-commit`** runs `npx husky init`, which overwrites
-`core.hooksPath`:
+**`setup-pre-commit`** runs `npx husky init`, which sets `core.hooksPath` to
+`.husky/_`. In a project whose `core.hooksPath` already points at its own hooks
+(`git config --get core.hooksPath`), those hooks then stop running: the secret
+scan, the message check and the push rules, with no warning and no sign in a
+commit that succeeds. Do not run it there.
 
-```
-before:            .agents/githooks
-after husky init:  .husky/_
-```
-
-Friday's secret scan, commit-message check, and push rules then stop running,
-with no warning and no sign in a commit that succeeds. The reverse order is
-safe: `install.sh` refuses a repository that already sets `core.hooksPath`.
-
-**`git-guardrails-claude-code`** writes the same place as Friday's guard
-(`.claude/settings.json`, `PreToolUse`, `matcher: "Bash"`). Hook sources merge
-and a block is a veto no source can lift, so nothing breaks -- but it sets no
-`onFailure`, so it fails *open* where Friday's guard fails closed, and it
-blocks `git push` unconditionally, which contradicts the rule that pushing a
-non-default branch is the agent's own call.
+**`git-guardrails-claude-code`** writes a `PreToolUse` hook with
+`matcher: "Bash"` into the project's `.claude/settings.json`. Hook sources
+merge, and a block is a veto no source can lift, so it breaks nothing outright.
+But it sets no `onFailure`, so it fails *open*, and it blocks `git push`
+unconditionally, which contradicts the rule that pushing a non-default branch
+is the agent's own call. On this machine the
+[Claude Code guard](./README.md#claude-code-guard) already covers what it
+offers. Run it only where a project wants its own copy of that guard.
 
 ## The Git hooks are this repository's own
 

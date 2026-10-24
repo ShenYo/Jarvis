@@ -21,8 +21,9 @@ Jarvis addresses four related scenarios:
 - **Claude/Codex bridge checks:** the script ensures the Claude bridge
   directory exists and creates or replaces missing or dangling canonical-name
   links; other dangling non-reserved bridge entries fail visibly.
-- **Friday adoption:** a local wrapper previews and, with fresh explicit
-  authorization, adopts a pinned Friday baseline into a blank project.
+- **Claude Code guard:** one versioned set of rules, copied into
+  `~/.claude/settings.json`, refuses destructive Git and file operations in
+  every project on this machine.
 
 ## Scope and ownership
 
@@ -69,9 +70,9 @@ do not infer completion from individual probes or bridge entries.
 
 ## Current inventory
 
-**Inventory observation, 2026-10-22:** this checkout has 36 canonical
-`SKILL.md` files, 36 Claude bridge links, 36 Codex bridge links, and 35 lock
-entries. Every canonical Skill is reachable from both tools.
+**Inventory observation, 2026-10-24:** this checkout has 35 canonical
+`SKILL.md` files, 35 Claude bridge links, 35 Codex bridge links, and 35 lock
+entries. Every canonical Skill is CLI-managed and reachable from both tools.
 
 `orca-cli` and `orchestration` were briefly unreachable: the `skills` CLI
 writes the canonical copy and the lock entry but does not create the bridge,
@@ -81,8 +82,7 @@ normal order of operations, not a fault -- install with the CLI, then bridge.
 
 A `synced` entry also sits in the Claude bridge directory. It is a real
 directory rather than a symlink, so it belongs to another tool and the bridge
-script deliberately leaves it alone. [`setup-project-agents`](./.agents/skills/setup-project-agents/) is
-the canonical Skill without a lock entry.
+script deliberately leaves it alone.
 These are observations, not enduring facts; recount rather than treating this
 README as a cache:
 
@@ -241,12 +241,10 @@ safe to omit Jarvis entirely for a project: personal Skills remain optional.
 After the bridge, use the read-only checks in [Verify](#verify) to confirm the
 canonical symlink and any already-installed Claude/Codex bridge directories.
 
-For a new project, bootstrap the portable baseline from a separately reviewed,
-clean Friday checkout; do not copy Jarvis Skills into the project. The optional
-[`setup-project-agents`](./.agents/skills/setup-project-agents/) Skill under
-`~/.agents` is a convenience wrapper for a
-blank-project Friday adoption, not a prerequisite for this manual workflow or
-for any consumer project.
+A new project takes its baseline from wherever that baseline is maintained,
+following that source's own adoption guide. Do not copy Jarvis Skills into a
+project: they are personal, and a project must work on a machine without
+them.
 
 The script also links `~/.claude/CLAUDE.md` to the personal instructions in
 `.agents/AGENTS.md`. It creates that link when it is missing and replaces it when
@@ -341,43 +339,6 @@ ln -s .Jarvis/.agents ~/.agents
 ~/.Jarvis/sync-personal-skills.sh
 ```
 
-## Friday adoption wrapper
-
-[`setup-matt-pocock-skills`](./.agents/skills/setup-matt-pocock-skills/) is
-third-party/CLI-managed. **Do not modify it for
-project setup.** Use the locally maintained
-[`setup-project-agents`](./.agents/skills/setup-project-agents/) wrapper
-instead. It is deliberately narrow: it adopts Friday's shared baseline, not
-personal Skills, consumer overlays, or conflicts.
-
-Use `$setup-project-agents` only to preview and adopt a pinned Friday baseline
-in a blank Git repository:
-
-```text
-$setup-project-agents target=/absolute/path/to/repository friday=/absolute/path/to/Friday
-```
-
-Both paths are required. The skill canonicalizes them, requires `target` to be
-a Git repository root and `friday` to be a different clean Git worktree with
-regular `install.sh` and `payload` paths, then records Friday's full SHA and
-the target Git state. Its only pre-authorization action is:
-
-```sh
-bash "$friday/install.sh" --check "$target"
-```
-
-Record the reviewed Friday SHA as the pin. Any conflict or failed preview stops
-the workflow for reconciliation in the consumer; neither this wrapper nor
-Friday is an update engine. Installation needs a fresh explicit authorization
-that names both the canonical target and that exact pinned SHA. Only then does
-the skill run Friday's installer, preview again, run the consumer checker, and
-report the target status and diff check.
-
-Do not manually copy baseline files, modify Friday or its vendor payload, or
-change a lock file for this workflow. The skill creates no commit or push; the
-consumer records the pinned provenance and any atomic adoption commit under
-its own reviewed convention.
-
 ## CLI-managed and locally maintained content
 
 [`.agents/.skill-lock.json`](./.agents/.skill-lock.json) records Skills installed by the Skills CLI, including
@@ -386,11 +347,13 @@ CLI-managed: do not casually patch their contents or rewrite the lock to make
 an installation look different. A missing lock entry means the CLI did not
 record that Skill; it does not make a canonical Skill invalid.
 
-Jarvis's bridge script, this README, and
-[`setup-project-agents`](./.agents/skills/setup-project-agents/) are locally
-maintained. Personal settings are intentionally excluded:
-`~/.claude/settings.json` and `~/.codex/config.toml` may contain local paths
-or secrets and are not part of this repository.
+Every Skill here is CLI-managed. What is locally maintained is the bridge
+script, the personal instructions, the Claude Code guard, the Git hooks and
+their rules, and this README. The settings files themselves are not part of
+this repository, because `~/.claude/settings.json` and `~/.codex/config.toml`
+may contain local paths or secrets. The guard is merged into
+`~/.claude/settings.json` by its apply script, and nothing else in that file
+comes from here.
 
 ## Local Git hooks
 
