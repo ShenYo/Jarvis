@@ -401,7 +401,7 @@ Code session 都要遵守的規則，不論 session 從哪個 repository 啟動�
 | `permissions.deny` | 拒絕永久禁止的操作：force push、`reset --hard`、`clean`、丟棄未 commit 的修改、刪除 branch／tag／ref、遞迴刪除、`git rm`、改寫 remote、GitHub `DELETE`，以及跳過 hook。它在所有判斷之前比對，所有 mode 都生效。 |
 | `permissions.ask` | 人工審核的關卡會跳出 prompt：merge、關閉或重開 pull request、approve、`gh repo edit`，以及 push 到 `main` 或 `master`。 |
 | `autoMode.hard_deny`、`soft_deny` | 同一組規則以文字寫給 auto-mode classifier，讓 pattern 看不到的寫法（`bash -c`、`git -C`、script）也會被判斷。兩者都透過 `"$defaults"` 保留內建規則。 |
-| `hooks.PreToolUse` | 每次執行 Bash 都會跑 [`bash-guard.py`](./.agents/claude-guard/bash-guard.py)。它解析指令，而不是比對文字，所以 `git -C <dir>`、`-c` 選項、`/usr/bin/git` 這類路徑、`bash -c` 和 `eval`、`$(...)`、餵給 shell 的 heredoc、`env`、`xargs` 和 `timeout`、`-an`、`-vrf` 這類合併的 flag，以及 git alias，它都看得穿。它拒絕的操作和跳出 prompt 的關卡都與上面相同，包括在 default branch 上直接執行 `git push`。它採 fail closed：hook 無法啟動時，Bash 呼叫會被擋下。 |
+| `hooks.PreToolUse` | 每次執行 Bash 都會跑 [`bash-guard.py`](./.agents/claude-guard/bash-guard.py)。它解析指令，而不是比對文字，所以 `git -C <dir>`、`-c` 選項、`/usr/bin/git` 這類路徑、`bash -c` 和 `eval`、`$(...)`、餵給 shell 的 heredoc、`env`、`xargs` 和 `timeout`、`-an`、`-vrf` 這類合併的 flag，以及 git alias，它都看得穿。它拒絕的操作和跳出 prompt 的關卡都與上面相同，包括在 default branch 上直接執行 `git push`；另外，可能帶出 tag 的 push（`--tags`、`--follow-tags`、`push.followTags`，或 refspec 指名某個 tag）它也會先詢問，因為 release tag 同樣是一道關卡。它採 fail closed：hook 無法啟動時，Bash 呼叫會被擋下。 |
 | `disableBypassPermissionsMode` | 關閉 bypass mode；在 bypass mode 下，ask 規則一條都不會跳出 prompt。 |
 
 套用，或檢查 settings 是否已經帶有 guard：

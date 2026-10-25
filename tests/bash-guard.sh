@@ -26,6 +26,9 @@ git_init "$onmain"
 git init -q --bare "$root/local.git"
 git_init "$root/sandbox"; git -C "$root/sandbox" remote add origin "$root/local.git"
 git -C "$onmain" remote add origin git@github.com:example/shared.git
+# Release tags: one in a repository with a shared remote, one in a scratch one.
+git -C "$onmain" tag v1.0.0
+git -C "$root/sandbox" tag v1.0.0
 git -C "$feat" config alias.nuke '!git branch -D "$@"'
 git -C "$feat" config alias.yolo 'push --force'
 git -C "$feat" config alias.st 'status'
@@ -34,7 +37,7 @@ git -C "$feat" config alias.a10 'branch -D'
 
 # Bare pushes that reach the default branch through configuration.
 shared=git@github.com:example/shared.git
-for name in matching upstream pushref pushremote pushurl fileurl develop nested; do
+for name in matching upstream pushref pushremote pushurl fileurl develop nested followtags; do
   git_init "$root/$name"
   git -C "$root/$name" remote add origin "$shared"
 done
@@ -51,6 +54,7 @@ git -C "$root/pushremote" config branch.main.remote scratch
 git -C "$root/pushremote" config branch.main.pushRemote origin
 git -C "$root/pushurl" remote set-url origin "$root/local.git"
 git -C "$root/pushurl" config remote.origin.pushurl "$shared"
+git -C "$root/followtags" config push.followTags true
 git -C "$root/fileurl" remote set-url origin file:///nonexistent/shared.git
 git -C "$root/develop" update-ref refs/remotes/origin/develop HEAD
 git -C "$root/develop" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
@@ -216,6 +220,17 @@ probe allow 'git commit -m "docs: explain why --no-verify is refused"'
 probe allow "$(printf 'git commit -F - <<'"'"'EOF'"'"'\nfix: refuse git push --force and rm -rf\n\nBody mentions git branch -D too.\nEOF')"
 probe allow "$(printf 'git commit -m "$(cat <<'"'"'EOF'"'"'\nfeat: x\n\ngit reset --hard is refused\nEOF\n)"')"
 probe allow 'git commit -m -n'
+echo "== pushing a release tag waits for the user"
+probe ask 'git push origin v1.0.0' "$onmain"
+probe ask 'git push origin refs/tags/v9.9.9' "$onmain"
+probe ask 'git push origin v1.0.0:refs/tags/v1.0.0' "$onmain"
+probe ask 'git push --tags origin feat/y' "$onmain"
+probe ask 'git push --follow-tags origin feat/y' "$onmain"
+probe ask 'git push origin feat/y' "$root/followtags"
+probe allow 'git push origin feat/y' "$onmain"
+probe allow 'git push origin v1.0.0' "$root/sandbox"
+probe allow 'git push --dry-run --tags origin' "$onmain"
+
 probe allow 'git push -u origin feat/x'
 probe allow 'git push'
 probe allow 'git push origin domain'
