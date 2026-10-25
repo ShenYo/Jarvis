@@ -189,6 +189,26 @@ named in the first and third, was removed afterwards
   "the Skill is available" does not by itself mean the one in this repository
   is the one that loaded.
 
+### Codex hook outcomes
+
+Measured on **codex-cli 0.164.0** (2026-10-25) with a user-level `PreToolUse`
+hook in `${CODEX_HOME:-~/.codex}/hooks.json`, matcher on the Bash tool, trusted
+in `/hooks`. Codex sent the hook the same JSON as Claude Code for a shell
+command (`tool_name`, `tool_input.command`, `cwd`, `hook_event_name`). Three
+outcomes decided the design of
+[`apply-codex-guard.sh`](../scripts/apply-codex-guard.sh):
+
+| The hook did | What Codex did | Seen |
+| --- | --- | --- |
+| Printed `permissionDecision: "deny"` | Blocked the command: "Command blocked by PreToolUse hook: <reason>" | Measured |
+| Printed `permissionDecision: "ask"` | Marked the hook run failed and ran the command; the official docs say "parsed but not supported yet" | Measured, and in the docs |
+| Exited non-zero, or overran its timeout | Marked the hook run `Failed` and ran the command; Codex has no `onFailure` setting | Measured |
+
+So Codex fails open, which is why `bash-guard.py --codex` turns an `ask` into
+a `deny` and any error of its own into a `deny` with exit status 0. A hook
+that Codex cannot start is not covered by that. Recount or re-run on another
+codex-cli version before relying on this.
+
 ## Progress, 2026-10-23 to 2026-10-25
 
 What merged in [ShenYo/Jarvis](https://github.com/ShenYo/Jarvis) in these

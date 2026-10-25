@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code PreToolUse guard for the Bash tool.
+"""Claude Code and Codex PreToolUse guard for the Bash tool.
 
 The permission rules in guard.json match command text, so `git -C . branch -D
 x`, `bash -c "..."`, `git commit -an` and `rm -vrf` reach a prohibited
@@ -17,12 +17,19 @@ What it cannot see: a script file it is asked to run, a program that builds a
 command at run time, and code in a language whose strings it does not scan.
 The auto-mode classifier is the layer for those.
 
+With the argument `--codex` it runs as a Codex hook. Codex cannot ask (it
+parses "ask" and then runs the command), and it runs the command when a hook
+fails or overruns, so in that mode every "ask" is emitted as "deny", the
+reason says why, and any error anywhere becomes a "deny" naming it, with exit
+status 0. Without the argument nothing changes.
+
 Compatible with Python 3.9, the version macOS ships at /usr/bin/python3.
 """
 import json
 import os
 import re
 import shlex
+import signal
 import stat
 import subprocess
 import sys
@@ -32,8 +39,14 @@ import time
 MAX_DEPTH = 6
 MAX_ALIAS_DEPTH = 8
 
-# Every git lookup shares one budget, well inside the hook's 10 s timeout: a
-# hook that times out blocks the call, which is safe but unhelpful. A lookup
+CODEX = "--codex" in sys.argv[1:]
+GUARD = "Codex guard" if CODEX else "Claude guard"
+
+# Every git lookup shares one budget, well inside the hook's 10 s timeout (the
+# one apply-codex-guard.sh writes for Codex; guard.json's for Claude Code): a
+# hook that times out blocks the call under Claude Code, which is safe but
+# unhelpful, and under Codex runs it. The 6 s budget leaves 4 s for the
+# interpreter to start and for the analysis outside the git lookups. A lookup
 # that runs out of budget answers "unknown", and unknown asks.
 DEADLINE = time.monotonic() + 6
 
@@ -43,6 +56,10 @@ PROHIBITED = (
     "themselves."
 )
 CHECKPOINT = "This is a human-review checkpoint: a person decides it."
+CODEX_CHECKPOINT = (
+    CHECKPOINT[:-1] + ", and Codex cannot ask. State the exact command and "
+    "let the user run it, or do it in a runtime that can ask."
+)
 
 
 class Result:
@@ -1234,29 +1251,67 @@ def decide(command, cwd):
     return res
 
 
+ANSWERED = False
+
+
 def emit(decision, reason):
+    """Print the answer, at most once: a hook that prints two JSON objects
+    gives Codex something it cannot read. In Codex mode the watchdog is
+    disarmed first, and SIGALRM ignored, so it cannot land after this point,
+    even if it had already tripped and not yet run."""
+    global ANSWERED
+    if ANSWERED:
+        return
+    if CODEX:
+        signal.signal(signal.SIGALRM, signal.SIG_IGN)
+        signal.alarm(0)
+    ANSWERED = True
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": decision,
         "permissionDecisionReason": reason,
     }}))
+    sys.stdout.flush()
 
 
-def main():
+def run():
     try:
         data = json.load(sys.stdin)
     except Exception:
-        emit("deny", "Claude guard: the hook input was not JSON, so the command was not checked.")
-        return 0
+        emit("deny", GUARD + ": the hook input was not JSON, so the command was not checked.")
+        return
     if data.get("tool_name") != "Bash":
-        return 0
+        return
     command = (data.get("tool_input") or {}).get("command") or ""
     cwd = data.get("cwd") or os.getcwd()
     res = decide(command, cwd)
     if res.deny:
-        emit("deny", "Claude guard: " + "; ".join(res.deny) + ". " + PROHIBITED)
+        emit("deny", GUARD + ": " + "; ".join(res.deny) + ". " + PROHIBITED)
+    elif res.ask and CODEX:
+        emit("deny", GUARD + ": " + "; ".join(res.ask) + ". " + CODEX_CHECKPOINT)
     elif res.ask:
-        emit("ask", "Claude guard: " + "; ".join(res.ask) + ". " + CHECKPOINT)
+        emit("ask", GUARD + ": " + "; ".join(res.ask) + ". " + CHECKPOINT)
+
+
+def main():
+    if not CODEX:
+        run()
+        return 0
+    # Codex runs the command when a hook exits non-zero, so a failure has to
+    # leave as a deny and an exit status of 0. So does a hang: Codex also runs
+    # the command when the hook overruns its 10 s timeout, so a watchdog
+    # answers deny at 8 s, past DEADLINE's 6 s budget for git lookups.
+    def overrun(signum, frame):
+        emit("deny", "%s: the guard did not finish in time, so the command was not checked." % GUARD)
+        os._exit(0)  # emit prints nothing if an answer is already out
+    signal.signal(signal.SIGALRM, overrun)
+    signal.alarm(8)
+    try:
+        run()
+    except Exception as exc:
+        emit("deny", "%s: the guard failed (%s: %s), so the command was not checked."
+             % (GUARD, type(exc).__name__, exc))
+    signal.alarm(0)  # an answer was not needed (or emit has already done this)
     return 0
 
 

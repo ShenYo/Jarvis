@@ -456,6 +456,36 @@ bash ~/.Jarvis/tests/claude-guard.sh
 bash ~/.Jarvis/tests/bash-guard.sh
 ```
 
+### Codex
+
+[`apply-codex-guard.sh`](./scripts/apply-codex-guard.sh) 用使用者層級的
+`PreToolUse` hook，讓 Codex session 得到同樣的保護：它把 `bash-guard.py` 複製到
+`${CODEX_HOME:-~/.codex}/hooks/jarvis-guard.py`，並把一組針對 Bash tool 的設定合併進
+`hooks.json`，其他所有項目（Orca 在那裡有自己的項目）原封不動。hook 拒絕同一批
+永久禁止的操作。Codex 不能詢問：它會解析 `ask` 的回答，然後照樣執行指令。所以遇到
+人工審核的關卡時，hook 回答 `deny`，理由會要求 agent 寫出完整的指令，交給使用者自己
+執行，或改在能詢問的 runtime 裡進行。因此在 Codex 裡，關卡是拒絕，不是 prompt。
+
+```sh
+bash ~/.Jarvis/scripts/apply-codex-guard.sh          # 複製 hook、合併 hooks.json，並留下 .guard-backup
+bash ~/.Jarvis/scripts/apply-codex-guard.sh --check  # 會改動任何東西時 exit 1
+```
+
+Codex 要等你在 `/hooks` 裡信任這支 hook 才會執行它，而信任是依 hash 計算的，所以
+hook 或它的設定每次有變動，都要再信任一次。
+
+它做不到的事。Codex 是 fail open：hook 以非零狀態結束，或超過 timeout，只會被標成
+失敗，指令照樣執行。在 Codex mode 下，guard 會把自己的錯誤（包括無法解析的輸入）
+轉成 `deny` 並以 0 結束，讓 git 查詢遠在 10 秒的 timeout 之內完成，而且到了 8 秒還沒
+做完時，由 watchdog 回答 `deny`。Codex 根本無法
+啟動 hook 的情況，例如找不到 interpreter，指令仍會通過。實測結果記在
+[歷史](./docs/history.md#codex-hook-outcomes)。測試在 sandbox 的 `CODEX_HOME` 裡執行，
+不會碰到真正的 `~/.codex`：
+
+```sh
+bash ~/.Jarvis/tests/codex-guard.sh
+```
+
 ## Bridge 狀態與限制
 
 [`sync-personal-skills.sh`](./sync-personal-skills.sh) 可以安全地重複執行，並檢查
