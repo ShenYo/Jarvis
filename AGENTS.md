@@ -3,9 +3,16 @@
 This repository is the machine-level home for personal AI-agent Skills. It is
 **personal scope**: a catalog plus the symlink bridge that makes it visible to
 Claude Code and Codex, the personal instructions linked as
-`~/.claude/CLAUDE.md`, and the Claude Code guard that
+`~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, and the Claude Code guard that
 `scripts/apply-claude-guard.sh` copies into `~/.claude/settings.json`. Read
 this before changing anything here.
+
+This file holds Jarvis's own rules, for working *in* this repository: the
+vendored Skills are not ours to edit, the Git hooks are maintained here, the
+two READMEs stay in parity, and scratch files stay out of commits. The rules
+for every project are the personal instructions,
+[`.agents/AGENTS.md`](./.agents/AGENTS.md), which every session already
+loads; nothing here repeats them.
 
 Nothing in this repository is a dependency of any project. A consumer project
 must build, test, and pass CI on a machine that has no copy of it.
