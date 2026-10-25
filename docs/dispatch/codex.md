@@ -1,9 +1,9 @@
 # Codex adapter
 
 > **中文摘要**：Codex 派工時的 model 對應與協作工具用法。Commander 用
-> `gpt-6.1-sol`，Implementer 與 Worker 用 `gpt-6-luna`；2026-10-25 這兩個在
-> 本機帳號（ChatGPT 登入）仍被拒絕，開放前派工會失敗。子代理直接在共享
-> workspace 改各自指定的檔案，範圍不可重疊。
+> `gpt-6.1-sol`，Implementer 與 Worker 用 `gpt-6-luna`，2026-10-25 在
+> codex-cli 0.164.0 實測可用。子代理直接在共享 workspace 改各自指定的檔案，
+> 範圍不可重疊。
 
 This adapter makes [`policy.md`](./policy.md) executable in Codex. The policy
 owns the roles, the brief, the report contract and escalation; this file only
@@ -17,29 +17,31 @@ says which Codex model and tool carries each.
 | Implementer | `gpt-6-luna` | Features, fixes, refactors and tests | medium; high for cross-file invariants |
 | Worker | `gpt-6-luna` | Search, exact mechanical edits, deterministic fresh checks | low; medium for bounded edits or checks |
 
-These are the owner's choice, and both are in OpenAI's Codex model list. **On
-2026-10-25 neither ran on this machine** (codex-cli 0.153.4, ChatGPT sign-in):
-both were refused with "not supported when using Codex with a ChatGPT
-account", and `~/.codex/models_cache.json` listed only `gpt-6-astra` and the
-`gpt-5.6-*` models. Until they run, a dispatch that names them fails. When the
-cache lists them, run `codex exec -m <model> "Reply with exactly: OK"` once
-for each and delete this paragraph.
+These are the owner's choice. Verified 2026-10-25 on this machine
+(codex-cli 0.164.0, ChatGPT sign-in): each answered a
+`codex exec -m <model>` run, and `~/.codex/models_cache.json` lists both. On
+codex-cli 0.153.4 both were refused for a ChatGPT account, so an older CLI is
+the first thing to check when an alias errors.
 
 The Commander is the interactive session, so its model is the `model` in
-`~/.codex/config.toml`, not this table. On 2026-10-25 that was `gpt-5.6-sol`,
-and it stays there until `gpt-6.1-sol` runs: setting an unsupported model
-there would stop every interactive session from starting.
+`~/.codex/config.toml`, not this table; keep the two the same. Use only the
+aliases in this table; another alias needs the same check before it goes in.
 
 ## Native collaboration
 
-`gpt-6-astra` reported these from its tool definitions on 2026-10-25, twice:
+`gpt-6.1-sol` reported these from its tool definitions on 2026-10-25:
 
 - Children are started with `collaboration.spawn_agent`, which takes
-  `task_name`, `message`, `model`, `reasoning_effort` and `fork_turns`.
-- A `model` or `reasoning_effort` override needs `fork_turns` set to `"none"`
-  (for a self-contained brief) or a positive count of turns; its default,
-  `"all"`, does not allow one. Use the smallest count that carries the context
-  needed.
+  `task_name` and `message`, and optionally `fork_turns`, `model` and
+  `reasoning_effort`. `collaboration.send_message`,
+  `collaboration.followup_task`, `collaboration.wait_agent`,
+  `collaboration.interrupt_agent` and `collaboration.list_agents` talk to
+  them.
+- `fork_turns` is `"all"` (the default) or `"none"`. `"all"` inherits the
+  parent's model and effort and takes no override, so a child on another
+  model or effort needs `"none"` and a self-contained brief. The tool accepts
+  an override only on explicit instructions from the user, an applicable
+  `AGENTS.md` or a Skill; this table is that instruction.
 - Four agents may be active at once, the root included, so the Commander runs
   at most three children.
 
