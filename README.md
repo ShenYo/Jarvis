@@ -4,8 +4,8 @@
 
 > **繁中摘要**：Jarvis 是這台機器的個人 AI agent Skills 版本庫。它讓
 > `~/.Jarvis/.agents` 成為唯一 canonical copy，透過 `~/.agents` 與 Claude
-> Code／Codex 的 symlink 共用；它也提供 Friday 基線的安全採用 wrapper。專案
-> 本身必須不依賴 Jarvis 仍可重現。
+> Code／Codex 的 symlink 共用；它也保管個人指示與 Claude Code guard。專案
+> 本身必須不依賴 Jarvis 仍可重現。歷史與觀察記錄在 `docs/history.md`。
 
 Jarvis is the version-controlled, machine-level home for one canonical copy of
 personal AI-agent Skills.
@@ -29,7 +29,7 @@ Jarvis addresses four related scenarios:
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| **Jarvis** | This machine's canonical personal Skills, bridge script, and personal Skill provenance; the personal instructions linked as `~/.claude/CLAUDE.md`; the [Claude Code guard](#claude-code-guard) it copies into `~/.claude/settings.json` | A project's `.agents/`, project policy, or any other personal setting |
+| **Jarvis** | This machine's canonical personal Skills, bridge script, and personal Skill provenance; the personal instructions linked as `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`; the [Claude Code guard](#claude-code-guard) it copies into `~/.claude/settings.json` | A project's `.agents/`, project policy, or any other personal setting |
 | **Friday** | A reviewed shared baseline that a consumer may pin and adopt | This machine's personal catalog or a consumer's conflict resolution |
 | **Consumer project** | Its `.agents/` seed, overlays, integrations, tests, and recorded Friday provenance | Jarvis's personal Skills or Friday's vendor payload |
 
@@ -37,54 +37,69 @@ A consumer project must build, test, and pass CI on a machine that has no
 personal layer at all -- a CI runner or another person's laptop has no copy of
 this repository. So whatever a project requires belongs in that project or in
 the Friday baseline it adopted, never here. Jarvis can help an agent work on a
-project; it must not become a hidden project dependency.
+project; it must not become a hidden project dependency. Personal helpers such
+as [TDD](./.agents/skills/tdd/) or [Wayfinder](./.agents/skills/wayfinder/) may
+assist, but a project-required outcome lives in that project's own
+documentation, tests or automation, and a missing helper must not block it.
 
 This constrains consumer projects, not Jarvis. Jarvis is expected to be present
 on this machine, and an agent working here may rely on it.
 
-## Current operating context
+## Status (2026-10-25)
 
-> **繁中摘要**：個人 Skills 是可選輔助，專案必需成果必須由專案自身的
-> 文件、測試或自動化承載；Matt Pocock 等 vendor Skill 維持原廠更新路徑。相同
-> 名稱的個人 Skill 優先只屬 owner policy，不能當作任何 runtime 的載入保證。
+In place:
 
-Jarvis remains the personal, optional layer; a project-required outcome must
-live in project-controlled documentation, tests, or automation.
-[TDD](./.agents/skills/tdd/), [Wayfinder](./.agents/skills/wayfinder/), and
-comparable personal helpers may assist work, but their absence
-must not block a consumer project.
+- **Personal instructions.** [`.agents/AGENTS.md`](./.agents/AGENTS.md) is
+  linked as `~/.claude/CLAUDE.md` for Claude Code and as `~/.codex/AGENTS.md`
+  for Codex, so both load it in every session. It is grouped by scope: *Base
+  behavior* (reply language, written rules over auto memory, handing work to
+  cheaper models), *Coding* (understand first, nothing speculative, surgical
+  changes, verify, write decisions where they live) and *Contracts*
+  (documents in English with a Chinese summary, Git in a repository without
+  its own rules).
+- **Dispatch docs.** [`docs/dispatch/`](./docs/dispatch/policy.md) holds the
+  policy, the prompt templates and the Codex adapter. Codex runs
+  `gpt-6.1-sol` as Commander and `gpt-6-luna` as Implementer and Worker,
+  verified 2026-10-25 on codex-cli 0.164.0.
+- **Claude Code guard.** The [guard](#claude-code-guard) refuses the
+  permanently prohibited Git and file operations and asks at the human-review
+  checkpoints, including before a push that may carry a tag.
+- **Git hooks and CI.** The three [local hooks](#local-git-hooks) run in this
+  clone. The [`CI`](.github/workflows/ci.yml) workflow runs on every pull
+  request, and its four checks (the tests on Linux and macOS, the Skills
+  check, and the secret scan) are required on `main`.
 
-Matt Pocock and other CLI-managed vendor Skills are updated only through their
-owning CLI after reviewing the named upstream source. Do not patch their
-vendored files to implement project setup or policy. When an optional external
-tracker is available, its project output is defined by that project's contract:
-resolve the Git root first, then use
-`docs/temp/matt-pocock/<feature>/<unique-suffix>/`. If the optional capability,
-repository root, or valid feature is unavailable, stop that optional workflow
-rather than writing an alternative personal or vendor location.
+Pending:
 
-An owner's preference for a same-name personal Skill is an ownership policy,
-not evidence of runtime precedence. Jarvis makes no precedence claim beyond
-the bridge limits below. Codex Skill Phase B as a whole remains **UNVERIFIED**;
-do not infer completion from individual probes or bridge entries.
+- The guard for Codex, which cannot ask the way Claude Code does: the plan is
+  recorded in [a comment on ShenYo/Jarvis#15](https://github.com/ShenYo/Jarvis/issues/15#issuecomment-6393273492).
+- Agent identity, so that an agent acts under its own identity rather than
+  ShenYo's: [ShenYo/Jarvis#13](https://github.com/ShenYo/Jarvis/issues/13),
+  with one issue per agent: Claude Code
+  [#14](https://github.com/ShenYo/Jarvis/issues/14), Codex
+  [#15](https://github.com/ShenYo/Jarvis/issues/15) and agy
+  [#16](https://github.com/ShenYo/Jarvis/issues/16).
+- Codex Skill Phase B as a whole remains **UNVERIFIED**; do not infer
+  completion from individual probes or bridge entries.
+
+What happened on the way, with dates, and the measurements behind some rules,
+are in [`docs/history.md`](./docs/history.md).
 
 ## Current inventory
 
-**Inventory observation, 2026-10-24:** this checkout has 35 canonical
-`SKILL.md` files, 35 Claude bridge links, 35 Codex bridge links, and 35 lock
-entries. Every canonical Skill is CLI-managed and reachable from both tools.
+This checkout has 35 canonical `SKILL.md` files, 35 Claude bridge links, 35
+Codex bridge links, and 35 lock entries. Every canonical Skill is CLI-managed
+and reachable from both tools.
 
-`orca-cli` and `orchestration` were briefly unreachable: the `skills` CLI
-writes the canonical copy and the lock entry but does not create the bridge,
-so a Skill it installs stays invisible to Claude Code and Codex until
-[`sync-personal-skills.sh`](./sync-personal-skills.sh) runs. That is the
-normal order of operations, not a fault -- install with the CLI, then bridge.
+The `skills` CLI writes the canonical copy and the lock entry but does not
+create the bridge, so a Skill it installs stays invisible to Claude Code and
+Codex until [`sync-personal-skills.sh`](./sync-personal-skills.sh) runs:
+install with the CLI, then bridge
+([history](./docs/history.md#inventory-and-unreachable-skills)). A real directory rather than
+a symlink in the Claude bridge directory belongs to another tool, and the
+bridge script deliberately leaves it alone.
 
-A `synced` entry also sits in the Claude bridge directory. It is a real
-directory rather than a symlink, so it belongs to another tool and the bridge
-script deliberately leaves it alone.
-These are observations, not enduring facts; recount rather than treating this
-README as a cache:
+These numbers are a count, not a cache; recount rather than trusting them:
 
 ```sh
 find ~/.Jarvis/.agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f | wc -l
@@ -123,9 +138,10 @@ at the root is for an agent working *in this repository*. The one in
 `.agents/` is for *every project*: [`.agents/AGENTS.md`](./.agents/AGENTS.md)
 holds personal rules, such as replying in the user's language, and the bridge
 links it as `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, which Claude Code
-and Codex load in every session wherever it starts. Before it existed, the
-language rule lived only in two projects' auto memory, so a session started
-anywhere else replied in English. Reference it reaches only for some tasks
+and Codex load in every session wherever it starts. It exists
+because a rule that lived only in project memory did not reach a session
+started anywhere else
+([history](./docs/history.md#personal-instructions-for-every-project)). Reference it reaches only for some tasks
 lives in its own file, behind a pointer: the dispatch policy, prompt templates
 and Codex adapter are in [`docs/dispatch/`](./docs/dispatch/policy.md).
 Keep that file short, because it is loaded on every turn of every session, and
@@ -160,9 +176,8 @@ own; the container is not linked, the skills inside it are. The link name comes
 from each skill's `name:` frontmatter, which is what the tools match on, so
 `.agents/skills/git/commit/` with `name: git-commit` links as
 `~/.claude/skills/git-commit`. Nothing here is nested today; the support exists
-because pet_care groups its four git skills that way, and a script that assumed
-one directory per skill both linked the unloadable container and hid the real
-skills inside.
+because a consumer project groups its git skills that way
+([history](./docs/history.md#skills-grouped-under-a-container)).
 
 ## The symlink chain
 
@@ -185,8 +200,7 @@ The `../../` above is the count for a bridge directory two levels below `~`,
 which is where both defaults sit. The script computes the count rather than
 assuming it, so a `CODEX_HOME` at any other depth gets the right number of
 hops, and one outside `$HOME` gets an absolute path through `~/.agents`
-instead. Assuming two used to leave every Codex link dangling for a deeper
-`CODEX_HOME`.
+instead ([history](./docs/history.md#a-deeper-codex-home)).
 
 ## There is nothing to sync
 
@@ -266,10 +280,9 @@ keep in step. Codex reads `AGENTS.override.md` in its home instead of
 The script creates `~/.agents` if it is missing, ensures the Claude bridge
 directory exists, and creates or replaces a canonical-name entry only when it
 is missing or dangling. It bridges Codex when
-`${CODEX_HOME:-$HOME/.codex}` exists, creating `skills/` under it if needed: a
-fresh Codex install has the home but has never created that subdirectory, so
-testing for the subdirectory instead left Codex with no Skills at all while
-reporting it as not installed. An absent Codex home is skipped rather than
+`${CODEX_HOME:-$HOME/.codex}` exists, creating `skills/` under it if needed, because a
+fresh Codex install has the home but not yet that subdirectory
+([history](./docs/history.md#codex-bridge-decided-by-its-home)). An absent Codex home is skipped rather than
 treated as an error. It checks that each canonical skill has an existing entry under its declared name in every bridged tool, reports
 dangling non-reserved entries, and rejects a top-level canonical directory that
 is neither a Skill nor a grouping directory. A live canonical-name entry that
@@ -364,6 +377,15 @@ may contain local paths or secrets. The guard is merged into
 `~/.claude/settings.json` by its apply script, and nothing else in that file
 comes from here.
 
+Matt Pocock and other CLI-managed vendor Skills are updated only through their
+owning CLI after reviewing the named upstream source. Do not patch their
+vendored files to implement project setup or policy. When an optional external
+tracker is available, its project output is defined by that project's contract:
+resolve the Git root first, then use
+`docs/temp/matt-pocock/<feature>/<unique-suffix>/`. If the optional capability,
+repository root, or valid feature is unavailable, stop that optional workflow
+rather than writing an alternative personal or vendor location.
+
 ## Local Git hooks
 
 `core.hooksPath` points at [`.githooks/`](.githooks), so this clone runs three
@@ -381,10 +403,9 @@ which holds this repository's Git rules.
 
 ### Owned here
 
-The three hooks are this repository's own. They began as copies of the hooks
-[Friday](https://github.com/ShenYo/Friday) ships to projects, and since
-2026-10-24 they are maintained here on their own: Jarvis and Friday do not
-depend on each other, in either direction. Nothing compares these files with
+The three hooks are this repository's own: Jarvis and Friday do not depend on
+each other, in either direction
+([history](./docs/history.md#git-hooks-maintained-here)). Nothing compares these files with
 Friday's, and a fix made to Friday's hooks reaches this repository only if
 someone ports it deliberately.
 
@@ -400,10 +421,9 @@ bash ~/.Jarvis/tests/githooks.sh
 
 ### Why the push rules live here as well as on GitHub
 
-They used to live here *instead*: rulesets need a paid plan for a private
-repository, and this one was private on the free plan. It is public now, so a
-ruleset on `main` is active — it refuses deletion and non-fast-forward pushes
-and requires a pull request, with no bypass actors.
+A ruleset on `main` is active: it refuses deletion and non-fast-forward pushes
+and requires a pull request, with no bypass actors
+([history](./docs/history.md#push-rules-on-github-as-well)).
 
 `pre-push` stays, for two reasons. It refuses at the moment of the push rather
 than after a round trip, so an agent gets the reason instead of a rejected
@@ -483,17 +503,14 @@ bash ~/.Jarvis/tests/claude-guard.sh
 bash ~/.Jarvis/tests/bash-guard.sh
 ```
 
-## Historical context
-
-The bridge was hand-maintained before 2026-09-07, and installed Skills could be
-present on disk yet invisible to Claude Code. That incident is why the bridge
-is safely repeatable and checks canonical-name presence and dangling entries
-rather than merely printing success.
-
 ## Bridge status and limitations
 
-[`sync-personal-skills.sh`](./sync-personal-skills.sh) ensures canonical names have existing entries in each
-bridged tool and reports dangling non-reserved entries. It does not validate or
+[`sync-personal-skills.sh`](./sync-personal-skills.sh) is safely repeatable and
+checks canonical-name presence and dangling entries rather than merely printing
+success, because a hand-maintained bridge once left installed Skills on disk
+yet invisible to Claude Code
+([history](./docs/history.md#hand-maintained-bridge)). It ensures canonical names have existing
+entries in each bridged tool and reports dangling non-reserved entries. It does not validate or
 repair a live canonical-name entry that points at the wrong target, nor does it
 prove Git-operation enforcement or each runtime's native skill-loader behavior.
 
@@ -504,49 +521,20 @@ and a Python listing tool support the destination and symlink convention, but
 the compiled Codex runtime loader remains unverified.
 
 Jarvis makes no claim about Claude's or Codex's runtime precedence between
-personal, project, and built-in Skills. A live link is filesystem evidence, not
-proof that a particular prompt will load a particular Skill.
+personal, project, and built-in Skills. An owner's preference for a same-name
+personal Skill is an ownership policy, not evidence of runtime precedence. A
+live link is filesystem evidence, not proof that a particular prompt will load
+a particular Skill.
 
-Three things were observed natively on **Claude Code 2.1.306** (2026-10-22), in
-a consumer repository and a disposable fixture. They do not turn the paragraph
-above into a precedence rule; they are what was seen.
-
-- **The bridge reaches a consumer-repo session.** A session rooted in another
-  repository reported `code-review`, `tdd`, `research`, `writing-for-agents`
-  and `setup-project-agents` as available, resolving through
-  `~/.claude/skills/<name>` into `~/.agents/skills` with `~/.agents` →
-  `.Jarvis/.agents`. So the centralization here does reach a working session,
-  not just the filesystem.
-- **On a same-name collision, the personal Skill was the one present, and the
-  project copy was not listed at all.** A fixture carried a project skill at
-  `.claude/skills/research/` alongside this repository's personal `research`.
-  A session with every tool disallowed — so the answer could only come from
-  loaded context — reported **exactly one** skill named `research` and quoted
-  the personal description verbatim. A control in the same fixture, a project
-  skill with no personal counterpart, *was* listed, which is what makes the
-  collision result meaningful rather than a discovery failure.
-
-  The practical consequence: the losing Skill is **invisible**, not merely
-  lower-priority, so a session cannot be asked to use the other one. If a
-  project needs its own version of a name that exists here, rename one of
-  them.
-
-  One name, one fixture, one version, two scopes. Nothing is claimed about
-  project-vs-plugin or Codex.
-- **A personal Skill also won over a marketplace plugin of the same name, and
-  the plugin kept the name when the bridge was gone.** `code-review` exists
-  both here, as a Skill, and in the official marketplace as a plugin command
-  (`~/.claude/plugins/marketplaces/claude-plugins-official/plugins/code-review/commands/code-review.md`).
-  With the bridge in place, a session rooted in a consumer repository quoted
-  *this* repository's description for `code-review`. With `~/.agents` and
-  `~/.claude/skills` temporarily moved aside, the name stayed available —
-  served by the marketplace copy — while `tdd`, `research`,
-  `writing-for-agents` and `setup-project-agents` all became unavailable.
-
-  Both directions are reported as observed. The practical point is not a
-  precedence rule but that **a name can have more than one provider here**, so
-  "the Skill is available" does not by itself mean the one in this repository
-  is the one that loaded.
+What was observed natively on one Claude Code version, in a consumer
+repository and a disposable fixture, is in
+[history](./docs/history.md#claude-code-bridge-and-same-name-skills). It is what was seen, not
+a precedence rule: the bridge reached a session rooted in another repository,
+and on a same-name collision only one provider's Skill was listed, the
+personal one over a project Skill and over a marketplace plugin. So a name can
+have more than one provider here, and the losing Skill is invisible rather than
+lower-priority. If a project needs its own version of a name that exists here,
+rename one of them.
 
 Gemini has no bridge created by this script. Its discovery and runtime behavior
 are pending/unknown here; this README makes no Gemini enforcement claim.
@@ -556,8 +544,9 @@ are pending/unknown here; this README makes no Gemini enforcement claim.
 Avoid `npx skills add -y`: its non-interactive fan-out can create unrelated
 agent directories in `$HOME`. Let it prompt or select only the intended agents.
 
-Avoid a blanket `npx skills update -g`: a 2026-09-07 audit found that upstream
-had removed Skills that were still locally installed. Use
+Avoid a blanket `npx skills update -g`: upstream can remove Skills that are
+still locally installed
+([history](./docs/history.md#upstream-removed-installed-skills)). Use
 `npx skills update -g <name>` only after checking that specific upstream Skill,
 then review the diff. The existing global lock filename is
 [`.agents/.skill-lock.json`](./.agents/.skill-lock.json); `skills-lock.json` is project scope. Missing
@@ -600,6 +589,3 @@ depend on Jarvis. Repair the one canonical copy and rerun the script.
   replaces canonical-name entries only when they are missing or dangling.
 - `~/.claude/settings.json`, `~/.codex/config.toml` — machine settings that may
   contain tokens or paths; deliberately left out for now, worth revisiting.
-- `~/.claude/skills-backup-2026-08-04/` — a manual backup from before this
-  repo existed, deleted on 2026-09-07 after all nine of its skills were
-  verified byte-identical to the tracked copies. Git is the backup now.

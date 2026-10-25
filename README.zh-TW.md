@@ -4,8 +4,8 @@
 
 > **繁中摘要**：Jarvis 是這台機器的個人 AI agent Skills 版本庫。它讓
 > `~/.Jarvis/.agents` 成為唯一 canonical copy，透過 `~/.agents` 與 Claude
-> Code／Codex 的 symlink 共用；它也提供 Friday 基線的安全採用 wrapper。專案
-> 本身必須不依賴 Jarvis 仍可重現。
+> Code／Codex 的 symlink 共用；它也保管個人指示與 Claude Code guard。專案
+> 本身必須不依賴 Jarvis 仍可重現。歷史與觀察記錄在 `docs/history.md`。
 
 Jarvis 是這台機器上、版本控制的 home，存放個人 AI-agent Skills 唯一的
 canonical copy。
@@ -28,56 +28,67 @@ Jarvis 處理四個相關情境：
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| **Jarvis** | 這台機器的 canonical 個人 Skills、bridge script，以及個人 Skill 的 provenance；以 `~/.claude/CLAUDE.md` 連結的個人指示；複製進 `~/.claude/settings.json` 的 [Claude Code guard](#claude-code-guard) | 某個專案的 `.agents/`、專案政策，或其他任何個人設定 |
+| **Jarvis** | 這台機器的 canonical 個人 Skills、bridge script，以及個人 Skill 的 provenance；以 `~/.claude/CLAUDE.md` 與 `~/.codex/AGENTS.md` 連結的個人指示；複製進 `~/.claude/settings.json` 的 [Claude Code guard](#claude-code-guard) | 某個專案的 `.agents/`、專案政策，或其他任何個人設定 |
 | **Friday** | 一份經審查、consumer 可以 pin 並採用的共享 baseline | 這台機器的個人目錄，或某個 consumer 的衝突處理 |
 | **Consumer project** | 它自己的 `.agents/` seed、overlays、整合、測試，以及已記錄的 Friday provenance | Jarvis 的個人 Skills，或 Friday 的 vendor payload |
 
 Consumer 專案必須在一台完全沒有個人層的機器上 build、測試並通過 CI —— CI
 runner 或別人的筆電上沒有這個 repository 的副本。因此專案所需的一切，屬於該專案
 本身或它所採用的 Friday 基線，不屬於這裡。Jarvis 可以協助 agent 在專案上工作，
-但絕不能成為專案隱性的依賴。
+但絕不能成為專案隱性的依賴。[TDD](./.agents/skills/tdd/) 或
+[Wayfinder](./.agents/skills/wayfinder/) 這類個人輔助工具可以幫忙，但專案必需的成果
+要放在該專案自己的文件、測試或自動化裡，缺少某個輔助工具也不能擋住它。
 
 這條限制的對象是 consumer 專案，不是 Jarvis。Jarvis 預期存在於這台機器上，在這裡
 工作的 agent 可以依賴它。
 
-## 目前的運作情境
+## 狀態 (2026-10-25)
 
-> **繁中摘要**：個人 Skills 是可選輔助，專案必需成果必須由專案自身的
-> 文件、測試或自動化承載；Matt Pocock 等 vendor Skill 維持原廠更新路徑。相同
-> 名稱的個人 Skill 優先只屬 owner policy，不能當作任何 runtime 的載入保證。
+已就緒：
 
-Jarvis 始終是個人、可選的那一層；專案必需的成果必須活在專案自身控制的文件、
-測試或自動化裡。[TDD](./.agents/skills/tdd/)、[Wayfinder](./.agents/skills/wayfinder/)
-及其他類似的個人 helper 可以協助工作，但它們的缺席絕不能阻擋 consumer
-project。
+- **個人指示。** [`.agents/AGENTS.md`](./.agents/AGENTS.md) 被連結成 Claude Code 的
+  `~/.claude/CLAUDE.md`，以及 Codex 的 `~/.codex/AGENTS.md`，所以兩者在每個 session
+  都會載入它。它依 scope 分組：*Base behavior*（回覆語系、書面規則優先於 auto
+  memory、把工作交給較便宜的 model）、*Coding*（先理解、不做臆測、外科手術式的修改、
+  驗證、把決定寫在它該在的地方）與 *Contracts*（英文文件加中文摘要、沒有自己規則的
+  repository 的 Git 規則）。
+- **派工文件。** [`docs/dispatch/`](./docs/dispatch/policy.md) 收有 policy、prompt
+  templates 與 Codex adapter。Codex 以 `gpt-6.1-sol` 擔任 Commander，以 `gpt-6-luna`
+  擔任 Implementer 與 Worker，已於 2026-10-25 在 codex-cli 0.164.0 上驗證。
+- **Claude Code guard。** [guard](#claude-code-guard) 拒絕永久禁止的 Git 與檔案操作，並在
+  人工審核的關卡詢問，包括可能帶出 tag 的 push 之前。
+- **Git hooks 與 CI。** 三道[本機 hook](#本機-git-hooks) 在這個 clone 裡執行。
+  [`CI`](.github/workflows/ci.yml) workflow 在每個 pull request 上執行，它的四項檢查
+  （Linux 與 macOS 上的測試、Skills 檢查、secret 掃描）在 `main` 上是必要的。
 
-Matt Pocock 與其他 CLI-managed 的 vendor Skills，只透過它們各自的 owning CLI
-更新，且更新前要先審查指名的上游來源。不要為了實作專案 setup 或政策而去修改
-它們 vendored 的檔案。當有可選的外部 tracker 可用時，它的專案輸出由該專案自己
-的 contract 定義：先解析出 Git root，再使用
-`docs/temp/matt-pocock/<feature>/<unique-suffix>/`。若該可選能力、repository
-root，或有效的 feature 不存在，就停止該可選工作流程，而不是寫到其他個人或
-vendor 的位置。
+待辦：
 
-owner 對某個同名個人 Skill 的偏好，只是一項 ownership policy，不代表任何
-runtime 的優先順序。Jarvis 不對 bridge 限制之外的事做任何優先順序宣告。Codex
-Skill Phase B 整體上仍屬 **UNVERIFIED**；不要從個別探測或 bridge entries 推論
-已經完成。
+- Codex 的 guard（Codex 無法像 Claude Code 那樣跳出詢問）：計畫記錄在
+  [ShenYo/Jarvis#15 的一則 comment](https://github.com/ShenYo/Jarvis/issues/15#issuecomment-6393273492)。
+- agent 身分，讓 agent 以自己的身分而不是 ShenYo 的名義操作：
+  [ShenYo/Jarvis#13](https://github.com/ShenYo/Jarvis/issues/13)，每個 agent 各有一個
+  issue：Claude Code [#14](https://github.com/ShenYo/Jarvis/issues/14)、Codex
+  [#15](https://github.com/ShenYo/Jarvis/issues/15) 與 agy
+  [#16](https://github.com/ShenYo/Jarvis/issues/16)。
+- Codex Skill Phase B 整體上仍屬 **UNVERIFIED**；不要從個別探測或 bridge entries 推論
+  已經完成。
+
+一路走來發生了什麼（附日期），以及某些規則背後的量測，都在
+[`docs/history.md`](./docs/history.md)。
 
 ## 目前盤點
 
-**盤點觀察，2026-10-24：** 這個 checkout 有 35 個 canonical `SKILL.md`
-檔案、35 個 Claude bridge links、35 個 Codex bridge links，以及 35 筆 lock
-entries。每個 canonical Skill 都是 CLI-managed，在兩個工具中都可被存取。
+這個 checkout 有 35 個 canonical `SKILL.md` 檔案、35 個 Claude bridge links、35 個
+Codex bridge links，以及 35 筆 lock entries。每個 canonical Skill 都是 CLI-managed，
+在兩個工具中都可被存取。
 
-`orca-cli` 與 `orchestration` 曾短暫無法存取：`skills` CLI 會寫入 canonical
-副本與 lock entry，但不會建立 bridge，因此它安裝的 Skill 在
-[`sync-personal-skills.sh`](./sync-personal-skills.sh) 執行之前，對 Claude Code
-與 Codex 都是看不見的。這是正常的操作順序，不是故障 —— 先用 CLI 安裝，再做
-bridge。
+`skills` CLI 會寫入 canonical 副本與 lock entry，但不會建立 bridge，因此它安裝的
+Skill 在 [`sync-personal-skills.sh`](./sync-personal-skills.sh) 執行之前，對 Claude
+Code 與 Codex 都是看不見的：先用 CLI 安裝，再做 bridge
+（[歷史](./docs/history.md#inventory-and-unreachable-skills)）。Claude bridge 目錄中若有真實目錄而非
+symlink，它屬於其他工具，bridge 腳本刻意不去動它。
 
-Claude bridge 目錄中另有一個 `synced` 項目。它是真實目錄而非 symlink，屬於
-其他工具，因此 bridge 腳本刻意不去動它。
+這些數字是點算的結果，不是快取；請重新點算而不要直接相信：
 
 ```sh
 find ~/.Jarvis/.agents/skills -mindepth 1 -maxdepth 2 -name SKILL.md -type f | wc -l
@@ -113,8 +124,9 @@ hooks 是這個 repository 自己維護的。它只保留這個 repository 專�
 工作」的 agent；`.agents/` 裡那份是給**每一個專案**的：
 [`.agents/AGENTS.md`](./.agents/AGENTS.md) 放的是個人規則（例如回覆語系跟著使用者
 的輸入），bridge 會把它連結成 `~/.claude/CLAUDE.md` 與 `~/.codex/AGENTS.md`，Claude Code
-與 Codex 不論從哪裡啟動的 session 都會載入它。在它出現之前，語系規則只存在兩個
-專案的 auto memory 裡，所以從其他地方啟動的 session 會用英文回覆。只有部分任務
+與 Codex 不論從哪裡啟動的 session 都會載入它。它之所以存在，是因為只活在專案
+memory 裡的規則，到不了從其他地方啟動的 session
+（[歷史](./docs/history.md#personal-instructions-for-every-project)）。只有部分任務
 才需要的 reference 放在各自的檔案裡，由 pointer 帶過去：dispatch policy、prompt
 templates 與 Codex adapter 在 [`docs/dispatch/`](./docs/dispatch/policy.md)。這份檔案要保持精簡（每個 session 的每一回合都
 會載入），只跟單一 repository 有關的規則請放在那個 repository 裡。
@@ -146,9 +158,8 @@ bridge links 解析時所依賴的穩定位址。
 被 link，但裡面的 skills 會。link 的名稱來自各個 skill 的 `name:` frontmatter，
 也是工具用來比對的依據，所以 `.agents/skills/git/commit/`（`name: git-commit`）
 會被 link 成 `~/.claude/skills/git-commit`。目前這個 repo 裡沒有任何巢狀結構；
-之所以支援這種寫法，是因為 pet_care 用這種方式把它的四個 git skills 分組，而
-曾經有一支假設「一個 skill 對應一個目錄」的腳本，結果同時把那個無法載入的
-container link 了出去，也把真正的 skills 藏在裡面。
+之所以支援這種寫法，是因為有 consumer project 用這種方式把它的 git skills 分組
+（[歷史](./docs/history.md#skills-grouped-under-a-container)）。
 
 ## Symlink 鏈
 
@@ -169,8 +180,8 @@ ${CODEX_HOME:-$HOME/.codex}/AGENTS.md
 
 上面的 `../../` 是「bridge 目錄位於 `~` 下兩層」時的段數，兩個預設位置都在那個深
 度。腳本會**計算**段數而不是假定它，所以位於其他深度的 `CODEX_HOME` 會得到正確
-的段數，而位於 `$HOME` 之外的則改用經過 `~/.agents` 的絕對路徑。先前假定為二，
-曾讓較深的 `CODEX_HOME` 下每一個 Codex link 都懸空。
+的段數，而位於 `$HOME` 之外的則改用經過 `~/.agents` 的絕對路徑
+（[歷史](./docs/history.md#a-deeper-codex-home)）。
 
 ## 沒有東西需要同步
 
@@ -243,8 +254,8 @@ clone 的機器可以執行這裡其他每一個 Skill；那一個會停在它�
 這支腳本會在 `~/.agents` 不存在時建立它、確保 Claude bridge 目錄存在，並且只
 在某個 canonical-name entry 缺失或 dangling 時才建立或替換它。當
 `${CODEX_HOME:-$HOME/.codex}` 存在時它會對 Codex 做 bridge，並在需要時建立其下的
-`skills/` —— 全新安裝的 Codex 有 home 但從未建立該子目錄，而以子目錄作為判準會讓
-Codex 完全拿不到 skill，卻回報為未安裝。不存在的 Codex home 會被跳過，而不是視為
+`skills/`，因為全新安裝的 Codex 有 home 但還沒有該子目錄
+（[歷史](./docs/history.md#codex-bridge-decided-by-its-home)）。不存在的 Codex home 會被跳過，而不是視為
 錯誤。它會檢查每個 canonical skill，在每個
 已 bridge 的工具裡，是否都有一個以其宣告名稱存在的 entry，回報 dangling 的
 non-reserved entries，並拒絕一個既不是 Skill、也不是 grouping directory 的
@@ -338,6 +349,14 @@ repository，因為 `~/.claude/settings.json` 與 `~/.codex/config.toml` 可能�
 路徑或機密資訊。guard 由它的 apply script 合併進 `~/.claude/settings.json`，那份
 檔案裡其他的內容都不是來自這裡。
 
+Matt Pocock 與其他 CLI-managed 的 vendor Skills，只透過它們各自的 owning CLI
+更新，且更新前要先審查指名的上游來源。不要為了實作專案 setup 或政策而去修改
+它們 vendored 的檔案。當有可選的外部 tracker 可用時，它的專案輸出由該專案自己
+的 contract 定義：先解析出 Git root，再使用
+`docs/temp/matt-pocock/<feature>/<unique-suffix>/`。若該可選能力、repository
+root，或有效的 feature 不存在，就停止該可選工作流程，而不是寫到其他個人或
+vendor 的位置。
+
 ## 本機 Git hooks
 
 `core.hooksPath` 指向 [`.githooks/`](.githooks)，所以這個 clone 會執行三道
@@ -354,11 +373,9 @@ commit 期與 push 期的檢查。它們是防手滑的護欄，不是伺服器�
 
 ### 由這裡自己維護
 
-這三個 hook 屬於這個 repository。它們最初是
-[Friday](https://github.com/ShenYo/Friday) 發給專案的 hook 的副本，從
-2026-10-24 起改由這裡自行維護：Jarvis 與 Friday 互不依賴，兩個方向都是。沒有
-任何東西拿這些檔案和 Friday 的比對；Friday 對它自己 hook 的修正，只有在有人刻意
-移植時才會來到這裡。
+這三個 hook 屬於這個 repository：Jarvis 與 Friday 互不依賴，兩個方向都是
+（[歷史](./docs/history.md#git-hooks-maintained-here)）。沒有任何東西拿這些檔案和 Friday 的比對；
+Friday 對它自己 hook 的修正，只有在有人刻意移植時才會來到這裡。
 
 確保它們可靠的是行為測試，而不是比對。[`tests/githooks.sh`](./tests/githooks.sh)
 在一個暫存 repository 裡執行每一個 hook，檢查它拒絕什麼、接受什麼。
@@ -372,10 +389,9 @@ bash ~/.Jarvis/tests/githooks.sh
 
 ### 為什麼 push 規則放在這裡，也放在 GitHub 上
 
-它們以前是放在這裡**而非** GitHub：private repository 的 ruleset 需要付費
-方案，而這個 repository 當時是免費方案下的 private repo。現在它是 public，
-所以 `main` 上有一個生效中的 ruleset —— 它拒絕刪除與 non-fast-forward push、
-並要求 pull request，且沒有任何 bypass actor。
+`main` 上有一個生效中的 ruleset：它拒絕刪除與 non-fast-forward push、並要求
+pull request，且沒有任何 bypass actor
+（[歷史](./docs/history.md#push-rules-on-github-as-well)）。
 
 `pre-push` 保留，有兩個理由。它在推送的那一刻就拒絕，而不是等一趟往返之後，
 所以 agent 得到的是原因而不是一個被拒的 ref。而且它保護這個 clone，即使面對
@@ -440,16 +456,12 @@ bash ~/.Jarvis/tests/claude-guard.sh
 bash ~/.Jarvis/tests/bash-guard.sh
 ```
 
-## 歷史背景
-
-在 2026-09-07 之前，這個 bridge 都是手動維護的，已安裝的 Skills 可能存在於
-磁碟上，卻對 Claude Code 不可見。正是這次事件，促成了這個 bridge 必須是可以
-安全重複執行、並且會檢查 canonical-name 是否存在與 dangling entries，而不只是
-印出「成功」。
-
 ## Bridge 狀態與限制
 
-[`sync-personal-skills.sh`](./sync-personal-skills.sh) 確保每個 canonical
+[`sync-personal-skills.sh`](./sync-personal-skills.sh) 可以安全地重複執行，並檢查
+canonical-name 是否存在與 dangling entries，而不只是印出「成功」，因為手動維護的
+bridge 曾讓已安裝的 Skills 存在於磁碟上，卻對 Claude Code 不可見
+（[歷史](./docs/history.md#hand-maintained-bridge)）。它確保每個 canonical
 名稱，在每個已 bridge 的工具裡都存在對應的 entry，並回報 dangling 的
 non-reserved entries。它不會驗證或修復一個指向錯誤目標、但本身仍是 live 的
 canonical-name entry，也沒有證明 Git-operation 的強制力，或各個 runtime 自身
@@ -462,43 +474,16 @@ installer 文件與一支 Python listing 工具，都支援這個目標位置與
 但那個已編譯的 Codex runtime loader 行為仍未被驗證。
 
 Jarvis 不對 Claude 或 Codex 在個人、專案與內建 Skills 之間的 runtime 優先
-順序做任何宣告。一個 live 的 link 只是檔案系統層級的證據，並不能證明某個特定
-prompt 一定會載入某個特定 Skill。
+順序做任何宣告。owner 對某個同名個人 Skill 的偏好，只是一項 ownership policy，
+不代表任何 runtime 的優先順序。一個 live 的 link 只是檔案系統層級的證據，並不能
+證明某個特定 prompt 一定會載入某個特定 Skill。
 
-以下三點是在 **Claude Code 2.1.306** 上原生觀察到的（2026-10-22），地點是一個
-消費端 repository 與一次性 fixture。它們不會把上面那段話變成優先序規則；它們
-只是被看到的事實。
-
-- **這個 bridge 確實能到達消費端 repo 的 session。** 一個根在其他 repository
-  的 session 回報 `code-review`、`tdd`、`research`、`writing-for-agents` 與
-  `setup-project-agents` 皆為可用，解析路徑是 `~/.claude/skills/<name>` →
-  `~/.agents/skills`，而 `~/.agents` → `.Jarvis/.agents`。所以這裡的集中化確實
-  會到達一個運作中的 session，不只是存在於檔案系統上。
-- **同名碰撞時，出現的是個人版，而專案版完全沒有被列出。** 一個 fixture 在
-  `.claude/skills/research/` 放了專案版 skill，與這個 repository 的個人
-  `research` 同名。一個停用了所有工具的 session —— 因此答案只能來自已載入的
-  context —— 回報**恰好一個**名為 `research` 的 skill，並逐字引用了個人版的
-  描述。同一個 fixture 裡的控制組（一個沒有同名對手的專案 skill）**有**被
-  列出，這才讓碰撞結果具有意義，而不是單純的「沒被發現」。
-
-  實務上的後果是：輸的那個 Skill 是**不可見**的，而不只是優先序較低，所以
-  session 沒辦法被要求改用另一個。如果某個專案需要自己版本的、而這裡也存在的
-  名稱，請把其中一個改名。
-
-  一個名稱、一個 fixture、一個版本、兩個 scope。對 project-vs-plugin 或
-  Codex 不做任何宣稱。
-- **個人 Skill 同樣勝過同名的 marketplace plugin；而 bridge 被移走時，那個名稱
-  由 plugin 接手。** `code-review` 同時以 Skill 的形式存在於這裡，並以 plugin
-  command 的形式存在於官方 marketplace
-  （`~/.claude/plugins/marketplaces/claude-plugins-official/plugins/code-review/commands/code-review.md`）。
-  bridge 在位時，一個根在消費端 repository 的 session 引用的是**這個**
-  repository 的 `code-review` 描述。而當 `~/.agents` 與 `~/.claude/skills`
-  被暫時移開時，這個名稱仍然可用 —— 由 marketplace 那份提供 —— 但 `tdd`、
-  `research`、`writing-for-agents` 與 `setup-project-agents` 全都變成不可用。
-
-  兩個方向都只照實記錄。重點不是某條優先序規則，而是**一個名稱在這裡可能有
-  不只一個提供者**，所以「這個 Skill 可用」本身並不代表載入的是這個
-  repository 裡的那一份。
+在某一個 Claude Code 版本上，於一個消費端 repository 與一次性 fixture 中原生觀察到
+的結果，記錄在[歷史](./docs/history.md#claude-code-bridge-and-same-name-skills)。那只是被看到的事實，
+不是優先序規則：bridge 確實到達了根在其他 repository 的 session，而同名碰撞時只有
+一個提供者的 Skill 被列出，個人版勝過專案版，也勝過 marketplace plugin。所以一個名稱
+在這裡可能有不只一個提供者，輸的那個 Skill 是不可見的，而不只是優先序較低。如果某個
+專案需要自己版本的、而這裡也存在的名稱，請把其中一個改名。
 
 Gemini 目前沒有由這支腳本建立的 bridge。它的 discovery 與 runtime 行為在
 這裡是 pending/unknown 的；這份 README 不對 Gemini 做任何強制性宣告。
@@ -509,8 +494,8 @@ Gemini 目前沒有由這支腳本建立的 bridge。它的 discovery 與 runtim
 `$HOME` 裡建立不相關的 agent 目錄。讓它用 prompt 或 select 的方式，只處理
 你真正要的 agents。
 
-避免大範圍使用 `npx skills update -g`：2026-09-07 的一次稽核發現，上游曾經
-移除過一些仍在本地安裝的 Skills。只有在先檢查過某個特定上游 Skill 之後，才
+避免大範圍使用 `npx skills update -g`：上游可能移除仍在本地安裝的 Skills
+（[歷史](./docs/history.md#upstream-removed-installed-skills)）。只有在先檢查過某個特定上游 Skill 之後，才
 使用 `npx skills update -g <name>`，然後再檢查 diff。目前全域 lock 的檔名是
 [`.agents/.skill-lock.json`](./.agents/.skill-lock.json)；`skills-lock.json`
 則是 project scope 的。缺少 `agents/openai.yaml` descriptors，本身並不是
@@ -553,6 +538,3 @@ jq -r '.skills | to_entries[] | "\(.key)\t\(.value.source)\t\(.value.skillPath)"
   缺失或 dangling 時，才建立或替換 canonical-name entries。
 - `~/.claude/settings.json`、`~/.codex/config.toml`——可能包含 tokens 或
   路徑的機器層級設定；目前刻意排除在外，值得日後再討論。
-- `~/.claude/skills-backup-2026-08-04/`——這個 repo 存在之前的一份手動備份，
-  在 2026-09-07，於確認其中九個 skills 都與受追蹤的副本逐 byte 相同之後被
-  刪除。現在 Git 就是備份。
