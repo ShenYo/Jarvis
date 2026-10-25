@@ -805,6 +805,9 @@ def push_rule(o, directory, res):
         remote = push_remote(directory, current)
     if sandbox_remote(directory, remote):
         return  # the checkpoint guards a shared remote, not a scratch repo
+    # A release tag is a checkpoint: consumers pin to it and no agent may
+    # delete one, so pushing it waits for the person to say yes.
+    tag_push(o, refspecs, directory, res)
     defaults = default_branches(directory, remote)
     if has_long(o, "--all", len("--al")) or has_long(o, "--branches", len("--br")):
         res.check("git push --all pushes the default branch too")
@@ -823,6 +826,30 @@ def push_rule(o, directory, res):
         if dest in defaults or dest in ("HEAD", "") or "*" in dest:
             res.check("git push to %s may update the default branch, which bypasses "
                       "the pull request" % (dest or "every matching branch"))
+
+
+def tag_push(o, refspecs, directory, res):
+    if has_long(o, "--tags", len("--tag")) or has_long(o, "--follow-tags", len("--fo")):
+        res.check("git push --tags or --follow-tags pushes tags, and a release tag "
+                  "needs the user's go-ahead")
+        return
+    if (run_git(directory, "config", "--get", "push.followTags") or "").lower() in (
+            "true", "yes", "on", "1"):
+        res.check("push.followTags is set, so this push may carry a release tag")
+        return
+    for spec in refspecs:
+        for side in spec.lstrip("+").split(":"):
+            if not side or side.startswith("refs/heads/"):
+                continue
+            if side.startswith("refs/tags/"):
+                found = side
+            else:
+                # None means git could not answer: unknown asks, like the rest.
+                found = run_git(directory, "tag", "--list", "--", side)
+            if found is None or found:
+                res.check("git push %s may push a tag, and a release tag needs the "
+                          "user's go-ahead" % spec)
+                return
 
 
 def push_remote(directory, branch):
