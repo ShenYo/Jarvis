@@ -144,6 +144,13 @@ Name any risk before the command. When it removes many files or a whole
 directory tree, say so plainly, list or count what goes, and ask the user to
 double-check before running it.
 
+When the command needs `sudo`, or cannot be undone, open with a warning line
+above the check and the command: **Needs sudo** says what the elevated command
+reaches beyond the user's own files; **Irreversible** says what nothing will
+bring back. Irreversible means neither Git history nor a backup can recover it:
+an untracked or ignored file, a remote branch or tag, a force push, data
+outside any repository.
+
 ### Git in a repository without its own rules
 
 A repository's own Git guideline always wins. Where a repository has none,
