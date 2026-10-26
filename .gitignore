@@ -9,3 +9,8 @@
 # Agent scratch space. docs/temp/ already held scratch work while nothing
 # ignored it, so a blanket `git add -A` would have committed it.
 docs/temp/
+
+# A directory whose name contains "local" holds this machine's own settings
+# or secrets (for example config-local/), never meant for the remote. The
+# bracket form matches any case, since a Linux clone does not ignore case.
+*[Ll][Oo][Cc][Aa][Ll]*/
