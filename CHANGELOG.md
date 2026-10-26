@@ -44,8 +44,9 @@ change something.
 - **Claude Code guard.** [`guard.json`](./.agents/claude-guard/guard.json) and
   the [`bash-guard.py`](./.agents/claude-guard/bash-guard.py) hook refuse the
   permanently prohibited Git and file operations, and ask at the human-review
-  checkpoints, including before a push that may carry a tag. The hook fails
-  closed. It takes effect only after
+  checkpoints, including before a push that may carry a tag and before
+  publishing a GitHub Release (`gh release create`, `edit` or `upload`). The
+  hook fails closed. It takes effect only after
   [`apply-claude-guard.sh`](./scripts/apply-claude-guard.sh) copies it into
   `~/.claude/settings.json` and `~/.claude/hooks/`.
 - **Codex guard.** [`apply-codex-guard.sh`](./scripts/apply-codex-guard.sh)
