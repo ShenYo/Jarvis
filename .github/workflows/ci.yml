@@ -33,6 +33,8 @@ jobs:
         run: bash tests/claude-guard.sh
       - name: The guard hook refuses every probed spelling and passes ordinary work
         run: bash tests/bash-guard.sh
+      - name: The Codex guard installs beside other hooks and refuses at the checkpoints
+        run: bash tests/codex-guard.sh
       - name: The Git hooks refuse what they should
         run: bash tests/githooks.sh
       - name: The two READMEs agree

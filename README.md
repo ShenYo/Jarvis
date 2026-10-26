@@ -503,6 +503,41 @@ bash ~/.Jarvis/tests/claude-guard.sh
 bash ~/.Jarvis/tests/bash-guard.sh
 ```
 
+### Codex
+
+[`apply-codex-guard.sh`](./scripts/apply-codex-guard.sh) gives Codex sessions
+the same protection through a user-level `PreToolUse` hook: it copies
+`bash-guard.py` to `${CODEX_HOME:-~/.codex}/hooks/jarvis-guard.py` and merges
+one group for the Bash tool into `hooks.json`, leaving every other entry (Orca
+keeps its own there) exactly as it is. The hook denies the same prohibited
+operations. Codex cannot ask: it parses an `ask` answer and runs the command
+anyway. So at a human-review checkpoint the hook answers `deny`, with a reason
+telling the agent to state the exact command and let the user run it, or to do
+it in a runtime that can ask. In Codex a checkpoint is therefore a refusal, not
+a prompt.
+
+```sh
+bash ~/.Jarvis/scripts/apply-codex-guard.sh          # copy the hook, merge hooks.json, keep a .guard-backup
+bash ~/.Jarvis/scripts/apply-codex-guard.sh --check  # exit 1 when it would change something
+```
+
+Codex runs the hook only after you trust it in `/hooks`, and trust is by hash,
+so trust it again after every change to the hook or its entry.
+
+What this does not do. Codex fails open: a hook that exits non-zero or overruns
+its timeout is marked failed and the command runs. In Codex mode the guard
+turns its own errors, including input it cannot parse, into a `deny` and exits
+0, keeps its git lookups well inside the 10-second timeout, and answers
+`deny` from a watchdog at 8 seconds if it has not finished by then. A hook Codex
+cannot start at all, for instance because the interpreter is missing, still
+lets commands through. The measurements are in
+[history](./docs/history.md#codex-hook-outcomes). The tests run in a sandbox
+`CODEX_HOME` and never touch the real `~/.codex`:
+
+```sh
+bash ~/.Jarvis/tests/codex-guard.sh
+```
+
 ## Bridge status and limitations
 
 [`sync-personal-skills.sh`](./sync-personal-skills.sh) is safely repeatable and
