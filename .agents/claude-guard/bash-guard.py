@@ -1114,6 +1114,10 @@ def analyze_gh(args, ctx, res, stdin=()):
             body = " ".join(v for n, v in o.long if n in ("--body",) and v) + " " + gh_short_value(args, "-b")
             if re.search(r"(^|\s)(/merge\b|bors r\+|bors merge|@dependabot merge)", body):
                 res.check("the comment asks a bot to merge")
+    elif group == "release" and action in ("create", "edit", "upload"):
+        # A release is published to everyone who watches the repository, and
+        # `create` also pushes the tag when it does not exist yet.
+        res.check("gh release %s publishes a release, and a release is a checkpoint" % action)
     elif group == "repo" and action in ("edit", "rename", "archive", "unarchive"):
         res.check("gh repo %s changes repository settings" % action)
     elif group == "workflow" and action == "disable":
@@ -1194,6 +1198,8 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
         res.no("the API call force-updates a ref")
     if re.search(r"git/refs/heads/(main|master)$", endpoint):
         res.check("the API call updates the default branch directly")
+    if re.search(r"(^|/)releases(/|$)", endpoint) or re.search(r"git/refs(/tags)?$", endpoint) and re.search(r"refs/tags/", body):
+        res.check("the API call publishes a release or a tag, and either is a checkpoint")
     if REPO_SETTINGS.match(endpoint):
         res.check("the API call changes repository settings or protection")
 

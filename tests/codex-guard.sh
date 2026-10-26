@@ -320,6 +320,7 @@ probe deny 'git push' "$onmain" "$cp_pat"
 probe deny 'gh pr merge 12 --squash' "$feat" "$cp_pat"
 probe deny 'git push origin v1.0.0' "$onmain" "$cp_pat"
 probe deny 'git push --follow-tags origin feat/x' "$onmain" "$cp_pat"
+probe deny 'gh release create v1.0.0 --notes-from-tag' "$feat" "$cp_pat"
 
 echo "== ordinary work: no decision"
 probe none 'git status' "$feat"
