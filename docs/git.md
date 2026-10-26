@@ -45,9 +45,10 @@ document.
 | Pushing directly to the default branch | A person's. `pre-push` refuses it. |
 | Approving a pull request that contains the agent's own work | Nobody's. Only an independent reviewer approves. |
 | Changing branch protection, rulesets or repository settings | A person's |
+| Pushing a tag; publishing, editing or uploading to a GitHub Release | A person's. They name the tag and the commit in their own message. |
 | Force push, `reset --hard`, rewriting pushed history | **Never the agent's**, even when asked |
 | Discarding uncommitted work: `git clean`, `stash drop`/`clear`, `worktree remove`, `restore`/`checkout --` | **Never the agent's**, even when asked |
-| Deleting a branch, tag or ref, locally or on the remote | **Never the agent's**, even when asked. `pre-push` refuses remote deletion. |
+| Deleting a branch, tag, ref or GitHub Release, locally or on the remote | **Never the agent's**, even when asked. `pre-push` refuses remote deletion. |
 | Deleting files: `rm -r`, `find -delete`, `git rm` | **Never the agent's**, even when asked |
 | Removing or rewriting a remote; GitHub API `DELETE`; deleting a repository | **Never the agent's**, even when asked |
 

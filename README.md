@@ -64,15 +64,17 @@ In place:
 - **Claude Code guard.** The [guard](#claude-code-guard) refuses the
   permanently prohibited Git and file operations and asks at the human-review
   checkpoints, including before a push that may carry a tag.
+- **Codex guard.** The same guard runs as a user-level Codex hook, refusing
+  where Claude Code would ask, because Codex cannot ask ([Codex](#codex)).
 - **Git hooks and CI.** The three [local hooks](#local-git-hooks) run in this
   clone. The [`CI`](.github/workflows/ci.yml) workflow runs on every pull
   request, and its four checks (the tests on Linux and macOS, the Skills
   check, and the secret scan) are required on `main`.
+- **Releases.** Jarvis is versioned from v1.0.0, the first tag; each release's
+  notes are in [`CHANGELOG.md`](./CHANGELOG.md) (see [Releases](#releases)).
 
 Pending:
 
-- The guard for Codex, which cannot ask the way Claude Code does: the plan is
-  recorded in [a comment on ShenYo/Jarvis#15](https://github.com/ShenYo/Jarvis/issues/15#issuecomment-6393273492).
 - Agent identity, so that an agent acts under its own identity rather than
   ShenYo's: [ShenYo/Jarvis#13](https://github.com/ShenYo/Jarvis/issues/13),
   with one issue per agent: Claude Code
@@ -615,6 +617,35 @@ jq -r '.skills | to_entries[] | "\(.key)\t\(.value.source)\t\(.value.skillPath)"
 Do not solve a bridge failure by making a second real copy of `~/.agents`,
 copying every Skill manually into a tool directory, or changing a project to
 depend on Jarvis. Repair the one canonical copy and rerun the script.
+
+## Releases
+
+Jarvis tags releases as `vMAJOR.MINOR.PATCH`, starting at v1.0.0:
+
+- **PATCH** for a documentation-only change.
+- **MINOR** for a change to what runs: the guard, the bridge script, the apply
+  scripts, the Git hooks, or how the Skills are bridged.
+- **MAJOR** for a large structural change.
+
+Nothing consumes a release: no project depends on Jarvis, so a release is a
+labelled point on this machine, not something to propagate. Every release
+carries a note in [`CHANGELOG.md`](./CHANGELOG.md), above all a MINOR or MAJOR
+one, which says what changed, why, and what to do on this machine afterwards.
+
+To cut a release, the pull request that makes it adds the entry to
+`CHANGELOG.md` under `## Unreleased` and renames that heading to the version, so
+the note is reviewed. After the merge, the entry becomes the tag's message and
+the GitHub Release's notes:
+
+```sh
+git tag -a vX.Y.Z <commit> -F <file holding the entry>
+git push origin vX.Y.Z
+gh release create vX.Y.Z --notes-from-tag
+```
+
+Pushing the tag and publishing the release are both checkpoints: the user
+authorizes each by naming the tag and the commit. Deleting a tag or a release is
+never the agent's ([`docs/git.md`](./docs/git.md)).
 
 ## Not in this repo
 
