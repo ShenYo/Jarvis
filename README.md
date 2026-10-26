@@ -291,6 +291,25 @@ is neither a Skill nor a grouping directory. A live canonical-name entry that
 points at the wrong target is left unchanged and is not detected. It exits
 non-zero if these checks fail. Re-run it after adding or removing a skill.
 
+To let agents act on GitHub as an account of their own, set up the [agent
+identity](#agent-identity) after the guards, in this order:
+
+1. Apply the guards: `bash ~/.Jarvis/scripts/apply-claude-guard.sh` and
+   `bash ~/.Jarvis/scripts/apply-codex-guard.sh`.
+2. On GitHub, once for all machines, create or reuse the one machine account.
+   Signed in as the owner of each repository, invite it as a collaborator with
+   the Write role (an organization repository asks for the role; on a personal
+   one a collaborator gets write by default), then accept the invitation signed
+   in as the machine account.
+3. On this machine, run `bash ~/.Jarvis/scripts/apply-agent-identity.sh --setup`.
+   It creates the config file and this machine's key, shows the public key to
+   add (signed in as the machine account: Settings, SSH and GPG keys, New SSH
+   key), and prints the command that logs `gh` in as the machine account.
+4. Run `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check` until its last
+   line says to apply.
+5. Run `bash ~/.Jarvis/scripts/apply-agent-identity.sh` to write the identity,
+   then start a new Claude Code session.
+
 ## Daily maintenance
 
 ### Add
@@ -539,6 +558,87 @@ lets commands through. The measurements are in
 ```sh
 bash ~/.Jarvis/tests/codex-guard.sh
 ```
+
+### Agent identity
+
+On this machine agents act on GitHub as the owner, so the owner cannot approve
+the pull requests an agent opens, and "an agent never approves its own work" is
+only an instruction. An agent identity gives agents a machine account of their
+own: their commits and pull requests come from it, and the owner reviews them as
+a different person.
+
+[`apply-agent-identity.sh`](./scripts/apply-agent-identity.sh) checks that a
+machine is set up for it, and only when every check passes writes the identity
+into the `env` of `~/.claude/settings.json`. The identity is kept in a local
+file, never in this repository, which is public:
+`~/.Jarvis/config-local/agent-identity`. The path is fixed, so every worktree
+reads the same file. It must be untracked and ignored by Git, and the check
+refuses it otherwise. It is parsed, never sourced: one `key=value` per line,
+`#` comments and blank lines, and an unknown key, a duplicate, an empty value,
+quotes, trailing spaces or CRLF are each reported with their line number.
+
+```ini
+login=my-agent-account
+email=12345+my-agent-account@users.noreply.github.com
+ssh_key=~/.ssh/id_ed25519_agent_claude_<hostname>
+gh_config_dir=~/.config/gh-agent
+repos=owner/repo
+# author_name=Claude Code
+```
+
+`login` is the machine account, `email` its verified email (commits are
+attributed by it), `ssh_key` this machine's private key for it, `gh_config_dir`
+the `GH_CONFIG_DIR` the agent's `gh` uses, which must not be your own, and
+`repos` the repositories it works in.
+
+Every check prints one line, `OK`, `MISSING`, `WRONG` or `WARN`, and for
+anything that is not `OK` an exact `fix:` line. All of them run, so one run shows
+everything, and the last line, `Next: step N of 6 — …`, names the earliest step
+still failing, so rerunning `--check` always tells you the single next thing to
+do. The checks follow the order a new machine is set up in:
+
+1. the config file exists, is private and is valid;
+2. this machine's SSH key exists;
+3. its public key is on the machine account, so GitHub answers `Hi <login>!`;
+4. `gh` is logged in as that account, with no `GH_TOKEN` in the way;
+5. the account can push to each repository: not invited, invited but not
+   accepted, and accepted with a role above Write are three different fixes;
+6. the settings can take the identity without overwriting anything.
+
+```sh
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --setup    # a new machine: create the file and the key, guided
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --check    # run every check, write nothing
+bash ~/.Jarvis/scripts/apply-agent-identity.sh            # check, and write only if all pass
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --unapply  # remove exactly what a run wrote
+bash ~/.Jarvis/tests/agent-identity.sh
+```
+
+`--setup` is interactive. After asking, it creates the config file from values
+it validates as you type them, and generates the key with `ssh-keygen` only when
+the key file does not exist: an existing key is never overwritten or modified.
+It prints the public key and where to add it, prints the `gh auth login` command
+for the agent's config directory, and finishes with the full check. It never
+writes `settings.json`, and it never touches your own `gh` login or keys.
+
+A real run merges `GIT_AUTHOR_NAME`, `GIT_COMMITTER_NAME`, `GIT_AUTHOR_EMAIL`,
+`GIT_COMMITTER_EMAIL`, `GIT_SSH_COMMAND`, `GH_CONFIG_DIR`,
+`JARVIS_AGENT_IDENTITY` and the `GIT_CONFIG_*` pairs below into `env`, keeps a backup, and records what it wrote in
+`~/.claude/agent-identity.applied.json`. A key that someone else set to a
+different value is reported as a conflict and is not overwritten, and a
+settings file that changes while the script runs is not written. Start a new
+Claude Code session afterwards: a running one keeps the old environment. The agent's git is also forced onto SSH
+(`GIT_CONFIG_COUNT` and the `url.git@github.com:.insteadOf` and
+`credential.helper` pairs), because an HTTPS remote ignores `GIT_SSH_COMMAND` and
+would push with the credentials in the operator's keychain, as the wrong account.
+
+The guard has a switch for this, and it is off. With
+`JARVIS_REQUIRE_AGENT_IDENTITY=1` in the environment and `JARVIS_AGENT_IDENTITY`
+empty, [`bash-guard.py`](./.agents/claude-guard/bash-guard.py) refuses every
+GitHub write: a push to a shared remote, `gh pr`, `gh issue`, `gh release` and
+`gh repo` commands that change something, and a `gh api` request that is not a
+`GET`. Reads stay allowed. Nothing sets the switch; the owner turns it on after
+this machine passes `--check`. It applies in Codex too, but the script writes
+only Claude Code's environment, so Codex needs the marker in its own.
 
 ## Bridge status and limitations
 

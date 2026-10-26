@@ -62,10 +62,37 @@ CODEX_CHECKPOINT = (
 )
 
 
+def identity_missing():
+    """True when this machine requires an agent identity for GitHub writes
+    (JARVIS_REQUIRE_AGENT_IDENTITY=1) and the environment carries none
+    (JARVIS_AGENT_IDENTITY, which scripts/apply-agent-identity.sh writes into
+    the agent's environment after every one of its checks passes). The switch
+    is off unless something sets it, and then nothing here changes."""
+    return (os.environ.get("JARVIS_REQUIRE_AGENT_IDENTITY") == "1"
+            and not os.environ.get("JARVIS_AGENT_IDENTITY", "").strip())
+
+
+NO_IDENTITY = (
+    "GitHub writes need this machine's agent identity, and it has none "
+    "(JARVIS_REQUIRE_AGENT_IDENTITY=1 but JARVIS_AGENT_IDENTITY is empty), so "
+    "the command would act as whoever is logged in. Run `bash "
+    "~/.Jarvis/scripts/apply-agent-identity.sh --check` and do what it lists; "
+    "the config file is ~/.Jarvis/config-local/agent-identity. Do not retry "
+    "this command or work around it: tell the user."
+)
+
+
 class Result:
     def __init__(self):
         self.deny = []
         self.ask = []
+        self.unset = []
+
+    def github_write(self, what):
+        """Record a command that writes to GitHub; it is refused when the
+        machine requires an agent identity and has none."""
+        if identity_missing() and what not in self.unset:
+            self.unset.append(what)
 
     def no(self, why):
         if why not in self.deny:
@@ -822,6 +849,7 @@ def push_rule(o, directory, res):
         remote = push_remote(directory, current)
     if sandbox_remote(directory, remote):
         return  # the checkpoint guards a shared remote, not a scratch repo
+    res.github_write("git push")
     # A release tag is a checkpoint: consumers pin to it and no agent may
     # delete one, so pushing it waits for the person to say yes.
     tag_push(o, refspecs, directory, res)
@@ -1086,6 +1114,16 @@ REPO_SETTINGS = re.compile(
     r"actions/permissions|transfer|topics|branches/[^/]+/(protection|rename))(/.*)?)?$")
 
 
+# gh commands that write to GitHub, for the agent-identity switch. Reads
+# (`gh pr view`, `gh issue list`, `gh api` with GET) are not in it.
+GH_WRITES = {
+    "pr": ("create", "merge", "close", "reopen", "edit", "comment", "review"),
+    "issue": ("create", "edit", "comment", "close", "reopen"),
+    "release": ("create", "edit", "upload"),
+    "repo": ("create", "edit", "fork"),
+}
+
+
 def analyze_gh(args, ctx, res, stdin=()):
     o = parse(args, "RXfFHqtpb", ("--repo", "--method", "--field", "--raw-field",
                                     "--header", "--input", "--jq", "--template",
@@ -1095,6 +1133,8 @@ def analyze_gh(args, ctx, res, stdin=()):
     if not words:
         return
     group, action = words[0], words[1] if len(words) > 1 else ""
+    if action in GH_WRITES.get(group, ()):
+        res.github_write("gh %s %s" % (group, action))
     if group != "api" and action in ("delete", "delete-asset"):
         res.no("gh %s %s deletes it" % (group, action))
         return
@@ -1172,6 +1212,10 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
     endpoint = o.pos[1] if len(o.pos) > 1 else ""
     endpoint = endpoint.lstrip("/").split("?")[0]
     body = "\n".join(fields)
+    # A GraphQL query is a POST but reads; only a mutation (or a body that
+    # could not be read) writes.
+    if method != "GET" and (endpoint != "graphql" or unread or re.search(r"\bmutation\b", body, re.I)):
+        res.github_write("gh api %s" % method)
     if method == "DELETE":
         res.no("a GitHub API DELETE request")
         return
@@ -1291,7 +1335,10 @@ def run():
     command = (data.get("tool_input") or {}).get("command") or ""
     cwd = data.get("cwd") or os.getcwd()
     res = decide(command, cwd)
-    if res.deny:
+    if res.unset:
+        why = "; ".join(res.deny + ["%s writes to GitHub" % ", ".join(res.unset)])
+        emit("deny", GUARD + ": " + why + ". " + (PROHIBITED + " " if res.deny else "") + NO_IDENTITY)
+    elif res.deny:
         emit("deny", GUARD + ": " + "; ".join(res.deny) + ". " + PROHIBITED)
     elif res.ask and CODEX:
         emit("deny", GUARD + ": " + "; ".join(res.ask) + ". " + CODEX_CHECKPOINT)

@@ -14,6 +14,10 @@ repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 hook="${BASH_GUARD:-$repo/.agents/claude-guard/bash-guard.py}"
 py=$(command -v /usr/bin/python3 || command -v python3)
 root=$(mktemp -d "${TMPDIR:-/tmp}/bash-guard-test.XXXXXX")
+# The corpus below runs with the agent-identity switch off, whatever this
+# machine has set; the switch's own cases set it themselves.
+unset JARVIS_REQUIRE_AGENT_IDENTITY JARVIS_AGENT_IDENTITY
+hook_args=""
 
 # A repository on a feature branch, and one on main, for the push cases.
 git_init() {
@@ -26,6 +30,8 @@ git_init "$onmain"
 git init -q --bare "$root/local.git"
 git_init "$root/sandbox"; git -C "$root/sandbox" remote add origin "$root/local.git"
 git -C "$onmain" remote add origin git@github.com:example/shared.git
+git_init "$root/https"; git -C "$root/https" switch -q -c feat/h
+git -C "$root/https" remote add origin https://github.com/example/shared.git
 # Release tags: one in a repository with a shared remote, one in a scratch one.
 git -C "$onmain" tag v1.0.0
 git -C "$root/sandbox" tag v1.0.0
@@ -71,7 +77,7 @@ probe() { # expected, command, [cwd]
   # A hook that does not answer within 5 s is a failure of its own: in a real
   # session it trips the hook timeout and blocks the call.
   jq -n --arg c "$cmd" --arg d "$dir" '{tool_name: "Bash", tool_input: {command: $c}, cwd: $d}' >"$root/in.json"
-  out=$(perl -e 'alarm 5; exec @ARGV' "$py" -I "$hook" <"$root/in.json"); rc=$?
+  out=$(perl -e 'alarm 5; exec @ARGV' "$py" -I "$hook" $hook_args <"$root/in.json"); rc=$?
   if [ "$rc" = 142 ]; then
     got=hang
   else
@@ -300,6 +306,108 @@ probe allow "\$'echo' hi"
 probe allow 'xargs -0 -n1 echo < list.txt'
 probe allow 'git push origin develop' "$onmain"
 probe allow 'gh api graphql -f query="query { repository(owner: \"o\", name: \"r\") { viewerCanDelete } }"'
+
+echo "== agent identity: the switch is off unless JARVIS_REQUIRE_AGENT_IDENTITY=1"
+export JARVIS_REQUIRE_AGENT_IDENTITY=0
+probe allow 'gh pr create --title x --body y'
+probe allow 'git push origin feat/y' "$onmain"
+probe allow 'gh api -X POST repos/o/r/issues -f title=x'
+export JARVIS_REQUIRE_AGENT_IDENTITY=
+probe allow 'gh issue create --title x'
+unset JARVIS_REQUIRE_AGENT_IDENTITY
+probe allow 'gh release view v1.0.0'
+
+echo "== agent identity: switch on, no identity on this machine -> GitHub writes are refused"
+export JARVIS_REQUIRE_AGENT_IDENTITY=1
+probe deny 'git push origin feat/y' "$onmain"
+probe deny 'git push -u origin feat/x'
+probe deny 'git push' "$feat"
+probe deny 'cd '"$onmain"' && git push origin feat/y'
+probe deny 'bash -c "gh pr create --title x"'
+probe deny 'git push origin feat/y' "$root/https"
+probe deny 'git push' "$root/https"
+probe deny 'gh pr create --title x --body y'
+probe deny 'gh -R o/r pr create --title x'
+probe deny 'gh pr edit 12 --title x'
+probe deny 'gh pr comment 12 --body hi'
+probe deny 'gh pr review 12 --comment -b ok'
+probe deny 'gh pr merge 12'
+probe deny 'gh pr close 12'
+probe deny 'gh pr reopen 12'
+probe deny 'gh issue create --title x'
+probe deny 'gh issue edit 3 --title y'
+probe deny 'gh issue comment 3 --body hi'
+probe deny 'gh issue close 3'
+probe deny 'gh issue reopen 3'
+probe deny 'gh release create v2.0.0 --notes x'
+probe deny 'gh release edit v1.0.0 --notes x'
+probe deny 'gh release upload v1.0.0 build.zip'
+probe deny 'gh repo create ShenYo/x --private'
+probe deny 'gh repo edit --description x'
+probe deny 'gh repo fork o/r'
+probe deny 'gh api -X POST repos/o/r/issues -f title=x'
+probe deny 'gh api repos/o/r/issues -f title=x'
+probe deny 'gh api -X PATCH repos/o/r/issues/3 -f state=closed'
+probe deny 'gh api --method=put repos/o/r/topics'
+probe deny 'gh api graphql -f query="mutation { addComment(input: {subjectId: \"x\", body: \"y\"}) { clientMutationId } }"'
+probe deny 'gh api graphql --input missing.json' "$root/sandbox"
+echo "== agent identity: switch on, no identity -> reads and local work stay allowed"
+probe allow 'gh pr view 12 --json state'
+probe allow 'gh pr list'
+probe allow 'gh pr diff 12'
+probe allow 'gh pr checkout 12'
+probe allow 'gh issue view 3'
+probe allow 'gh issue list'
+probe allow 'gh repo view o/r'
+probe allow 'gh release view v1.0.0'
+probe allow 'gh api repos/o/r'
+probe allow 'gh api -X GET repos/o/r/issues -f per_page=1'
+probe allow 'gh api graphql -f query="query { viewer { login } }"'
+probe allow 'git fetch origin'
+probe allow 'git status --short'
+probe allow 'git commit -m "docs: mention gh pr create"'
+probe allow 'git push --dry-run origin feat/x'
+probe allow 'git push --dry-run origin feat/y' "$root/https"
+probe allow 'git push -u origin feat/x' "$root/sandbox"
+probe allow 'echo "gh pr create is refused"'
+export JARVIS_AGENT_IDENTITY="   "
+probe deny 'gh pr create --title x'
+echo "== agent identity: switch on, identity present -> exactly the usual behaviour"
+export JARVIS_AGENT_IDENTITY=some-agent
+probe allow 'gh pr create --title x --body y'
+probe allow 'git push origin feat/y' "$onmain"
+probe allow 'git push origin feat/y' "$root/https"
+probe ask 'git push origin main' "$root/https"
+probe allow 'gh api -X POST repos/o/r/issues -f title=x'
+probe allow 'gh issue create --title x'
+probe ask 'gh pr merge 12'
+probe ask 'gh pr review 12 --approve'
+probe ask 'git push origin main'
+probe ask 'gh release create v2.0.0 --notes x'
+probe deny 'git push --force origin feat/x'
+probe deny 'gh api -X DELETE repos/o/r/git/refs/heads/x'
+echo "== agent identity: the same in Codex mode, where an ask is a deny anyway"
+hook_args=--codex
+probe allow 'gh pr create --title x'
+probe deny 'gh pr merge 12'
+unset JARVIS_AGENT_IDENTITY
+probe deny 'gh pr create --title x'
+probe deny 'git push origin feat/y' "$onmain"
+probe allow 'gh pr view 12'
+hook_args=""
+unset JARVIS_REQUIRE_AGENT_IDENTITY
+
+echo "== agent identity: the refusal says what to run"
+export JARVIS_REQUIRE_AGENT_IDENTITY=1
+jq -n --arg d "$feat" '{tool_name: "Bash", tool_input: {command: "gh pr create --title x"}, cwd: $d}' >"$root/in.json"
+reason=$("$py" -I "$hook" <"$root/in.json" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+unset JARVIS_REQUIRE_AGENT_IDENTITY
+total=$((total + 1))
+if printf '%s' "$reason" | grep -qF 'bash ~/.Jarvis/scripts/apply-agent-identity.sh --check' && printf '%s' "$reason" | grep -qF '~/.Jarvis/config-local/agent-identity' && printf '%s' "$reason" | grep -qF 'gh pr create'; then
+  echo "ok   the reason names the --check command, the config path and the command"
+else
+  echo "FAIL the reason names the --check command, the config path and the command: $reason"; fails=$((fails + 1))
+fi
 
 echo
 if [ "$fails" -gt 0 ]; then echo "$fails of $total failed (sandboxes: $root)"; exit 1; fi

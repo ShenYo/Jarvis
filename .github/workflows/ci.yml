@@ -35,6 +35,8 @@ jobs:
         run: bash tests/bash-guard.sh
       - name: The Codex guard installs beside other hooks and refuses at the checkpoints
         run: bash tests/codex-guard.sh
+      - name: The agent identity script checks a machine and writes only when it passes
+        run: bash tests/agent-identity.sh
       - name: The Git hooks refuse what they should
         run: bash tests/githooks.sh
       - name: The two READMEs agree
