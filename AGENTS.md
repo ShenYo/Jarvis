@@ -70,7 +70,7 @@ Do not reach for `--no-verify`; the Claude Code guard refuses that flag.
 The general rules for how to work -- understand first, nothing speculative,
 surgical changes, verify and say what you ran -- are the personal
 instructions, [`.agents/AGENTS.md`](./.agents/AGENTS.md), which every session
-already loads. These four are this repository's own:
+already loads. These five are this repository's own:
 
 1. **Scratch files go under `docs/temp/<purpose>/`**, which `.gitignore`
    ignores. Never stage one, and never reach for a blanket `git add -A` across
@@ -87,6 +87,11 @@ already loads. These four are this repository's own:
    every turn needs it; reference that only some tasks reach goes in its own
    file under `docs/`, with a pointer that says when to read it. Codex does
    not expand `@` imports, so a rule behind one never reaches Codex.
+5. **A release's pull request updates [`CHANGELOG.md`](./CHANGELOG.md)**, so the
+   note is reviewed with the change; the entry is the tag's message and the
+   GitHub Release's notes. Cut a tag or a GitHub Release only with the user's
+   go-ahead, naming the tag and the commit
+   ([Releases](./README.md#releases)).
 
 ### Git
 

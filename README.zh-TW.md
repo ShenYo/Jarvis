@@ -57,14 +57,16 @@ runner 或別人的筆電上沒有這個 repository 的副本。因此專案所�
   擔任 Implementer 與 Worker，已於 2026-10-25 在 codex-cli 0.164.0 上驗證。
 - **Claude Code guard。** [guard](#claude-code-guard) 拒絕永久禁止的 Git 與檔案操作，並在
   人工審核的關卡詢問，包括可能帶出 tag 的 push 之前。
+- **Codex guard。** 同一個 guard 以 user-level 的 Codex hook 執行；因為 Codex 無法詢問，
+  Claude Code 會詢問的地方，它一律拒絕（[Codex](#codex)）。
 - **Git hooks 與 CI。** 三道[本機 hook](#本機-git-hooks) 在這個 clone 裡執行。
   [`CI`](.github/workflows/ci.yml) workflow 在每個 pull request 上執行，它的四項檢查
   （Linux 與 macOS 上的測試、Skills 檢查、secret 掃描）在 `main` 上是必要的。
+- **發佈版本。** Jarvis 從 v1.0.0（第一個 tag）開始有版本；每個 release 的說明在
+  [`CHANGELOG.md`](./CHANGELOG.md)（見[發佈版本](#發佈版本)）。
 
 待辦：
 
-- Codex 的 guard（Codex 無法像 Claude Code 那樣跳出詢問）：計畫記錄在
-  [ShenYo/Jarvis#15 的一則 comment](https://github.com/ShenYo/Jarvis/issues/15#issuecomment-6393273492)。
 - agent 身分，讓 agent 以自己的身分而不是 ShenYo 的名義操作：
   [ShenYo/Jarvis#13](https://github.com/ShenYo/Jarvis/issues/13)，每個 agent 各有一個
   issue：Claude Code [#14](https://github.com/ShenYo/Jarvis/issues/14)、Codex
@@ -559,6 +561,33 @@ jq -r '.skills | to_entries[] | "\(.key)\t\(.value.source)\t\(.value.skillPath)"
 不要用「再建立一份真正的 `~/.agents` 副本」「把每個 Skill 手動複製進某個
 工具目錄」，或「讓某個專案改成依賴 Jarvis」的方式，來解決 bridge 失敗。請修復
 那唯一一份 canonical 副本，再重新執行這支腳本。
+
+## 發佈版本
+
+Jarvis 以 `vMAJOR.MINOR.PATCH` 為 release 打 tag，從 v1.0.0 開始：
+
+- **PATCH**：只改文件。
+- **MINOR**：改到會執行的東西：guard、bridge script、apply scripts、Git hooks，或 Skills
+  的 bridge 方式。
+- **MAJOR**：大幅度的結構性改動。
+
+沒有任何東西消費 release：沒有專案依賴 Jarvis，所以 release 是這台機器上一個有標籤的
+時間點，不是要往外傳播的東西。每個 release 都附一則說明在
+[`CHANGELOG.md`](./CHANGELOG.md)，MINOR 與 MAJOR 尤其如此：寫明改了什麼、為什麼，以及
+之後在這台機器上要做什麼。
+
+要發佈一個 release，它的 pull request 把條目加進 `CHANGELOG.md` 的 `## Unreleased`
+底下，並把那個標題改成版本號，讓說明經過審查。merge 之後，該條目就是 tag 的訊息，也是
+GitHub Release 的說明：
+
+```sh
+git tag -a vX.Y.Z <commit> -F <file holding the entry>
+git push origin vX.Y.Z
+gh release create vX.Y.Z --notes-from-tag
+```
+
+推送 tag 與發佈 release 都是關卡：使用者要點名 tag 與 commit，才算授權。刪除 tag 或
+release 永遠不是 agent 的事（[`docs/git.md`](./docs/git.md)）。
 
 ## 不在這個 repo 裡
 
