@@ -108,8 +108,9 @@ involved.
 ## Contracts
 
 <!-- Responsibility: formats other people and tools read: documents, commit
-messages, pull requests. Short rules are written out; the Git contract is in
-docs/git.md, behind the pointer below. -->
+messages, pull requests, and commands handed to the user to run. Short rules
+are written out; the Git contract is in docs/git.md, behind the pointer
+below. -->
 
 ### Documents: English, opened by a Chinese summary
 
@@ -126,6 +127,22 @@ repository's own convention says otherwise. It leaves out commit messages,
 pull request bodies and code comments, and the instruction files loaded on
 every turn (this file, a `CLAUDE.md`, a Skill's `SKILL.md`), where each line
 costs context.
+
+### A deletion the user runs
+
+When a deletion is the user's to run, because the rules keep it from agents,
+check the command before handing it over, and say what the check found:
+
+- each target exists and is what it should be: tracked or not, a file or a
+  link, with no uncommitted edit the command would lose;
+- nothing still uses it: code, CI, hooks, configuration, or a document that
+  links to it;
+- the command reaches only what is meant: quoted paths, no stray glob, the
+  right repository and branch.
+
+Name any risk before the command. When it removes many files or a whole
+directory tree, say so plainly, list or count what goes, and ask the user to
+double-check before running it.
 
 ### Git in a repository without its own rules
 
