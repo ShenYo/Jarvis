@@ -16,6 +16,7 @@ set -uo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 apply="${APPLY_AGENT_IDENTITY:-$repo/scripts/apply-agent-identity.sh}"
+orig_path=$PATH
 root=$(mktemp -d "${TMPDIR:-/tmp}/agent-identity-test.XXXXXX")
 echo "sandboxes: $root"
 
@@ -33,6 +34,24 @@ mkdir -p "$root/bin"
 cat >"$root/bin/ssh" <<'EOF'
 #!/usr/bin/env bash
 echo "ssh $*" >>"$STUB_DIR/calls.log"
+case " $* " in *" -G "*)
+  # ssh -G: the identity files ssh would offer. A user config is read unless -F says otherwise.
+  f=""; cfgf=""; prev=""
+  for a in "$@"; do
+    [ "$prev" = -i ] && echo "identityfile $a"
+    [ "$prev" = -F ] && cfgf=$a
+    prev=$a
+  done
+  [ -z "$cfgf" ] && [ -f "$HOME/.ssh/config" ] && sed -n 's/^[[:space:]]*[Ii]dentity[Ff]ile[[:space:]]*/identityfile /p' "$HOME/.ssh/config"
+  [ -f "$STUB_DIR/ssh.G.extra" ] && cat "$STUB_DIR/ssh.G.extra"
+  exit 0 ;;
+esac
+case " $* " in *" -i "*) ;; *)
+  # no -i: the operator's own ssh, with their normal config and agent
+  [ -f "$STUB_DIR/ssh.default.out" ] && cat "$STUB_DIR/ssh.default.out"
+  rc=255; [ -f "$STUB_DIR/ssh.default.rc" ] && rc=$(cat "$STUB_DIR/ssh.default.rc")
+  exit "$rc" ;;
+esac
 case " $* " in *" IdentitiesOnly=yes "*) ;; *) echo "stub ssh: IdentitiesOnly=yes missing" >&2; exit 97 ;; esac
 case " $* " in *" BatchMode=yes "*) ;; *) echo "stub ssh: BatchMode=yes missing" >&2; exit 97 ;; esac
 case " $* " in *" git@github.com "*) ;; *) echo "stub ssh: unexpected target: $*" >&2; exit 97 ;; esac
@@ -63,6 +82,7 @@ case "$1 $2" in
   "auth status") emit auth_status ;;
   "api user") emit user ;;
 esac
+case "$*" in "api user/memberships/orgs/"*) emit "membership.${2##*/}" ;; esac
 if [ "$1" = api ]; then
   ep=$2
   case $ep in
@@ -120,13 +140,14 @@ EOF
   put "$stub/gh-agent/rulesets.acme__app.out" "[]"
   put "$stub/gh-agent/invitations.out" "[]"
   put "$stub/gh-operator/user.out" "owner-person"
+  put "$stub/ssh.default.out" "Hi owner-person! You've successfully authenticated, but GitHub does not provide shell access."; put "$stub/ssh.default.rc" 1
   XENV=""
 }
 base_env() {
   env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GH_HOST -u GH_CONFIG_DIR \
     -u XDG_CONFIG_HOME -u GIT_DIR -u GIT_WORK_TREE \
     HOME="$home" CLAUDE_CONFIG_DIR="$home/.claude" JARVIS_AGENT_IDENTITY_FILE="$cfg" STUB_DIR="$stub" \
-    STUB_SETTINGS="$settings" PATH="$root/bin:$PATH" $XENV "$@"
+    STUB_SETTINGS="$settings" GIT_CONFIG_NOSYSTEM=1 PATH="${TEST_PATH:-$root/bin:$PATH}" $XENV "$@"
 }
 run() { (cd "$dir" && base_env bash "$apply" "$@" </dev/null) >"$dir/out" 2>&1; }
 has()  { grep -qF -- "$1" "$dir/out"; }
@@ -160,7 +181,7 @@ check "pass: operator differs" has "OK  the operator's own gh login (owner-perso
 check "pass: repo push" has "OK  repo acme/app: bot-agent can push"
 check "pass: Next line" hasl "Next: run without --check to apply"
 check "pass: --check writes nothing" cmp -s "$dir/snap.before" "$dir/snap.after"
-check "pass: ssh used the key, IdentitiesOnly" bash -c "grep -q 'ssh -T -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new' '$stub/calls.log'"
+check "pass: ssh used the key, IdentitiesOnly" bash -c "grep -q 'ssh -T -F /dev/null -i $key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new' '$stub/calls.log'"
 check "pass: the agent's gh runs in its own config dir" bash -c "grep -q 'gh GH_CONFIG_DIR=$ghdir auth status' '$stub/calls.log'"
 check "pass: the operator's gh runs in the default config dir" bash -c "grep -q 'gh GH_CONFIG_DIR=<unset> api user' '$stub/calls.log'"
 
@@ -245,7 +266,7 @@ badline "single quotes" "author_name='Bot'" 'author_name has quotes around its v
 badline "trailing space" 'author_name=Bot ' 'author_name has trailing whitespace' 'remove the trailing spaces'
 badline "leading value space" 'author_name= Bot' 'author_name has whitespace before its value' 'remove the space after ='
 badline "spaces around =" 'author_name = Bot' 'key "author_name " has characters other than a-z and _ (no spaces around =)' 'write it as key=value with no spaces, using one of: login email ssh_key gh_config_dir repos author_name'
-badline "CRLF" 'author_name=Bot\r' 'ends with a carriage return (CRLF line ending)' "save the file with LF line endings (tr -d '\\r' <@CFG@ >tmp && mv tmp @CFG@)" raw
+badline "CRLF" 'author_name=Bot\r' 'ends with a carriage return (CRLF line ending)' "save the file with LF line endings (tr -d '\\r' <@CFG@ >@CFG@.new && chmod 600 @CFG@.new && mv @CFG@.new @CFG@)" raw
 badline "indented line" '  author_name=Bot' 'starts with whitespace' 'remove the leading whitespace (comments start with # in column 1)'
 badline "whitespace-only line" '   ' 'contains only whitespace' 'make it an empty line or delete it'
 badline "not key=value" 'author_name' 'is not key=value, a # comment or blank' 'write it as key=value, or start it with #'
@@ -291,7 +312,7 @@ rm "$key" "$key.pub"
 run --check; rc=$?
 check "no key: MISSING" has "MISSING  SSH key file $key does not exist"
 check "no key: exact fix" has "  fix: ssh-keygen -t ed25519 -N '' -C bot-agent -f $key   (or: bash $apply --setup)"
-check "no key: GitHub's answer is skipped, ssh is not run" bash -c "has() { grep -qF -- \"\$1\" '$dir/out'; }; has 'SKIP  GitHub' && ! grep -q '^ssh ' '$stub/calls.log'"
+check "no key: GitHub's answer is skipped, ssh is not run" bash -c "has() { grep -qF -- \"\$1\" '$dir/out'; }; has 'SKIP  GitHub' && ! grep -q '^ssh -T -F /dev/null' '$stub/calls.log'"
 check "no key: Next names step 2" hasl "Next: step 2 of 6 — generate this machine's SSH key — ssh-keygen -t ed25519 -N '' -C bot-agent -f $key   (or: bash $apply --setup)"
 check "no key: exit 1" test "$rc" = 1
 sandbox
@@ -342,8 +363,8 @@ sandbox
 put "$stub/gh-agent/auth_status.out" "You are not logged into any GitHub hosts. To log in, run: gh auth login"; put "$stub/gh-agent/auth_status.rc" 1
 run --check; rc=$?
 check "gh not logged in: MISSING" has "MISSING  gh: not logged in to github.com in $ghdir"
-check "gh not logged in: exact fix" has "  fix: GH_CONFIG_DIR=$ghdir gh auth login --hostname github.com   (sign in as bot-agent, not as yourself)"
-check "gh not logged in: Next names step 4" hasl "Next: step 4 of 6 — log gh in as the machine account — GH_CONFIG_DIR=$ghdir gh auth login --hostname github.com   (sign in as bot-agent, not as yourself)"
+check "gh not logged in: exact fix" has "  fix: GH_CONFIG_DIR=$ghdir gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web   (sign in as bot-agent, not as yourself)"
+check "gh not logged in: Next names step 4" hasl "Next: step 4 of 6 — log gh in as the machine account — GH_CONFIG_DIR=$ghdir gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web   (sign in as bot-agent, not as yourself)"
 check "gh not logged in: repository access skipped" has "SKIP  repository access (needs the gh login of the machine account first)"
 sandbox
 put "$stub/gh-agent/user.out" "someone-else"
@@ -358,7 +379,7 @@ check "gh network: not reported as logged out" hasn "not logged in"
 sandbox
 put "$stub/gh-agent/auth_status.out" $'X Failed to log in to github.com account bot-agent (keyring)\n - The token in keyring is invalid.'; put "$stub/gh-agent/auth_status.rc" 1
 run --check
-check "gh bad token: WRONG with a re-login fix" bash -c "grep -q '^WRONG  gh: the login in $ghdir does not work' '$dir/out' && grep -q 'fix: GH_CONFIG_DIR=$ghdir gh auth login' '$dir/out'"
+check "gh bad token: WRONG with a re-login fix" bash -c "grep -q '^WRONG  gh: the login in $ghdir does not work' '$dir/out' && grep -q 'fix: GH_CONFIG_DIR=$ghdir gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web' '$dir/out'"
 sandbox
 put "$stub/gh-agent/auth_status.out" $'github.com\n  \xe2\x9c\x93 Logged in to github.com account bot-agent (keyring)\n  - Active account: true\n\n  \xe2\x9c\x93 Logged in to github.com account other (keyring)\n  - Active account: false'
 run --check; rc=$?
@@ -369,7 +390,7 @@ sandbox
 XENV="GH_TOKEN=ghp_notreal"
 run --check; rc=$?
 check "token in process: WRONG" has "WRONG  GH_TOKEN is set in this process; it would override the agent's gh login with whoever owns that token"
-check "token in process: exact fix" has "  fix: unset GH_TOKEN   (and remove the line that exports it from your shell profile)"
+check "token in process: exact fix" has "  fix: unset GH_TOKEN   (and remove the line that exports it from your shell profile, for example ~/.zshrc or ~/.bash_profile)"
 check "token in process: exit 1" test "$rc" = 1
 check "token in process: Next names step 4" bash -c "grep -q '^Next: step 4 of 6 — log gh in as the machine account — unset GH_TOKEN' '$dir/out'"
 check "token in process: no gh call carried the token" bash -c "grep -q 'gh GH_CONFIG_DIR' '$stub/calls.log' && ! grep -q TOKEN-LEAK '$stub/calls.log'"
@@ -436,12 +457,12 @@ check "an invitation to another repository does not count" has "MISSING  repo ac
 sandbox
 put "$stub/gh-agent/repo.acme__app.out" '{"permissions":{"admin":true,"maintain":true,"push":true,"pull":true}}'
 run --check; rc=$?
-check "admin role: WARN, still passes" bash -c "test $rc = 0 && grep -q '^WARN  repo acme/app: bot-agent holds the admin role; it should be Write' '$dir/out'"
+check "admin role: WRONG, blocks the apply" bash -c "test $rc = 1 && grep -q '^WRONG  repo acme/app: bot-agent holds the admin role; it must be Write' '$dir/out'"
 check "admin role: exact fix" has "  fix: lower bot-agent to the Write role at https://github.com/acme/app/settings/access"
 sandbox
 put "$stub/gh-agent/repo.acme__app.out" '{"permissions":{"admin":false,"maintain":true,"push":true,"pull":true}}'
 run --check; rc=$?
-check "maintain role: WARN, still passes" bash -c "test $rc = 0 && grep -q '^WARN  repo acme/app: bot-agent holds the maintain role; it should be Write' '$dir/out'"
+check "maintain role: WRONG, blocks the apply" bash -c "test $rc = 1 && grep -q '^WRONG  repo acme/app: bot-agent holds the maintain role; it must be Write' '$dir/out'"
 sandbox
 rm "$stub/gh-agent/repo.acme__app.out"; put "$stub/gh-agent/repo.acme__app.err" "dial tcp: lookup api.github.com: no such host"; put "$stub/gh-agent/repo.acme__app.rc" 1
 run --check
@@ -524,7 +545,7 @@ run; rc=$?
 check "apply: exit 0" test "$rc" = 0
 check "apply: GIT_AUTHOR_NAME" sx '.env.GIT_AUTHOR_NAME == "Claude Code" and .env.GIT_COMMITTER_NAME == "Claude Code"'
 check "apply: GIT_AUTHOR_EMAIL and GIT_COMMITTER_EMAIL" sx '.env.GIT_AUTHOR_EMAIL == "1+bot-agent@users.noreply.github.com" and .env.GIT_COMMITTER_EMAIL == .env.GIT_AUTHOR_EMAIL'
-check "apply: GIT_SSH_COMMAND names the expanded key, IdentitiesOnly" sx ".env.GIT_SSH_COMMAND == \"ssh -i $key -o IdentitiesOnly=yes\""
+check "apply: GIT_SSH_COMMAND names the expanded key, IdentitiesOnly" sx ".env.GIT_SSH_COMMAND == \"ssh -F /dev/null -i $key -o IdentitiesOnly=yes\""
 check "apply: GH_CONFIG_DIR expanded" sx ".env.GH_CONFIG_DIR == \"$ghdir\""
 check "apply: the guard's marker" sx '.env.JARVIS_AGENT_IDENTITY == "bot-agent"'
 check "apply: every other key preserved (jq -S)" bash -c "jq -e '.env.JARVIS_AGENT_IDENTITY' '$settings' >/dev/null && diff <(jq -S 'del(.env.GIT_AUTHOR_NAME,.env.GIT_COMMITTER_NAME,.env.GIT_AUTHOR_EMAIL,.env.GIT_COMMITTER_EMAIL,.env.GIT_SSH_COMMAND,.env.GH_CONFIG_DIR,.env.JARVIS_AGENT_IDENTITY,.env.GIT_CONFIG_COUNT,.env.GIT_CONFIG_KEY_0,.env.GIT_CONFIG_VALUE_0,.env.GIT_CONFIG_KEY_1,.env.GIT_CONFIG_VALUE_1)' '$settings') <(jq -S . '$dir/orig')"
@@ -727,7 +748,7 @@ check "setup: the config directory is private" test "$(mode "$cfgdir")" = 700
 dkey="$home/.ssh/id_ed25519_agent_claude_$host"
 check "setup: the key is generated by ssh-keygen -t ed25519 with an empty passphrase" bash -c "grep -q \"^ssh-keygen -t ed25519 -N  -C bot-agent@$host -f $dkey\$\" '$stub/calls.log' && test -f '$dkey' && test -f '$dkey.pub'"
 check "setup: shows the .pub and where to add it" bash -c "grep -q 'AAAAFAKEKEY' '$dir/out' && grep -q 'Settings -> SSH and GPG keys -> New SSH key' '$dir/out' && grep -q 'Sign in to GitHub as bot-agent' '$dir/out'"
-check "setup: prints the gh auth login command for the agent's config dir" has "GH_CONFIG_DIR=$ghdir gh auth login --hostname github.com"
+check "setup: prints the gh auth login command for the agent's config dir" has "    GH_CONFIG_DIR=$ghdir gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web"
 check "setup: ends with the full check and a Next line" bash -c "grep -q '== The full check' '$dir/out' && grep -q '^Next: step 3 of 6' '$dir/out'"
 check "setup: never writes settings.json" bash -c "cmp -s '$settings' '$dir/settings.before' && test ! -e '$record' && test ! -e '$settings.agent-identity-backup'"
 check "setup: never ran the operator's gh" bash -c "! grep -q 'gh GH_CONFIG_DIR=<unset> auth' '$stub/calls.log'"
@@ -820,6 +841,198 @@ PY
 fi
 
 # =================================================================================
+# =================================================================================
+echo "== the machine account must not be the owner's account in disguise"
+# The reproduced case: a new machine, so the operator's own gh is not logged in and
+# that comparison can only warn; login is the owner's account and holds admin.
+sandbox
+rm "$stub/gh-operator/user.out"; put "$stub/gh-operator/user.err" "To get started with GitHub CLI, please run:  gh auth login"; put "$stub/gh-operator/user.rc" 1
+put "$stub/gh-agent/repo.acme__app.out" '{"owner":{"login":"Bot-Agent","type":"User"},"permissions":{"admin":true,"maintain":true,"push":true,"pull":true}}'
+snapshot >"$dir/snap.before"
+run; rc=$?
+snapshot >"$dir/snap.after"
+check "owner is login: exit 1 although the operator comparison could only warn" test "$rc" = 1
+check "owner is login: WRONG names the repo and the account" has "WRONG  repo acme/app: bot-agent owns it, so the agent would be the owner and could approve its own work"
+check "owner is login: exact fix" has "  fix: use a separate machine account as login= in $cfg; bot-agent must not be the owner of acme/app"
+check "owner is login: the operator comparison is still only a WARN" bash -c "grep -q '^WARN  the operator.s own gh is not logged in' '$dir/out'"
+check "owner is login: a real run writes nothing" cmp -s "$dir/snap.before" "$dir/snap.after"
+check "owner is login: Next names step 5" bash -c "grep -q '^Next: step 5 of 6' '$dir/out'"
+sandbox
+rm "$stub/gh-operator/user.out"; put "$stub/gh-operator/user.err" "To get started with GitHub CLI, please run:  gh auth login"; put "$stub/gh-operator/user.rc" 1
+put "$stub/gh-agent/repo.acme__app.out" '{"owner":{"login":"someone","type":"User"},"permissions":{"admin":true,"push":true}}'
+snapshot >"$dir/snap.before"
+run; rc=$?
+snapshot >"$dir/snap.after"
+check "admin, operator not logged in: exit 1 and nothing written" bash -c "test $rc = 1" 
+check "admin, operator not logged in: WRONG, not WARN" has "WRONG  repo acme/app: bot-agent holds the admin role; it must be Write"
+check "admin, operator not logged in: nothing written" cmp -s "$dir/snap.before" "$dir/snap.after"
+sandbox
+put "$stub/gh-agent/repo.acme__app.out" '{"owner":{"login":"acme","type":"Organization"},"permissions":{"admin":false,"push":true}}'
+put "$stub/gh-agent/membership.acme.out" '{"state":"active","role":"admin"}'
+run; rc=$?
+check "organization owner: WRONG" bash -c "test $rc = 1 && grep -q '^WRONG  repo acme/app: bot-agent is an owner of the organization acme' '$dir/out'"
+check "organization owner: exact fix" has "  fix: make bot-agent a plain member (https://github.com/orgs/acme/people) or use a separate machine account"
+sandbox
+put "$stub/gh-agent/repo.acme__app.out" '{"owner":{"login":"acme","type":"Organization"},"permissions":{"admin":false,"push":true}}'
+put "$stub/gh-agent/membership.acme.out" '{"state":"active","role":"member"}'
+run; rc=$?
+check "organization member: passes" test "$rc" = 0
+sandbox
+put "$stub/gh-agent/repo.acme__app.out" '{"owner":{"login":"acme","type":"Organization"},"permissions":{"admin":false,"push":true}}'
+run; rc=$?
+check "organization membership unreadable: not guessed, the other checks decide" test "$rc" = 0
+
+echo "== the environment the agent inherits, not only the settings"
+sandbox
+XENV="GH_HOST=ghe.example.com"
+run --check; rc=$?
+check "process GH_HOST: WRONG" bash -c "test $rc = 1 && grep -q '^WRONG  GH_HOST is set in this process; it would send gh to another host' '$dir/out'"
+check "process GH_HOST: fix names the shell profile" bash -c "grep -q '  fix: unset GH_HOST   (and remove the line that exports it from your shell profile' '$dir/out'"
+sandbox
+XENV="GIT_CONFIG_PARAMETERS=x.y=z"
+run --check; rc=$?
+check "process GIT_CONFIG_PARAMETERS: WRONG" bash -c "test $rc = 1 && grep -q '^WRONG  GIT_CONFIG_PARAMETERS is set in this process; it would override the agent.s git config' '$dir/out'"
+sandbox
+XENV="GH_CONFIG_DIR=/elsewhere/gh"
+run --check; rc=$?
+check "process GH_CONFIG_DIR of another login: WRONG" bash -c "test $rc = 1 && grep -q '^WRONG  GH_CONFIG_DIR is set in this process; it points gh at another login' '$dir/out'"
+sandbox
+XENV="GH_CONFIG_DIR=$ghdir"
+run --check; rc=$?
+check "process GH_CONFIG_DIR equal to the agent's own (an applied session): accepted" test "$rc" = 0
+sandbox
+put "$settings" '{"env":{"GH_HOST":"ghe.example.com"}}'
+run --check
+check "settings GH_HOST: WRONG" has "WRONG  GH_HOST is set in the env of $settings; it would override the agent's gh login"
+
+echo "== git under the agent's env: HTTPS GitHub remotes become SSH, whatever ~/.gitconfig says"
+sandbox
+run --check; rc=$?
+check "git urls: the pass case shows the rewrite for fetch and push" has "OK  git: https://github.com/acme/app.git fetches and pushes as git@github.com:acme/app.git under the agent's env"
+sandbox
+printf '[url "ssh://other.example/"]\n\tinsteadOf = https://github.com/acme/\n' >"$home/.gitconfig"
+run --check; rc=$?
+check "foreign insteadOf that wins: exit 1, WRONG with both URLs" bash -c "test $rc = 1 && grep -q '^WRONG  git: https://github.com/acme/app.git becomes ssh://other.example/app.git (fetch)' '$dir/out'"
+check "foreign insteadOf that wins: the offending config line is shown" bash -c "grep -q 'file:$home/.gitconfig.*url.ssh://other.example/.insteadof' '$dir/out'"
+check "foreign insteadOf that wins: Next names step 6" bash -c "grep -q '^Next: step 6 of 6 — apply the identity to the Claude Code settings — remove or change the url rewrite that wins' '$dir/out'"
+sandbox
+printf '[url "https://evil.example/"]\n\tpushInsteadOf = https://github.com/\n' >"$home/.gitconfig"
+run --check; rc=$?
+check "foreign pushInsteadOf: WRONG, the push URL is the one shown" bash -c "test $rc = 1 && grep -q '(fetch) and https://evil.example/acme/app.git (push)' '$dir/out' && grep -q 'url.https://evil.example/.pushinsteadof' '$dir/out'"
+sandbox
+printf '[url "ssh://x.example/"]\n\tinsteadOf = https://example.org/\n' >"$home/.gitconfig"
+run --check; rc=$?
+check "an unrelated url rewrite is left alone" test "$rc" = 0
+
+echo "== ssh ignores ~/.ssh/config, so it cannot add the operator's key"
+sandbox
+printf 'Host github.com\n  IdentityFile /elsewhere/operator_key\n' >"$home/.ssh/config"
+run --check; rc=$?
+check "ssh config with another IdentityFile: the check passes because -F /dev/null is used" test "$rc" = 0
+check "ssh config with another IdentityFile: ssh -G was run with -F /dev/null" bash -c "grep -q 'ssh -G -F /dev/null -i $key -o IdentitiesOnly=yes github.com' '$stub/calls.log'"
+check "ssh config with another IdentityFile: only the agent key is offered" has "OK  ssh offers only the agent key $key under the command git will run"
+sandbox
+put "$stub/ssh.G.extra" "identityfile /elsewhere/operator_key"
+run --check; rc=$?
+check "another identity file still offered: WRONG" bash -c "test $rc = 1 && grep -q '^WRONG  ssh would offer identity files other than the agent key $key: ' '$dir/out'"
+real_ssh=$(PATH="$orig_path" command -v ssh || true)
+if [ -n "$real_ssh" ]; then
+  sandbox
+  printf 'Host github.com\n  IdentityFile /elsewhere/operator_key\n' >"$home/.ssh/config"
+  # (ssh takes the home directory from the passwd entry, not $HOME, so the sandbox config is named with -F)
+  with_cfg=$("$real_ssh" -G -F "$home/.ssh/config" -i "$key" -o IdentitiesOnly=yes github.com 2>/dev/null | awk 'tolower($1)=="identityfile"{print $2}' | tr '\n' ' ')
+  without_cfg=$("$real_ssh" -G -F /dev/null -i "$key" -o IdentitiesOnly=yes github.com 2>/dev/null | awk 'tolower($1)=="identityfile"{print $2}' | tr '\n' ' ')
+  check "real ssh -G: a user config adds the operator's key" bash -c "case '$with_cfg' in *operator_key*) true;; *) false;; esac"
+  check "real ssh -G with -F /dev/null: the agent key alone" test "$without_cfg" = "$key "
+fi
+
+echo "== the operator's own SSH identity (covers an org Write account when the operator's gh is logged out)"
+sandbox
+run --check
+check "operator ssh: a different account is fine" has "OK  the operator's own SSH identity (owner-person) differs from login=bot-agent"
+check "operator ssh: asked with no -i and the normal config" bash -c "grep -qx 'ssh -T -o BatchMode=yes -o ConnectTimeout=15 git@github.com' '$stub/calls.log'"
+sandbox
+put "$stub/ssh.default.out" "Hi bot-agent! You've successfully authenticated, but GitHub does not provide shell access."
+rm "$stub/gh-operator/user.out"; put "$stub/gh-operator/user.err" "To get started with GitHub CLI, please run:  gh auth login"; put "$stub/gh-operator/user.rc" 1
+snapshot >"$dir/snap.before"
+run; rc=$?
+snapshot >"$dir/snap.after"
+check "operator ssh is the agent, operator gh logged out: exit 1" test "$rc" = 1
+check "operator ssh is the agent: WRONG naming the answer" has "WRONG  login=bot-agent is the account the operator's own SSH key authenticates as (ssh git@github.com answers \"Hi bot-agent!\"): the agent would be the owner again"
+check "operator ssh is the agent: exact fix" has "  fix: create a separate machine account on GitHub and set login= (and its key and gh login) to that account in $cfg"
+check "operator ssh is the agent: a real run writes nothing" cmp -s "$dir/snap.before" "$dir/snap.after"
+sandbox
+put "$stub/ssh.default.out" "git@github.com: Permission denied (publickey)."; put "$stub/ssh.default.rc" 255
+run --check; rc=$?
+check "operator ssh refused: no conclusion, not an error" bash -c "test $rc = 0 && grep -q '^SKIP  the operator.s own SSH identity could not be read (no key offered or refused)' '$dir/out'"
+sandbox
+put "$stub/ssh.default.out" "ssh: Could not resolve hostname github.com: nodename nor servname provided, or not known"; put "$stub/ssh.default.rc" 255
+run --check; rc=$?
+check "operator ssh unreachable: no conclusion, not an error" bash -c "test $rc = 0 && grep -q '^SKIP  the operator.s own SSH identity could not be read (network)' '$dir/out'"
+
+echo "== git: the SSH form must stay SSH too"
+sandbox
+run --check
+check "ssh form: the pass case shows both forms" bash -c "grep -q '^OK  git: https://github.com/acme/app.git fetches and pushes as git@github.com:acme/app.git' '$dir/out' && grep -q '^OK  git: git@github.com:acme/app.git fetches and pushes as git@github.com:acme/app.git' '$dir/out'"
+sandbox
+printf '[url "https://github.com/"]\n\tinsteadOf = git@github.com:\n' >"$home/.gitconfig"
+run --check; rc=$?
+check "global insteadOf turning SSH into HTTPS: WRONG" bash -c "test $rc = 1 && grep -q '^WRONG  git: git@github.com:acme/app.git becomes https://github.com/acme/app.git (fetch) and https://github.com/acme/app.git (push)' '$dir/out'"
+check "global insteadOf turning SSH into HTTPS: the offending line" bash -c "grep -q 'file:$home/.gitconfig.*url.https://github.com/.insteadof' '$dir/out'"
+sandbox
+printf '[url "https://github.com/"]\n\tpushInsteadOf = git@github.com:\n' >"$home/.gitconfig"
+run --check; rc=$?
+check "global pushInsteadOf turning SSH into HTTPS for push: WRONG" bash -c "test $rc = 1 && grep -q '^WRONG  git: git@github.com:acme/app.git becomes git@github.com:acme/app.git (fetch) and https://github.com/acme/app.git (push)' '$dir/out' && grep -q 'url.https://github.com/.pushinsteadof' '$dir/out'"
+
+echo "== setup without gh installed"
+mkdir -p "$root/bin-nogh"
+for tool in bash git jq sed tr cat cut grep wc awk head tail mkdir rm mv cp mktemp stat dirname basename readlink cksum env ls chmod hostname sort find uname date ln touch id python3 perl tee printf test; do
+  p=$(PATH="$orig_path" command -v "$tool" 2>/dev/null) && [ -x "$p" ] && ln -sf "$p" "$root/bin-nogh/$tool"
+done
+ln -sf "$root/bin/ssh" "$root/bin-nogh/ssh"; ln -sf "$root/bin/ssh-keygen" "$root/bin-nogh/ssh-keygen"
+sandbox
+: >"$dir/input"
+TEST_PATH="$root/bin-nogh" setup_run "$dir/input"; rc=$?
+check "setup without gh: no unbound-variable crash" hasn "unbound variable"
+check "setup without gh: says how to install gh" has "gh is not installed. Install it (brew install gh, or see https://cli.github.com), then re-run --setup."
+check "setup without gh: continues to the full check" bash -c "grep -q '== The full check' '$dir/out' && grep -q '^MISSING  gh is not installed' '$dir/out'"
+check "setup without gh: exit 1 (gh still missing)" test "$rc" = 1
+
+echo "== smaller things"
+sandbox
+run --check
+check "no warnings: no '(0 warning(s))'" bash -c "grep -q '^apply-agent-identity: all checks passed\$' '$dir/out'"
+sandbox
+put "$stub/gh-agent/auth_status.out" $'github.com\n  \xe2\x9c\x93 Logged in to github.com account bot-agent (keyring)\n\n  \xe2\x9c\x93 Logged in to github.com account other (keyring)'
+run --check
+check "one warning: counted" has "apply-agent-identity: all checks passed (1 warning(s))"
+sandbox
+put "$stub/ssh.out" "ssh: Could not resolve hostname github.com: nodename nor servname provided, or not known"; put "$stub/ssh.rc" 255
+run --check
+check "ssh network failure: Next says reach github.com, not step 3" hasl "Next: reach github.com (steps 3 to 5 need it) — check the network or proxy, then re-run: ssh -T -F /dev/null -i $key -o IdentitiesOnly=yes git@github.com"
+sandbox
+put "$stub/gh-agent/auth_status.out" "error connecting to api.github.com"; put "$stub/gh-agent/auth_status.rc" 1
+run --check
+check "gh network failure: Next says reach github.com" hasl "Next: reach github.com (steps 3 to 5 need it) — check the network or proxy, then re-run this check"
+sandbox
+rm "$stub/gh-agent/repo.acme__app.out"; put "$stub/gh-agent/repo.acme__app.err" "dial tcp: lookup api.github.com: no such host"; put "$stub/gh-agent/repo.acme__app.rc" 1
+run --check
+check "repo network failure: Next says reach github.com" hasl "Next: reach github.com (steps 3 to 5 need it) — check the network or proxy, then re-run this check"
+sandbox
+rm "$key"
+put "$stub/ssh.out" "ssh: Could not resolve hostname github.com"; put "$stub/ssh.rc" 255
+run --check
+check "a missing key (step 2) still comes before a network failure" bash -c "grep -q '^Next: step 2 of 6' '$dir/out'"
+sandbox
+printf 'author_name=Bot\r\n' >>"$cfg"
+run --check
+fixcmd=$(sed -n 's/^  fix: edit line 7 of [^:]*: save the file with LF line endings (\(.*\))$/\1/p' "$dir/out")
+bash -c "$fixcmd"
+check "CRLF fix: removes the CR and keeps mode 600" bash -c "test \$(stat -c %a '$cfg' 2>/dev/null || stat -f %Lp '$cfg') = 600 && ! grep -q \$'\\r' '$cfg' && test ! -e '$cfg.new'"
+run --check; rc=$?
+check "CRLF fix: the file then passes" test "$rc" = 0
+check "docs: the login command is explained once in the script" bash -c "grep -c 'setup-git' '$repo/scripts/apply-agent-identity.sh' | grep -q '^1\$'"
+
 echo "== no account is named in the script"
 check "the script names no account of its own" bash -c "! grep -n -i 'shenyo' '$repo/scripts/apply-agent-identity.sh' | grep -q ."
 

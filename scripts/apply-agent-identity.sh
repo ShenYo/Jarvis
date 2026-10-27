@@ -61,6 +61,7 @@ usage() { sed -n '/^# Usage:/,/2 usage or internal error/s/^# \{0,1\}//p' "$0"; 
 die() { printf 'apply-agent-identity: %s\n' "$*" >&2; exit 2; }
 
 tmpfiles=""
+tmpdirs=""
 mktmp() { # template -> path, removed on exit
   local t
   t=$(mktemp "$1") || die "cannot create a temporary file for $1"
@@ -71,12 +72,13 @@ $t"
 cleanup() {
   local f
   while IFS= read -r f; do [ -z "$f" ] || rm -f "$f"; done <<<"$tmpfiles"
+  while IFS= read -r f; do [ -z "$f" ] || rm -rf "$f"; done <<<"$tmpdirs"
   return 0
 }
 
 # --- output --------------------------------------------------------------------
 
-problems=0 warns=0 next_step=0 next_cmd="" cur_step=1 last_bad=0
+problems=0 warns=0 next_step=0 next_cmd="" next_net=0 cur_step=1 last_bad=0
 
 step() { cur_step=$1; }
 say() { # OK | MISSING | WRONG | WARN | SKIP, then the text
@@ -87,7 +89,7 @@ say() { # OK | MISSING | WRONG | WARN | SKIP, then the text
     WARN) warns=$((warns + 1)) ;;
   esac
 }
-fix() { # text; its first line is what "Next:" shows if this is the earliest failing step
+fix() { # text [net]; its first line is what "Next:" shows if this is the earliest failing step
   local first=1 line
   while IFS= read -r line; do
     if [ "$first" = 1 ]; then printf '  fix: %s\n' "$line"; first=0; else printf '       %s\n' "$line"; fi
@@ -95,6 +97,8 @@ fix() { # text; its first line is what "Next:" shows if this is the earliest fai
   if [ "$last_bad" = 1 ] && { [ "$next_step" = 0 ] || [ "$cur_step" -lt "$next_step" ]; }; then
     next_step=$cur_step
     next_cmd=${1%%$'\n'*}
+    next_net=0
+    [ "${2-}" != net ] || next_net=1   # a failure to reach github.com, not a step to do
   fi
 }
 step_name() {
@@ -108,7 +112,9 @@ step_name() {
   esac
 }
 print_next() { # all_ok_message
-  if [ "$next_step" != 0 ]; then
+  if [ "$next_step" != 0 ] && [ "$next_net" = 1 ]; then
+    printf 'Next: reach github.com (steps 3 to 5 need it) — %s\n' "$next_cmd"
+  elif [ "$next_step" != 0 ]; then
     printf 'Next: step %s of 6 — %s — %s\n' "$next_step" "$(step_name "$next_step")" "$next_cmd"
   else
     printf 'Next: %s\n' "$1"
@@ -141,6 +147,12 @@ is_network() {
   printf '%s' "$1" | grep -Eiq 'could not resolve|name or service not known|nodename nor servname|connection (timed out|refused|reset|closed)|timed out|network is unreachable|no route to host|no such host|dial tcp|error connecting to|i/o timeout|tls handshake|temporary failure|kex_exchange_identification|unable to connect|proxyconnect'
 }
 TOKEN_VARS="GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN"
+
+# The command that logs gh in as the machine account. --git-protocol ssh and
+# --skip-ssh-key keep gh from running setup-git, which rewrites the operator's own
+# ~/.gitconfig credential helper, and from generating or uploading an SSH key;
+# --web signs in as the account in a browser.
+gh_login_cmd() { printf 'GH_CONFIG_DIR=%s gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web' "$(q "$1")"; }
 
 # gh as the agent (its own config dir, no token that would override the login)
 gh_agent() {
@@ -232,7 +244,7 @@ parse_config() {
       case $line in $'\357\273\277'*) bad_line 1 "starts with a byte-order mark" "save the file as UTF-8 without a BOM"; continue ;; esac
     fi
     case $line in
-      *$'\r') bad_line "$n" "ends with a carriage return (CRLF line ending)" "save the file with LF line endings (tr -d '\\r' <$(q "$cfg_file") >tmp && mv tmp $(q "$cfg_file"))"; continue ;;
+      *$'\r') bad_line "$n" "ends with a carriage return (CRLF line ending)" "save the file with LF line endings (tr -d '\\r' <$(q "$cfg_file") >$(q "$cfg_file").new && chmod 600 $(q "$cfg_file").new && mv $(q "$cfg_file").new $(q "$cfg_file"))"; continue ;;
       "") continue ;;
       "#"*) continue ;;
     esac
@@ -437,7 +449,7 @@ chk_config_file() {
 probe_ssh() { # key
   local re='Hi ([A-Za-z0-9-]+)!'
   ssh_who=""
-  ssh_out=$(ssh -T -i "$1" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+  ssh_out=$(ssh -T -F /dev/null -i "$1" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
     -o ConnectTimeout=15 git@github.com </dev/null 2>&1)
   if [[ $ssh_out =~ $re ]]; then ssh_who=${BASH_REMATCH[1]}; ssh_state=hi
   elif is_network "$ssh_out"; then ssh_state=net
@@ -499,6 +511,24 @@ chk_ssh() {
       fix "ssh-keygen -y -f $(q "$key") >$(q "$pub")"
     fi
   fi
+  # ~/.ssh/config must not be able to add the operator's key: the command git runs
+  # (GIT_SSH_COMMAND) ignores it with -F /dev/null; confirm with ssh -G that the
+  # agent key is the only identity file it would offer.
+  if [ "$keyok" = 1 ]; then
+    local gout ids nids
+    gout=$(ssh -G -F /dev/null -i "$key" -o IdentitiesOnly=yes github.com 2>/dev/null </dev/null)
+    ids=$(printf '%s\n' "$gout" | awk 'tolower($1) == "identityfile" {print $2}')
+    nids=$(printf '%s\n' "$ids" | grep -c .)
+    if [ "$nids" = 0 ]; then
+      say WARN "ssh -G printed no identity file, so which keys ssh would offer was not verified"
+      fix "run: ssh -G -F /dev/null -i $(q "$key") -o IdentitiesOnly=yes github.com | grep -i identityfile"
+    elif [ "$nids" != 1 ] || [ "$ids" != "$key" ]; then
+      say WRONG "ssh would offer identity files other than the agent key $key: $(printf '%s' "$ids" | tr '\n' ' ')"
+      fix "run: ssh -G -F /dev/null -i $(q "$key") -o IdentitiesOnly=yes github.com | grep -i identityfile   (only the agent key may be listed)"
+    else
+      say OK "ssh offers only the agent key $key under the command git will run"
+    fi
+  fi
   step 3
   if [ "$keyok" = 0 ]; then
     say SKIP "GitHub's answer to the SSH key (needs a usable key file)"; return
@@ -514,7 +544,7 @@ chk_ssh() {
       fi ;;
     net)
       say MISSING "SSH: could not reach github.com (network), so the key was not verified"
-      fix "check the network or proxy, then re-run: ssh -T -i $(q "$key") -o IdentitiesOnly=yes git@github.com" ;;
+      fix "check the network or proxy, then re-run: ssh -T -F /dev/null -i $(q "$key") -o IdentitiesOnly=yes git@github.com" net ;;
     hostkey)
       say WRONG "SSH: host key verification failed for github.com"
       fix "ssh-keygen -R github.com   (then compare the new fingerprint with GitHub's published ones)" ;;
@@ -523,7 +553,7 @@ chk_ssh() {
       fix "sign in to GitHub as $cfg_login, open https://github.com/settings/ssh/new and paste the contents of $(q "$pub")" ;;
     *)
       say WRONG "SSH: unexpected answer from github.com: $(first_line "$ssh_out")"
-      fix "run: ssh -vT -i $(q "$key") -o IdentitiesOnly=yes git@github.com" ;;
+      fix "run: ssh -vT -F /dev/null -i $(q "$key") -o IdentitiesOnly=yes git@github.com" ;;
   esac
 }
 
@@ -542,17 +572,17 @@ chk_gh() {
   case $gh_state in
     none)
       say MISSING "gh: not logged in to github.com in $cfg_gh"
-      fix "GH_CONFIG_DIR=$dirq gh auth login --hostname github.com   (sign in as $cfg_login, not as yourself)" ;;
+      fix "$(gh_login_cmd "$cfg_gh")   (sign in as $cfg_login, not as yourself)" ;;
     net)
       say MISSING "gh: could not reach github.com (network), so the login in $cfg_gh was not verified"
-      fix "check the network or proxy, then re-run this check" ;;
+      fix "check the network or proxy, then re-run this check" net ;;
     bad)
       say WRONG "gh: the login in $cfg_gh does not work: $(first_line "$gh_out")"
-      fix "GH_CONFIG_DIR=$dirq gh auth login --hostname github.com   (sign in as $cfg_login)" ;;
+      fix "$(gh_login_cmd "$cfg_gh")   (sign in as $cfg_login)" ;;
     ok)
       if [ "$(lc "$gh_who")" != "$(lc "$cfg_login")" ]; then
         say WRONG "gh: $cfg_gh is logged in as $gh_who, but the config says login=$cfg_login"
-        fix "GH_CONFIG_DIR=$dirq gh auth logout --hostname github.com && GH_CONFIG_DIR=$dirq gh auth login --hostname github.com   (sign in as $cfg_login)"
+        fix "GH_CONFIG_DIR=$dirq gh auth logout --hostname github.com && $(gh_login_cmd "$cfg_gh")   (sign in as $cfg_login)"
       else
         say OK "gh: GH_CONFIG_DIR=$cfg_gh is logged in as $gh_who"
         gh_ok=1
@@ -566,14 +596,24 @@ chk_gh() {
 
 chk_tokens() {
   step 4
-  local v val found=0
-  for v in $TOKEN_VARS; do
+  local v val found=0 why
+  # The process this script runs in: anything exported here by a shell profile is in
+  # the agent's environment too, unless the settings env overrides it.
+  for v in $TOKEN_VARS GH_HOST GIT_CONFIG_PARAMETERS GH_CONFIG_DIR; do
     val=${!v:-}
-    if [ -n "$val" ]; then
-      found=1
-      say WRONG "$v is set in this process; it would override the agent's gh login with whoever owns that token"
-      fix "unset $v   (and remove the line that exports it from your shell profile)"
-    fi
+    [ -n "$val" ] || continue
+    case $v in
+      GH_CONFIG_DIR) [ -n "${cfg_gh:-}" ] && [ "$val" != "$cfg_gh" ] || continue
+        why="it points gh at another login than the agent's $cfg_gh" ;;
+      GH_HOST) why="it would send gh to another host" ;;
+      GIT_CONFIG_PARAMETERS) why="it would override the agent's git config (the forced-SSH url rewrite and credential helper)" ;;
+      *) why="it would override the agent's gh login with whoever owns that token" ;;
+    esac
+    found=1
+    say WRONG "$v is set in this process; $why"
+    fix "unset $v   (and remove the line that exports it from your shell profile, for example ~/.zshrc or ~/.bash_profile)"
+  done
+  for v in $TOKEN_VARS GH_HOST; do
     if [ "$settings_state" = ok ] && [ "$(jq -r --arg v "$v" '(.env // {}) | if type == "object" then has($v) else false end' <<<"$settings_text")" = true ]; then
       found=1
       say WRONG "$v is set in the env of $settings; it would override the agent's gh login"
@@ -581,7 +621,7 @@ chk_tokens() {
     fi
   done
   if [ "$found" = 0 ]; then
-    say OK "no GH_TOKEN, GITHUB_TOKEN or GH_ENTERPRISE_TOKEN in this process or in the env of $settings"
+    say OK "no GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN, GH_HOST, GIT_CONFIG_PARAMETERS or foreign GH_CONFIG_DIR in this process or in the env of $settings"
   fi
 }
 
@@ -605,6 +645,26 @@ chk_operator() {
     fix "create a separate machine account on GitHub and set login= (and its key and gh login) to that account in $cfg_file"
   else
     say OK "the operator's own gh login ($who) differs from login=$cfg_login"
+  fi
+}
+
+# The operator's own SSH identity, the way a plain `ssh git@github.com` presents it (no
+# -i, the normal config and agent). It covers what the operator's gh login cannot when
+# that is logged out, which is usual on a new machine. No answer, or a refusal, proves
+# nothing either way and is not an error.
+chk_operator_ssh() {
+  step 1
+  if [ "$valid_login" != 1 ] || ! command -v ssh >/dev/null; then return; fi
+  local out re='Hi ([A-Za-z0-9-]+)!' who=""
+  out=$(ssh -T -o BatchMode=yes -o ConnectTimeout=15 git@github.com </dev/null 2>&1)
+  if [[ $out =~ $re ]]; then who=${BASH_REMATCH[1]}; fi
+  if [ -z "$who" ]; then
+    say SKIP "the operator's own SSH identity could not be read ($(is_network "$out" && echo "network" || echo "no key offered or refused")), so it was not compared with login=$cfg_login"
+  elif [ "$(lc "$who")" = "$(lc "$cfg_login")" ]; then
+    say WRONG "login=$cfg_login is the account the operator's own SSH key authenticates as (ssh git@github.com answers \"Hi $who!\"): the agent would be the owner again"
+    fix "create a separate machine account on GitHub and set login= (and its key and gh login) to that account in $cfg_file; if $who is in fact the agent's account, its key is on a default path or in ssh-agent, so plain ssh offers it too: move it off ~/.ssh/id_* and run ssh-add -d on it"
+  else
+    say OK "the operator's own SSH identity ($who) differs from login=$cfg_login"
   fi
 }
 
@@ -639,7 +699,7 @@ probe_repo() { # owner/repo
 
 chk_repos() {
   step 5
-  local r out rc admin maintain list id rs name byp n_active
+  local r out rc admin maintain list id rs name byp n_active owner mem
   if [ "$valid_repos" != 1 ]; then say SKIP "repository access (needs valid repos in the config)"; return; fi
   if [ "$gh_ok" != 1 ]; then say SKIP "repository access (needs the gh login of the machine account first)"; return; fi
   list=$(printf '%s' "$cfg_repos" | tr ',' '\n')
@@ -648,7 +708,7 @@ chk_repos() {
     case $repo_state in
       net)
         say MISSING "repo $r: could not reach github.com (network), so access was not verified"
-        fix "check the network or proxy, then re-run this check"
+        fix "check the network or proxy, then re-run this check" net
         continue ;;
       err)
         say WRONG "repo $r: reading it as $cfg_login failed: $repo_msg"
@@ -664,10 +724,24 @@ chk_repos() {
         continue ;;
     esac
     say OK "repo $r: $cfg_login can push"
+    # The machine account must not be the owner's account in disguise: the repository's
+    # owner, an organization owner, or a collaborator above Write can approve and merge
+    # their own work, which is what the separate account is for.
+    owner=$(jq -r '.owner.login // ""' <<<"$repo_json")
+    if [ "$(lc "$owner")" = "$(lc "$cfg_login")" ]; then
+      say WRONG "repo $r: $cfg_login owns it, so the agent would be the owner and could approve its own work"
+      fix "use a separate machine account as login= in $cfg_file; $cfg_login must not be the owner of $r"
+    elif [ "$(jq -r '.owner.type // ""' <<<"$repo_json")" = Organization ]; then
+      mem=$(gh_agent api "user/memberships/orgs/$owner") && \
+        [ "$(jq -r '.role // ""' 2>/dev/null <<<"$mem")" = admin ] && {
+          say WRONG "repo $r: $cfg_login is an owner of the organization $owner, so it could approve its own work"
+          fix "make $cfg_login a plain member (https://github.com/orgs/$owner/people) or use a separate machine account"
+        }
+    fi
     admin=$(jq -r '.permissions.admin // false' <<<"$repo_json")
     maintain=$(jq -r '.permissions.maintain // false' <<<"$repo_json")
     if [ "$admin" = true ] || [ "$maintain" = true ]; then
-      say WARN "repo $r: $cfg_login holds the $([ "$admin" = true ] && echo admin || echo maintain) role; it should be Write, because a higher role can bypass branch protection"
+      say WRONG "repo $r: $cfg_login holds the $([ "$admin" = true ] && echo admin || echo maintain) role; it must be Write, because a higher role can bypass branch protection and approve its own work"
       fix "lower $cfg_login to the Write role at https://github.com/$r/settings/access"
     fi
     rs=$(gh_agent api "repos/$r/rulesets"); rc=$?
@@ -728,7 +802,7 @@ build_want() {
     --arg gh "$cfg_gh" --arg login "$cfg_login" '{
       GIT_AUTHOR_NAME: $name, GIT_COMMITTER_NAME: $name,
       GIT_AUTHOR_EMAIL: $email, GIT_COMMITTER_EMAIL: $email,
-      GIT_SSH_COMMAND: ("ssh -i " + $key + " -o IdentitiesOnly=yes"),
+      GIT_SSH_COMMAND: ("ssh -F /dev/null -i " + $key + " -o IdentitiesOnly=yes"),
       GH_CONFIG_DIR: $gh, JARVIS_AGENT_IDENTITY: $login,
       GIT_CONFIG_COUNT: "2",
       GIT_CONFIG_KEY_0: "url.git@github.com:.insteadOf", GIT_CONFIG_VALUE_0: "https://github.com/",
@@ -805,6 +879,40 @@ chk_settings() {
     say OK "env of $settings: $n_write key(s) to write, $n_same already in place"
   fi
   plan_n_write=$n_write
+}
+
+# Under the env a run would write, what does git do with an HTTPS GitHub remote of each
+# configured repository? It must become git@github.com:<repo>.git for fetch and push,
+# whatever the operator's own ~/.gitconfig says about url rewrites. No network.
+chk_git_urls() {
+  step 6
+  if [ "$cfg_ready" != 1 ]; then say SKIP "the agent's git rewriting HTTPS GitHub remotes to SSH (needs a valid config)"; return; fi
+  build_want
+  local gitenv=() kv r list tmp fetch push want_url origins
+  while IFS= read -r kv; do gitenv+=("$kv"); done < <(jq -r 'to_entries[] | "\(.key)=\(.value)"' <<<"$want")
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/apply-agent-identity-git.XXXXXX") || die "cannot create a temporary directory"
+  tmpdirs="$tmpdirs
+$tmp"
+  gitc init -q --bare "$tmp/r.git" 2>/dev/null || { say WRONG "git could not create a scratch repository in $tmp"; fix "check that git works and $tmp is writable"; return; }
+  gitc -C "$tmp/r.git" remote add origin https://github.com/placeholder/placeholder.git 2>/dev/null
+  list=$(printf '%s' "$cfg_repos" | tr ',' '\n')
+  while IFS= read -r r; do
+    local form
+    for form in "https://github.com/$r.git" "git@github.com:$r.git"; do
+      gitc -C "$tmp/r.git" remote set-url origin "$form" 2>/dev/null
+      fetch=$(env -u GIT_CONFIG_PARAMETERS "${gitenv[@]}" env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$tmp/r.git" remote get-url origin 2>&1)
+      push=$(env -u GIT_CONFIG_PARAMETERS "${gitenv[@]}" env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git -C "$tmp/r.git" remote get-url --push origin 2>&1)
+      want_url="git@github.com:$r.git"
+      if [ "$fetch" = "$want_url" ] && [ "$push" = "$want_url" ]; then
+        say OK "git: $form fetches and pushes as $want_url under the agent's env"
+      else
+        origins=$(gitc -C "$tmp/r.git" config --show-origin --get-regexp '^url\..*' 2>/dev/null | head -n 8)
+        say WRONG "git: $form becomes $fetch (fetch) and $push (push) under the agent's env, not $want_url, so the agent could push over HTTPS as another account"
+        fix "remove or change the url rewrite that wins, so it no longer touches https://github.com/ or git@github.com: (file, then key and value)
+${origins:-no url.* line is set in any git config file; check includeIf and .git/config of the repository}"
+      fi
+    done
+  done <<<"$list"
 }
 
 plan_settings() { # needs want, settings_text, rec_json
@@ -946,7 +1054,7 @@ do_unapply() {
 # --- the checks, in the order a new machine is set up ----------------------------------------------
 
 run_checks() {
-  problems=0 warns=0 next_step=0 next_cmd="" last_bad=0
+  problems=0 warns=0 next_step=0 next_cmd="" next_net=0 last_bad=0
   gh_ok=0; plan_n_write=0
   valid_login=0 valid_ssh_key=0 valid_gh_config_dir=0 valid_repos=0 cfg_ready=0
   snapshot_settings
@@ -960,8 +1068,10 @@ run_checks() {
   fi
   chk_tokens
   chk_operator
+  chk_operator_ssh
   if [ "$have_cfg" = 1 ]; then chk_repos; fi
   chk_settings
+  chk_git_urls
 }
 
 finish_checks() { # prints Next and the summary
@@ -1003,6 +1113,7 @@ pause() { # message
 }
 
 setup_steps() {
+  gh_state=none; gh_who=""; gh_ok=0
   local host dir ans_login ans_email ans_key ans_gh ans_repos ans_author comment pub body
   host=$(host_tag)
   echo "Agent identity setup for this machine."
@@ -1101,11 +1212,12 @@ author_name=$ans_author"
       echo "  $cfg_gh is already logged in as $gh_who: nothing to do."
     else
       echo "  Run this in another terminal and sign in as $cfg_login, not as yourself:"
-      echo "    GH_CONFIG_DIR=$(q "$cfg_gh") gh auth login --hostname github.com"
+      echo "    $(gh_login_cmd "$cfg_gh")"
       pause "  Press Enter when it is done."
     fi
   else
-    echo "  gh is not installed: install it (brew install gh), then re-run."
+    echo "  gh is not installed. Install it (brew install gh, or see https://cli.github.com), then re-run --setup."
+    echo "  Continuing to the full check, which lists everything still open."
   fi
 
   echo
@@ -1174,7 +1286,11 @@ main() {
     exit 1
   fi
   if [ "$mode" = check ]; then
-    echo "apply-agent-identity: all checks passed${warns:+ ($warns warning(s))}"
+    if [ "$warns" -gt 0 ]; then
+      echo "apply-agent-identity: all checks passed ($warns warning(s))"
+    else
+      echo "apply-agent-identity: all checks passed"
+    fi
     exit 0
   fi
   do_apply

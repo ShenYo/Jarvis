@@ -306,7 +306,7 @@ identity](#agent-identity) after the guards, in this order:
    add (signed in as the machine account: Settings, SSH and GPG keys, New SSH
    key), and prints the command that logs `gh` in as the machine account.
 4. Run `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check` until its last
-   line says to apply.
+   line is `Next: run without --check to apply`.
 5. Run `bash ~/.Jarvis/scripts/apply-agent-identity.sh` to write the identity,
    then start a new Claude Code session.
 
@@ -591,8 +591,9 @@ attributed by it), `ssh_key` this machine's private key for it, `gh_config_dir`
 the `GH_CONFIG_DIR` the agent's `gh` uses, which must not be your own, and
 `repos` the repositories it works in.
 
-Every check prints one line, `OK`, `MISSING`, `WRONG` or `WARN`, and for
-anything that is not `OK` an exact `fix:` line. All of them run, so one run shows
+Every check prints one line, `OK`, `MISSING`, `WRONG` or `WARN` (or `SKIP`, for a
+check that cannot run until an earlier one passes), and for anything that is
+not `OK` an exact `fix:` line. All of them run, so one run shows
 everything, and the last line, `Next: step N of 6 — …`, names the earliest step
 still failing, so rerunning `--check` always tells you the single next thing to
 do. The checks follow the order a new machine is set up in:
@@ -634,11 +635,44 @@ would push with the credentials in the operator's keychain, as the wrong account
 The guard has a switch for this, and it is off. With
 `JARVIS_REQUIRE_AGENT_IDENTITY=1` in the environment and `JARVIS_AGENT_IDENTITY`
 empty, [`bash-guard.py`](./.agents/claude-guard/bash-guard.py) refuses every
-GitHub write: a push to a shared remote, `gh pr`, `gh issue`, `gh release` and
-`gh repo` commands that change something, and a `gh api` request that is not a
-`GET`. Reads stay allowed. Nothing sets the switch; the owner turns it on after
-this machine passes `--check`. It applies in Codex too, but the script writes
-only Claude Code's environment, so Codex needs the marker in its own.
+GitHub write: a push to a shared remote, every `gh` subcommand except the known
+read-only forms (`view`, `list`, `status`, `diff`, `checks`, `search`,
+`browse --no-browser`, `auth status`, `--help`), and a `gh api` request that is
+not a `GET` or a GraphQL query. Nothing sets the switch; the owner turns it on
+after this machine passes `--check`, by adding it to the `env` of
+`~/.claude/settings.json`. It applies in Codex too, but the script writes only
+Claude Code's environment, so Codex needs the marker in its own.
+
+Once the identity is applied (the marker is set), the guard also refuses a
+GitHub write that would not act as the agent, whether or not the switch is on:
+when the hook's own environment carries `GH_TOKEN`, `GITHUB_TOKEN`,
+`GH_ENTERPRISE_TOKEN`, `GH_HOST` or `GIT_CONFIG_PARAMETERS`, or when the command
+sets, unsets or `env -u`'s one of those, `GH_CONFIG_DIR`, `GIT_SSH_COMMAND` or
+`GIT_CONFIG_*`, or passes `git -c` for `credential.*`, `url.*`, `core.sshCommand`
+or `http.*`. That covers environment the check cannot see, such as the `env` of a
+project's own `.claude/settings.json`, which is read at run time. The check
+itself also refuses a login that is the owner's account, owns a repository, or
+holds admin or maintain on one, or is the account the operator's own SSH key
+authenticates as; confirms with real `git` that an HTTPS GitHub remote becomes
+SSH for fetch and push, and that an SSH one stays SSH, and reports the
+`~/.gitconfig` url rewrite that gets in the way if not; and runs `ssh` with
+`-F /dev/null`, so `~/.ssh/config` cannot add the operator's key. With the
+marker set the hook also compares its own `GH_CONFIG_DIR`, `GIT_SSH_COMMAND` and
+`GIT_CONFIG_*` values with what was applied (`~/.claude/agent-identity.applied.json`),
+refuses `env -i` before a GitHub write, and refuses every GitHub write if that
+record is missing.
+
+Known limits, not checked: `git -c include.path=…`, a token embedded in a push
+URL, `GIT_ASKPASS` and `SSH_ASKPASS`, and an `ssh_config` `ProxyCommand` or
+port 443 setup that the check then fails, because `-F /dev/null` ignores it.
+One wrong-account case is not caught: `login=` set to the operator's own
+account on an organization repository where it only has Write, on a machine
+with neither the operator's `gh` login nor an operator SSH key, after the key
+and the `gh` login were made in a browser signed in as the operator. Use a
+separate machine account, and sign in as it in a private window. And keep the
+agent's key off the default paths (`~/.ssh/id_ed25519` and the like) and out of
+`ssh-agent`: otherwise a plain `ssh` presents it too, and the operator check
+reports the agent's own login as the operator's.
 
 ## Bridge status and limitations
 

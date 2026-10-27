@@ -16,8 +16,24 @@ py=$(command -v /usr/bin/python3 || command -v python3)
 root=$(mktemp -d "${TMPDIR:-/tmp}/bash-guard-test.XXXXXX")
 # The corpus below runs with the agent-identity switch off, whatever this
 # machine has set; the switch's own cases set it themselves.
-unset JARVIS_REQUIRE_AGENT_IDENTITY JARVIS_AGENT_IDENTITY
+unset JARVIS_REQUIRE_AGENT_IDENTITY JARVIS_AGENT_IDENTITY CLAUDE_CONFIG_DIR
 hook_args=""
+# An applied identity: the marker, the environment apply-agent-identity.sh writes,
+# and the record of it that the hook compares that environment with.
+applied_home="$root/applied-home"; mkdir -p "$applied_home"
+jq -n '{version: 1, env: {GH_CONFIG_DIR: "/agent/gh", GIT_SSH_COMMAND: "ssh -F /dev/null -i /agent/key -o IdentitiesOnly=yes",
+  GIT_CONFIG_COUNT: "2", GIT_CONFIG_KEY_0: "url.git@github.com:.insteadOf", GIT_CONFIG_VALUE_0: "https://github.com/",
+  GIT_CONFIG_KEY_1: "credential.helper", GIT_CONFIG_VALUE_1: "", GIT_AUTHOR_NAME: "Claude Code"}}' >"$applied_home/agent-identity.applied.json"
+apply_identity() {
+  export JARVIS_AGENT_IDENTITY=some-agent CLAUDE_CONFIG_DIR="$applied_home"
+  export GH_CONFIG_DIR=/agent/gh GIT_SSH_COMMAND="ssh -F /dev/null -i /agent/key -o IdentitiesOnly=yes"
+  export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=url.git@github.com:.insteadOf GIT_CONFIG_VALUE_0=https://github.com/
+  export GIT_CONFIG_KEY_1=credential.helper GIT_CONFIG_VALUE_1=
+}
+drop_identity() {
+  unset JARVIS_AGENT_IDENTITY CLAUDE_CONFIG_DIR GH_CONFIG_DIR GIT_SSH_COMMAND GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 \
+    GIT_CONFIG_VALUE_0 GIT_CONFIG_KEY_1 GIT_CONFIG_VALUE_1 GIT_CONFIG_KEY_2 GIT_CONFIG_VALUE_2
+}
 
 # A repository on a feature branch, and one on main, for the push cases.
 git_init() {
@@ -373,7 +389,7 @@ probe allow 'echo "gh pr create is refused"'
 export JARVIS_AGENT_IDENTITY="   "
 probe deny 'gh pr create --title x'
 echo "== agent identity: switch on, identity present -> exactly the usual behaviour"
-export JARVIS_AGENT_IDENTITY=some-agent
+apply_identity
 probe allow 'gh pr create --title x --body y'
 probe allow 'git push origin feat/y' "$onmain"
 probe allow 'git push origin feat/y' "$root/https"
@@ -390,12 +406,157 @@ echo "== agent identity: the same in Codex mode, where an ask is a deny anyway"
 hook_args=--codex
 probe allow 'gh pr create --title x'
 probe deny 'gh pr merge 12'
-unset JARVIS_AGENT_IDENTITY
+drop_identity
 probe deny 'gh pr create --title x'
 probe deny 'git push origin feat/y' "$onmain"
 probe allow 'gh pr view 12'
 hook_args=""
 unset JARVIS_REQUIRE_AGENT_IDENTITY
+
+echo "== agent identity: switch on, no identity -> every gh subcommand that is not a known read is a write"
+export JARVIS_REQUIRE_AGENT_IDENTITY=1
+for c in 'gh pr ready 12' 'gh pr update-branch 12' 'gh pr lock 12' 'gh issue transfer 3 o/r' 'gh issue lock 3' \
+         'gh issue pin 3' 'gh issue develop 3 -b x' 'gh repo sync' 'gh repo deploy-key add key.pub' \
+         'gh workflow run ci.yml' 'gh workflow enable ci.yml' 'gh run rerun 1' 'gh run cancel 1' 'gh label create bug' \
+         'gh secret set X' 'gh variable set X' 'gh gist create f.txt' 'gh ssh-key add k.pub' 'gh gpg-key add k.asc' \
+         'gh auth login' 'gh auth refresh' 'gh alias set x y' 'gh codespace create' 'gh ruleset check' 'gh browse' \
+         'gh extension install o/ext' 'gh cache delete 1' 'gh somefuturecommand now'; do
+  probe deny "$c"
+done
+probe deny 'bash -c "gh workflow run ci.yml"'
+probe deny 'xargs gh label create < labels.txt'
+echo "== agent identity: switch on, no identity -> the known read-only gh forms"
+for c in 'gh pr status' 'gh issue status' 'gh pr checks 12' 'gh pr view 12' 'gh pr diff 12' 'gh pr list' 'gh search issues bug' \
+         'gh search repos x' 'gh status' 'gh browse --no-browser' 'gh browse -n' 'gh auth status' 'gh --help' 'gh help' \
+         'gh --version' 'gh version' 'gh pr create --help' 'gh pr' 'gh run view 1' 'gh run list' 'gh label list' \
+         'gh secret list' 'gh repo clone o/r' 'gh run watch 1' 'gh release download v1.0.0' 'gh api repos/o/r' \
+         'gh api graphql -f query="query { viewer { login } }"'; do
+  probe allow "$c"
+done
+unset JARVIS_REQUIRE_AGENT_IDENTITY
+
+echo "== agent identity applied: no GitHub write while something overrides who it acts as"
+apply_identity
+for var in GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN GH_HOST GIT_CONFIG_PARAMETERS; do
+  export "$var=x"
+  probe deny 'gh pr create --title t'
+  probe deny 'git push origin feat/y'
+  probe deny 'gh api -X POST repos/o/r/issues -f title=x'
+  probe allow 'gh pr view 12'
+  probe allow 'git fetch origin'
+  unset "$var"
+done
+export GH_TOKEN=x
+drop_identity
+probe allow 'gh pr create --title t'
+export JARVIS_REQUIRE_AGENT_IDENTITY=1
+probe deny 'gh pr create --title t'
+unset JARVIS_REQUIRE_AGENT_IDENTITY GH_TOKEN
+apply_identity
+for sw in off on; do
+  [ "$sw" = on ] && export JARVIS_REQUIRE_AGENT_IDENTITY=1
+  probe deny 'GH_TOKEN=x gh pr create --title t'
+  probe deny 'GITHUB_TOKEN=x gh pr create --title t'
+  probe deny 'GH_ENTERPRISE_TOKEN=x gh pr create --title t'
+  probe deny 'GH_CONFIG_DIR=/x gh pr create --title t'
+  probe deny 'GH_HOST=h.example gh pr create --title t'
+  probe deny 'GIT_SSH_COMMAND="ssh -i /x" git push origin feat/y'
+  probe deny 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.x.insteadOf GIT_CONFIG_VALUE_0=y git push origin feat/y'
+  probe deny 'GIT_CONFIG_PARAMETERS=x git push origin feat/y'
+  probe deny 'env GH_TOKEN=x gh pr create --title t'
+  probe deny 'env -u GH_CONFIG_DIR gh pr create --title t'
+  probe deny 'env -u GIT_SSH_COMMAND git push origin feat/y'
+  probe deny 'env --unset=GH_CONFIG_DIR gh pr create --title t'
+  probe deny 'unset GH_CONFIG_DIR; gh pr create --title t'
+  probe deny 'unset GIT_CONFIG_COUNT && git push origin feat/y'
+  probe deny 'export GH_TOKEN=x; gh pr create --title t'
+  probe deny 'git -c credential.helper=store push origin feat/y'
+  probe deny 'git -c url.https://x.example/.insteadOf=y push origin feat/y'
+  probe deny 'git -c core.sshCommand=ssh push origin feat/y'
+  probe deny 'git -c http.extraheader=x push origin feat/y'
+  probe deny 'git --config-env=credential.helper=HELPER push origin feat/y'
+  probe deny 'bash -c "GH_TOKEN=x gh pr create --title t"'
+  probe allow 'GH_TOKEN=x gh pr view 12'
+  probe allow 'git -c credential.helper=store fetch origin'
+  probe allow 'env -u GH_CONFIG_DIR gh pr list'
+  probe allow 'unset GH_TOKEN; gh pr view 12'
+  probe allow 'FOO=1 gh pr create --title x'
+  probe allow 'git -c core.editor=true push origin feat/y'
+  probe allow 'git -c user.name=x push origin feat/y'
+done
+unset JARVIS_REQUIRE_AGENT_IDENTITY; drop_identity
+echo "== agent identity applied: an empty environment, and the GIT_CONFIG_* variables that count"
+apply_identity
+probe deny 'env -i gh pr create --title t'
+probe deny 'env --ignore-environment gh pr create --title t'
+probe deny 'env - gh pr create --title t'
+probe deny 'env -i PATH=/usr/bin git push origin feat/y'
+probe deny 'env -iu FOO gh pr create --title t'
+probe deny 'env -i bash -c "gh pr create --title t"'
+probe allow 'env -i gh pr view 12'
+probe allow 'env FOO=1 gh pr create --title t'
+probe allow 'env -u FOO gh pr create --title t'
+probe deny 'GIT_CONFIG_GLOBAL=/x git push origin feat/y'
+probe deny 'GIT_CONFIG_SYSTEM=/x git push origin feat/y'
+probe deny 'GIT_CONFIG_KEY_7=a.b git push origin feat/y'
+probe deny 'GIT_CONFIG_VALUE_3=a git push origin feat/y'
+probe deny 'GIT_CONFIG_COUNT=0 git push origin feat/y'
+probe allow 'GIT_CONFIG_NOSYSTEM=1 git push origin feat/y'
+probe allow 'GIT_CONFIG_NOSYSTEM=1 gh pr create --title t'
+drop_identity
+echo "== agent identity applied: the hook's environment must still be what was applied"
+apply_identity
+probe allow 'gh pr create --title t'
+probe allow 'git push origin feat/y'
+for var in GH_CONFIG_DIR GIT_SSH_COMMAND GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 GIT_CONFIG_KEY_1 GIT_CONFIG_VALUE_1; do
+  saved=${!var}
+  export "$var=/other"
+  probe deny 'gh pr create --title t'
+  probe deny 'git push origin feat/y'
+  probe allow 'gh pr view 12'
+  export "$var=$saved"
+done
+export GH_CONFIG_DIR=/other
+reason=$(jq -n --arg d "$feat" '{tool_name: "Bash", tool_input: {command: "gh pr create --title t"}, cwd: $d}' | "$py" -I "$hook" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+total=$((total + 1))
+if printf '%s' "$reason" | grep -qF 'differs from the applied identity in GH_CONFIG_DIR' && printf '%s' "$reason" | grep -qF 'apply-agent-identity.sh --check'; then
+  echo "ok   the reason names the variable that differs and the --check command"
+else
+  echo "FAIL the reason names the variable that differs and the --check command: $reason"; fails=$((fails + 1))
+fi
+export GH_CONFIG_DIR=/agent/gh
+unset GIT_CONFIG_COUNT
+probe deny 'gh pr create --title t'
+export GIT_CONFIG_COUNT=2
+export GIT_CONFIG_KEY_2=core.editor
+probe deny 'gh pr create --title t'
+unset GIT_CONFIG_KEY_2
+export GIT_CONFIG_VALUE_2=x
+probe deny 'git push origin feat/y'
+unset GIT_CONFIG_VALUE_2
+probe allow 'gh pr create --title t'
+echo "== agent identity applied: no record to compare with means no GitHub write"
+export CLAUDE_CONFIG_DIR="$root/no-such-claude-home"
+probe deny 'gh pr create --title t'
+probe deny 'git push origin feat/y'
+probe allow 'gh pr view 12'
+mkdir -p "$root/bad-home"; echo '{ not json' >"$root/bad-home/agent-identity.applied.json"
+export CLAUDE_CONFIG_DIR="$root/bad-home"
+probe deny 'gh pr create --title t'
+jq -n --arg d "$feat" '{tool_name: "Bash", tool_input: {command: "gh pr create --title t"}, cwd: $d}' >"$root/in.json"
+reason=$("$py" -I "$hook" <"$root/in.json" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+total=$((total + 1))
+if printf '%s' "$reason" | grep -qF 'is missing or unreadable' && printf '%s' "$reason" | grep -qF 'bash ~/.Jarvis/scripts/apply-agent-identity.sh --check'; then
+  echo "ok   a missing record is explained and points at --check"
+else
+  echo "FAIL a missing record is explained and points at --check: $reason"; fails=$((fails + 1))
+fi
+drop_identity
+
+echo "== agent identity not applied and switch off: an override changes nothing"
+probe allow 'GH_TOKEN=x gh pr create --title t'
+probe allow 'env -u GH_CONFIG_DIR gh pr create --title t'
+probe allow 'git -c credential.helper=store push origin feat/y'
 
 echo "== agent identity: the refusal says what to run"
 export JARVIS_REQUIRE_AGENT_IDENTITY=1
@@ -407,6 +568,17 @@ if printf '%s' "$reason" | grep -qF 'bash ~/.Jarvis/scripts/apply-agent-identity
   echo "ok   the reason names the --check command, the config path and the command"
 else
   echo "FAIL the reason names the --check command, the config path and the command: $reason"; fails=$((fails + 1))
+fi
+
+apply_identity
+jq -n --arg d "$feat" '{tool_name: "Bash", tool_input: {command: "GH_TOKEN=x gh pr create --title t"}, cwd: $d}' >"$root/in.json"
+reason=$("$py" -I "$hook" <"$root/in.json" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+drop_identity
+total=$((total + 1))
+if printf '%s' "$reason" | grep -qF "overrides the agent's identity (sets GH_TOKEN)" && printf '%s' "$reason" | grep -qF 'gh pr create'; then
+  echo "ok   the override reason names what is overridden"
+else
+  echo "FAIL the override reason names what is overridden: $reason"; fails=$((fails + 1))
 fi
 
 echo

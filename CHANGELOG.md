@@ -43,8 +43,14 @@ A MINOR release: new scripts run, and the guard hook gains a switch that is off.
   `~/.claude/agent-identity.applied.json` and a `.agent-identity-backup`.
 - **Guard switch, off.** With `JARVIS_REQUIRE_AGENT_IDENTITY=1` and an empty
   `JARVIS_AGENT_IDENTITY`, `bash-guard.py` (Claude Code and Codex) refuses
-  GitHub writes with a reason naming `--check`. Nothing sets the switch, and
-  with it unset the hook answers byte-for-byte as before.
+  GitHub writes with a reason naming `--check`. Nothing sets the switch. With
+  it unset and no marker the hook answers as before over its whole probe
+  corpus; the one difference is stricter parsing of `env` flag clusters, so
+  `env -iu VAR rm -rf …` and `env -S'…'` forms of a prohibited command are now
+  refused too, where the old parser let them through. With the
+  switch on, every `gh` subcommand that is not a known read-only form is refused. With the
+  marker set, a GitHub write is refused while a token, `GH_HOST`, `GIT_CONFIG_*` or a
+  `git -c credential.*` override would make it act as someone else.
 - **What the owner does on this machine:** nothing is required for the guard.
   To adopt the identity, follow the README's [Agent identity](./README.md#agent-identity):
   run `bash ~/.Jarvis/scripts/apply-agent-identity.sh --setup`, then `--check`, then the
