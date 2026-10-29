@@ -23,6 +23,43 @@ How an entry is written:
 
 ## Unreleased
 
+A MINOR release: new scripts run, and the guard hook gains a switch that is off.
+
+- **Agent identity.** [`scripts/apply-agent-identity.sh`](./scripts/apply-agent-identity.sh)
+  gives agents a GitHub machine account of their own, so the owner can approve
+  the pull requests an agent opens (until now agents acted as the owner, and
+  "an agent never approves its own work" was only an instruction). The identity
+  lives in a local, Git-ignored file, `~/.Jarvis/config-local/agent-identity`;
+  nothing in the repository names an account. `--check` runs every check (the
+  file and its place in Git, the SSH key and GitHub's answer to it, the
+  machine account's `gh` login, tokens that would override it, the operator's
+  own login, access to each repository, and conflicts in
+  `~/.claude/settings.json`), prints an exact fix for each failure, and ends
+  with the next step to take. A real run writes the identity into the `env` of
+  `~/.claude/settings.json` only when every check passes; `--setup` guides a new
+  machine through the first four steps; `--unapply` rolls a run back. The agent's git is forced onto SSH too (`GIT_CONFIG_*` env: `url.git@github.com:.insteadOf`
+  and an empty `credential.helper`), so an HTTPS remote cannot push with the owner's
+  keychain credentials. It writes
+  `~/.claude/agent-identity.applied.json` and a `.agent-identity-backup`.
+- **Guard switch, off.** With `JARVIS_REQUIRE_AGENT_IDENTITY=1` and an empty
+  `JARVIS_AGENT_IDENTITY`, `bash-guard.py` (Claude Code and Codex) refuses
+  GitHub writes with a reason naming `--check`. Nothing sets the switch. With
+  it unset and no marker the hook answers as before over its whole probe
+  corpus; the one difference is stricter parsing of `env` flag clusters, so
+  `env -iu VAR rm -rf …` and `env -S'…'` forms of a prohibited command are now
+  refused too, where the old parser let them through. With the
+  switch on, every `gh` subcommand that is not a known read-only form is refused. With the
+  marker set, a GitHub write is refused while a token, `GH_HOST`, `GIT_CONFIG_*` or a
+  `git -c credential.*` override would make it act as someone else.
+- **What the owner does on this machine:** nothing is required for the guard.
+  To adopt the identity, follow the README's [Agent identity](./README.md#agent-identity):
+  run `bash ~/.Jarvis/scripts/apply-agent-identity.sh --setup`, then `--check`, then the
+  plain run, and start a new Claude Code session. Re-run
+  `bash ~/.Jarvis/scripts/apply-claude-guard.sh` and
+  `bash ~/.Jarvis/scripts/apply-codex-guard.sh` to install the updated hook, and
+  trust the Codex hook again in `/hooks`. Turn the switch on only after
+  `--check` passes here.
+
 ## v1.0.0 (2026-10-26)
 
 The first release. It marks what Jarvis is on this machine today; nothing

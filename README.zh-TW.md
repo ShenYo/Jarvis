@@ -265,6 +265,23 @@ top-level canonical 目錄。一個指向錯誤目標、但本身仍是 live 的
 canonical-name entry 會被保留不動，也不會被偵測出來。這些檢查任一失敗，它就會
 以非零狀態結束。每次新增或移除一個 skill 之後，請重新執行它。
 
+要讓 agent 以自己的帳號操作 GitHub，在 guard 之後依下列順序設定 [agent
+identity](#agent-identity)：
+
+1. 套用 guard：`bash ~/.Jarvis/scripts/apply-claude-guard.sh` 與
+   `bash ~/.Jarvis/scripts/apply-codex-guard.sh`。
+2. 在 GitHub 上（所有機器共用，只做一次）建立或沿用那一個 machine account。以每個
+   repository 的 owner 身分登入，邀請它成為 Write 角色的 collaborator（organization 的
+   repository 會要你選角色；個人 repository 的 collaborator 預設就有寫入權限），然後以
+   machine account 的身分登入並接受邀請。
+3. 在這台機器上執行 `bash ~/.Jarvis/scripts/apply-agent-identity.sh --setup`。它會建立設定檔與
+   這台機器的 key、顯示要加入的 public key（以 machine account 登入：Settings、SSH and GPG
+   keys、New SSH key），並印出讓 `gh` 以 machine account 登入的指令。
+4. 執行 `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check`，直到最後一行是
+   `Next: run without --check to apply`。
+5. 執行 `bash ~/.Jarvis/scripts/apply-agent-identity.sh` 寫入 identity，然後開新的 Claude
+   Code session。
+
 ## 日常維護
 
 ### 新增
@@ -487,6 +504,95 @@ hook 或它的設定每次有變動，都要再信任一次。
 ```sh
 bash ~/.Jarvis/tests/codex-guard.sh
 ```
+
+### Agent identity
+
+在這台機器上，agent 以 owner 的身分操作 GitHub，所以 owner 無法核准 agent 開的
+pull request，「agent 絕不核准自己的作品」也只是一條指示。Agent identity 讓 agent 有自己
+的 machine account：它的 commit 與 pull request 都從這個帳號發出，owner 以另一個人的身分審查。
+
+[`apply-agent-identity.sh`](./scripts/apply-agent-identity.sh) 檢查機器是否已為此設定好，
+只有每項檢查都通過，才把 identity 寫進 `~/.claude/settings.json` 的 `env`。Identity 存在
+一個本機檔案裡，絕不放進這個 repository（它是公開的）：
+`~/.Jarvis/config-local/agent-identity`。路徑固定，所以每個 worktree 讀的是同一份檔案。
+它必須是 untracked 且被 Git 忽略，否則檢查會拒絕。它是被解析的，不會被 source：每行一個
+`key=value`，可有 `#` 註解與空行；未知的 key、重複、空值、引號、行尾空白或 CRLF 都會連同
+行號被報告。
+
+```ini
+login=my-agent-account
+email=12345+my-agent-account@users.noreply.github.com
+ssh_key=~/.ssh/id_ed25519_agent_claude_<hostname>
+gh_config_dir=~/.config/gh-agent
+repos=owner/repo
+# author_name=Claude Code
+```
+
+`login` 是 machine account，`email` 是它已驗證的 email（commit 靠它歸屬），`ssh_key` 是這台
+機器為它準備的私鑰，`gh_config_dir` 是 agent 的 `gh` 使用的 `GH_CONFIG_DIR`，不可以是你
+自己的，`repos` 是它工作的 repository。
+
+每項檢查印出一行 `OK`、`MISSING`、`WRONG` 或 `WARN`（前面的檢查沒過、導致這項無法執行時是 `SKIP`），
+凡不是 `OK` 的都附一行確切的 `fix:`。
+所有檢查都會跑，所以一次就能看到全部問題；最後一行 `Next: step N of 6 — …` 指出最早還
+失敗的那一步，所以重跑 `--check` 永遠知道下一件該做的事。檢查的順序就是新機器設定的順序：
+
+1. 設定檔存在、權限私有、內容有效；
+2. 這台機器的 SSH key 存在；
+3. 它的 public key 已加到 machine account，GitHub 回答 `Hi <login>!`；
+4. `gh` 以該帳號登入，且沒有 `GH_TOKEN` 擋在中間；
+5. 該帳號能 push 到每個 repository：沒被邀請、已邀請但未接受、已接受但角色高於 Write，
+   是三種不同的修法；
+6. settings 可以接受 identity，而不會覆蓋任何東西。
+
+```sh
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --setup    # 新機器：引導建立設定檔與 key
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --check    # 跑完所有檢查，不寫入
+bash ~/.Jarvis/scripts/apply-agent-identity.sh            # 檢查，全部通過才寫入
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --unapply  # 精確移除上次寫入的內容
+bash ~/.Jarvis/tests/agent-identity.sh
+```
+
+`--setup` 是互動式的。它在詢問之後，用你輸入時即時驗證過的值建立設定檔，並且只在 key 檔不
+存在時才用 `ssh-keygen` 產生 key：既有的 key 絕不會被覆蓋或修改。它會印出 public key 與要
+加到哪裡，印出 agent 設定目錄用的 `gh auth login` 指令，最後跑完整檢查。它絕不寫
+`settings.json`，也絕不碰你自己的 `gh` 登入或 key。
+
+真正的執行會把 `GIT_AUTHOR_NAME`、`GIT_COMMITTER_NAME`、`GIT_AUTHOR_EMAIL`、
+`GIT_COMMITTER_EMAIL`、`GIT_SSH_COMMAND`、`GH_CONFIG_DIR` 與 `JARVIS_AGENT_IDENTITY` 合併進
+`env`、留下備份，並把寫入的內容記在 `~/.claude/agent-identity.applied.json`。別人設成不同值的
+key 會被報告為衝突而不覆蓋；腳本執行期間 settings 檔若被改動，就不寫入。之後請開新的 Claude
+Code session：執行中的 session 仍用舊的環境。Agent 的 git 也被強制走 SSH（`GIT_CONFIG_COUNT` 以及 `url.git@github.com:.insteadOf` 與 `credential.helper` 兩組設定），因為 HTTPS remote 不會用 `GIT_SSH_COMMAND`，會改用 operator keychain 裡的憑證 push，也就是以錯誤的帳號操作。
+
+Guard 為此有一個開關，目前是關的。環境裡有 `JARVIS_REQUIRE_AGENT_IDENTITY=1` 而
+`JARVIS_AGENT_IDENTITY` 為空時，[`bash-guard.py`](./.agents/claude-guard/bash-guard.py)
+拒絕所有寫入 GitHub 的操作：push 到共用 remote、除了已知唯讀形式（`view`、`list`、`status`、
+`diff`、`checks`、`search`、`browse --no-browser`、`auth status`、`--help`）之外的每一個 `gh`
+子指令，以及不是 `GET` 也不是 GraphQL query 的 `gh api` 請求。沒有任何東西會設定這個開關；
+由 owner 在這台機器通過 `--check` 之後，把它加進 `~/.claude/settings.json` 的 `env` 來打開。
+它在 Codex 也生效，但腳本只寫 Claude Code 的環境，所以 Codex 需要在自己的環境裡放上這個標記。
+
+Identity 套用之後（標記已設定），不論開關是否打開，guard 還會拒絕不會以 agent 身分執行的 GitHub
+寫入：hook 自己的環境帶有 `GH_TOKEN`、`GITHUB_TOKEN`、`GH_ENTERPRISE_TOKEN`、`GH_HOST` 或
+`GIT_CONFIG_PARAMETERS`，或指令設定、unset、`env -u` 了其中之一、`GH_CONFIG_DIR`、`GIT_SSH_COMMAND`
+或 `GIT_CONFIG_*`，或以 `git -c` 改 `credential.*`、`url.*`、`core.sshCommand` 或 `http.*`。這涵蓋
+檢查看不到的環境，例如專案自己的 `.claude/settings.json` 的 `env`，它在執行時才被讀入。檢查本身也
+拒絕這樣的 login：它是 owner 的帳號、擁有某個 repository、在其上有 admin 或 maintain 角色，或是
+operator 自己的 SSH key 所驗證的帳號；它用真正的 `git` 確認 HTTPS 的 GitHub remote 的 fetch 與 push
+都會變成 SSH、SSH 的 remote 也維持 SSH，否則回報擋路的 `~/.gitconfig` url 改寫；並以 `-F /dev/null`
+執行 `ssh`，讓 `~/.ssh/config` 無法加入 operator 的 key。標記已設定時，hook 還會把自己的
+`GH_CONFIG_DIR`、`GIT_SSH_COMMAND` 與 `GIT_CONFIG_*` 的值拿去和套用時記下的內容
+（`~/.claude/agent-identity.applied.json`）比對，拒絕在 GitHub 寫入之前出現的 `env -i`，而且該
+紀錄不存在時拒絕所有 GitHub 寫入。
+
+已知限制，不在檢查範圍內：`git -c include.path=…`、嵌在 push URL 裡的 token、`GIT_ASKPASS` 與
+`SSH_ASKPASS`，以及 `ssh_config` 裡的 `ProxyCommand` 或 port 443 設定（因為 `-F /dev/null` 會忽略它，
+檢查反而會失敗）。
+有一種用錯帳號的情況抓不到：`login=` 填的是操作者自己的帳號，而它在某個組織 repo 上只有 Write
+權限，這台機器上又既沒有操作者的 `gh` 登入，也沒有操作者的 SSH key，而 key 和 `gh` 登入都是在
+以操作者身分登入的瀏覽器裡完成的。請使用獨立的機器帳號，並在無痕視窗以它登入。另外，agent 的
+key 不要放在預設路徑（`~/.ssh/id_ed25519` 之類），也不要載入 `ssh-agent`：否則一般的 `ssh` 也會
+送出它，操作者檢查就會把 agent 自己的 login 誤認為操作者的。
 
 ## Bridge 狀態與限制
 

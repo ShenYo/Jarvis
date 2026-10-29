@@ -62,10 +62,128 @@ CODEX_CHECKPOINT = (
 )
 
 
+def identity_missing():
+    """True when this machine requires an agent identity for GitHub writes
+    (JARVIS_REQUIRE_AGENT_IDENTITY=1) and the environment carries none
+    (JARVIS_AGENT_IDENTITY, which scripts/apply-agent-identity.sh writes into
+    the agent's environment after every one of its checks passes). The switch
+    is off unless something sets it, and then nothing here changes."""
+    return (os.environ.get("JARVIS_REQUIRE_AGENT_IDENTITY") == "1"
+            and not os.environ.get("JARVIS_AGENT_IDENTITY", "").strip())
+
+
+NO_IDENTITY = (
+    "GitHub writes need this machine's agent identity, and it has none "
+    "(JARVIS_REQUIRE_AGENT_IDENTITY=1 but JARVIS_AGENT_IDENTITY is empty), so "
+    "the command would act as whoever is logged in. Run `bash "
+    "~/.Jarvis/scripts/apply-agent-identity.sh --check` and do what it lists; "
+    "the config file is ~/.Jarvis/config-local/agent-identity. Do not retry "
+    "this command or work around it: tell the user."
+)
+
+
+def identity_active():
+    """True when the agent identity is applied here: the marker
+    JARVIS_AGENT_IDENTITY is set. Then a GitHub write must really act as that
+    identity, whether or not the switch above is on."""
+    return bool(os.environ.get("JARVIS_AGENT_IDENTITY", "").strip())
+
+
+# Environment that would make git or gh act as someone else than the agent:
+# a token or host gh reads before its stored login, and git's own command-line
+# configuration, which outranks the config the agent identity sets.
+HIJACK_ENV = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN",
+              "GITHUB_ENTERPRISE_TOKEN", "GH_HOST", "GIT_CONFIG_PARAMETERS")
+HIJACK_VARS = set(HIJACK_ENV) | {"GH_CONFIG_DIR", "GIT_SSH_COMMAND"}
+HIJACK_SUFFIX = (
+    "The command would not act as the agent's own account. Do not retry it or "
+    "work around it: remove the override, or tell the user."
+)
+
+
+# GIT_CONFIG_NOSYSTEM only drops the system file, so it cannot undo what the
+# identity sets; the other GIT_CONFIG_* variables can.
+IDENTITY_GIT_ENV = re.compile(
+    r"^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+|PARAMETERS|GLOBAL|SYSTEM)$")
+
+
+def is_identity_var(name):
+    up = name.upper()
+    return up in HIJACK_VARS or bool(IDENTITY_GIT_ENV.match(up))
+
+
+# What scripts/apply-agent-identity.sh recorded as written, which the hook's own
+# environment must still match.
+APPLIED_CHECKED = re.compile(r"^(GH_CONFIG_DIR|GIT_SSH_COMMAND|GIT_CONFIG_COUNT|"
+                             r"GIT_CONFIG_KEY_[0-9]+|GIT_CONFIG_VALUE_[0-9]+)$")
+
+
+def applied_record_path():
+    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    return os.path.join(home, "agent-identity.applied.json")
+
+
+def applied_env_problems():
+    """Reasons the hook's environment is not the applied identity's: the record
+    is missing or unreadable (nothing to compare with), or a variable the
+    script wrote now differs, which a project's own .claude/settings.json env
+    can cause. Empty when it all matches."""
+    path = applied_record_path()
+    try:
+        with open(path, encoding="utf-8") as fh:
+            applied = json.load(fh).get("env")
+        if not isinstance(applied, dict):
+            raise ValueError("no env object")
+    except Exception:
+        return ["JARVIS_AGENT_IDENTITY is set but %s is missing or unreadable, so the "
+                "identity cannot be verified; run `bash ~/.Jarvis/scripts/apply-agent-identity.sh "
+                "--check`" % path]
+    differ = [k for k, v in applied.items()
+              if APPLIED_CHECKED.match(k) and os.environ.get(k, "") != v]
+    differ += [k for k in os.environ
+               if k not in applied and re.match(r"^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)$", k)]
+    if differ:
+        return ["the hook's environment differs from the applied identity in %s (a project's "
+                "own .claude/settings.json env can do this); run `bash "
+                "~/.Jarvis/scripts/apply-agent-identity.sh --check`" % ", ".join(sorted(differ))]
+    return []
+
+
 class Result:
     def __init__(self):
         self.deny = []
         self.ask = []
+        self.writes = []      # commands that write to GitHub
+        self.overrides = []   # ways the command changes who it acts as
+        self.unset = []       # writes refused: the machine has no agent identity
+        self.hijack = []      # writes refused: the agent identity is overridden
+
+    def github_write(self, what):
+        if what not in self.writes:
+            self.writes.append(what)
+
+    def override(self, what):
+        if what not in self.overrides:
+            self.overrides.append(what)
+
+    def judge_identity(self):
+        """Decide, once the whole command has been read, whether its GitHub
+        writes may run. Nothing happens unless the switch is on, or the agent
+        identity is applied."""
+        if not self.writes:
+            return
+        if identity_missing():
+            self.unset = list(self.writes)
+        elif identity_active():
+            bad = [v for v in HIJACK_ENV if os.environ.get(v)]
+            if bad:
+                self.hijack.append(
+                    "this session's environment sets %s, which would override the "
+                    "agent's identity" % ", ".join(bad))
+            self.hijack.extend(applied_env_problems())
+            if self.overrides:
+                self.hijack.append("the command overrides the agent's identity (%s)"
+                                   % "; ".join(self.overrides))
 
     def no(self, why):
         if why not in self.deny:
@@ -369,6 +487,8 @@ INTERPRETERS = re.compile(r"^(python[0-9.]*|node|nodejs|deno|bun|ruby|perl|php)$
 
 def check_assignment(name, value, res):
     up = name.upper()
+    if is_identity_var(name):
+        res.override("sets %s" % name)
     if up == "GIT_CONFIG_PARAMETERS" and "hookspath" in value.lower():
         res.no("GIT_CONFIG_PARAMETERS sets core.hooksPath, which skips Git hooks")
     if up.startswith("GIT_CONFIG_KEY_") and value.lower() == "core.hookspath":
@@ -432,6 +552,7 @@ def strip_options(name, argv, res):
         if a == "--":
             return argv[1:], split
         if name == "env" and a == "-":
+            res.override("env - (an empty environment)")
             argv = argv[1:]
             continue
         if name == "env" and ASSIGN.match(a):
@@ -448,15 +569,34 @@ def strip_options(name, argv, res):
                 val, argv = (argv[1] if len(argv) > 1 else ""), argv[1:]
             if opt == "--split-string":
                 split = val
+            if name == "env" and opt == "--unset" and is_identity_var(val):
+                res.override("env --unset %s" % val)
+            if name == "env" and opt == "--ignore-environment":
+                res.override("env --ignore-environment")
             argv = argv[1:]
             continue
         if a.startswith("-") and len(a) > 1:
             letter = a[1]
+            if name == "env":
+                # A cluster such as -iu VAR: flags, then an option that takes
+                # the rest of the word, or the next word, as its value.
+                nxt_val = False
+                for j, ch in enumerate(a[1:], 1):
+                    if ch == "i":
+                        res.override("env -i")
+                    if ch in short_vals:
+                        val = a[j + 1:] if len(a) > j + 1 else (argv[1] if len(argv) > 1 else "")
+                        nxt_val = len(a) == j + 1
+                        if ch == "S":
+                            split = val
+                        if ch == "u" and is_identity_var(val):
+                            res.override("env -u %s" % val)
+                        break
+                argv = argv[2:] if nxt_val else argv[1:]
+                continue
             if letter in short_vals:
                 val = a[2:] if len(a) > 2 else (argv[1] if len(argv) > 1 else "")
                 argv = argv[1:] if len(a) > 2 else argv[2:]
-                if letter == "S" and name == "env":
-                    split = val
             else:
                 argv = argv[1:]
             continue
@@ -513,6 +653,11 @@ def analyze_argv(argv, ctx, res, depth, bodies, piped=()):
         action = [a for a in args if a != "--" and not re.match(r"^-[lp]$", a)]
         if action:
             analyze_text(action[0], ctx.copy(), res, depth + 1)
+        return
+    if name == "unset":
+        for a in args:
+            if not a.startswith("-") and is_identity_var(a):
+                res.override("unset %s" % a)
         return
     if name in ("export", "declare", "typeset", "local", "readonly"):
         for a in args:
@@ -697,6 +842,14 @@ GIT_GLOBAL_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
                     "--config-env", "--exec-path", "--super-prefix", "--list-cmds"}
 
 
+IDENTITY_GIT_KEY = re.compile(r"^(credential\.|url\.|core\.sshcommand$|http\.)")
+
+
+def git_identity_key(key, res):
+    if IDENTITY_GIT_KEY.match(key.lower()):
+        res.override("git -c %s" % key)
+
+
 def git_config_key(key, res, persistent=False, unset=False):
     k = key.lower()
     if k == "core.hookspath":
@@ -745,8 +898,10 @@ def analyze_git(args, ctx, res, depth, alias_depth=0, overrides=None):
             key, _, value = val.partition("=")
             overrides[key.lower()] = value
             git_config_key(key, res)
+            git_identity_key(key, res)
         elif name == "--config-env":
             git_config_key(val.partition("=")[0], res)
+            git_identity_key(val.partition("=")[0], res)
         k += 1
     if k >= len(args):
         return
@@ -822,6 +977,7 @@ def push_rule(o, directory, res):
         remote = push_remote(directory, current)
     if sandbox_remote(directory, remote):
         return  # the checkpoint guards a shared remote, not a scratch repo
+    res.github_write("git push")
     # A release tag is a checkpoint: consumers pin to it and no agent may
     # delete one, so pushing it waits for the person to say yes.
     tag_push(o, refspecs, directory, res)
@@ -1086,6 +1242,36 @@ REPO_SETTINGS = re.compile(
     r"actions/permissions|transfer|topics|branches/[^/]+/(protection|rename))(/.*)?)?$")
 
 
+# For the agent-identity switch, a gh command is a GitHub write unless it is one
+# of these read-only forms. The list is the allowed side, so a subcommand gh
+# adds later, or one this file never heard of, counts as a write.
+GH_GROUPS = {
+    "pr", "issue", "repo", "release", "workflow", "run", "label", "secret",
+    "variable", "gist", "ssh-key", "gpg-key", "cache", "codespace", "extension",
+    "alias", "config", "ruleset", "project", "org", "auth", "attestation",
+}
+GH_READ_GROUPS = {"search", "status", "help", "version", "completion"}
+GH_READ_ACTIONS = {"view", "list", "status", "diff", "checks", "checkout",
+                   "clone", "download", "watch"}
+
+
+def gh_is_read(o, words):
+    if "h" in o.short or any(n in ("--help", "--version") for n, _ in o.long):
+        return True
+    if not words:
+        return True
+    group, action = words[0], words[1] if len(words) > 1 else ""
+    if group in GH_READ_GROUPS or group == "api":
+        return True   # api is judged by its method and body
+    if group == "browse":
+        return "n" in o.short or any(n == "--no-browser" for n, _ in o.long)
+    if group == "auth":
+        return action == "status"
+    if group in GH_GROUPS:
+        return action == "" or action in GH_READ_ACTIONS   # a bare group prints its help
+    return False
+
+
 def analyze_gh(args, ctx, res, stdin=()):
     o = parse(args, "RXfFHqtpb", ("--repo", "--method", "--field", "--raw-field",
                                     "--header", "--input", "--jq", "--template",
@@ -1095,6 +1281,8 @@ def analyze_gh(args, ctx, res, stdin=()):
     if not words:
         return
     group, action = words[0], words[1] if len(words) > 1 else ""
+    if not gh_is_read(o, words):
+        res.github_write("gh " + " ".join(words[:2]))
     if group != "api" and action in ("delete", "delete-asset"):
         res.no("gh %s %s deletes it" % (group, action))
         return
@@ -1172,6 +1360,10 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
     endpoint = o.pos[1] if len(o.pos) > 1 else ""
     endpoint = endpoint.lstrip("/").split("?")[0]
     body = "\n".join(fields)
+    # A GraphQL query is a POST but reads; only a mutation (or a body that
+    # could not be read) writes.
+    if method != "GET" and (endpoint != "graphql" or unread or re.search(r"\bmutation\b", body, re.I)):
+        res.github_write("gh api %s" % method)
     if method == "DELETE":
         res.no("a GitHub API DELETE request")
         return
@@ -1254,6 +1446,7 @@ def decide(command, cwd):
     except Exception as exc:  # unparseable: fail closed only where it matters
         if SUSPECT.search(command):
             res.no("the guard could not parse the command (%s: %s)" % (type(exc).__name__, exc))
+    res.judge_identity()
     return res
 
 
@@ -1291,7 +1484,14 @@ def run():
     command = (data.get("tool_input") or {}).get("command") or ""
     cwd = data.get("cwd") or os.getcwd()
     res = decide(command, cwd)
-    if res.deny:
+    if res.unset or res.hijack:
+        reasons = list(res.deny)
+        reasons.append("%s writes to GitHub" % ", ".join(res.writes))
+        reasons += res.hijack
+        advice = (PROHIBITED + " " if res.deny else "") + (NO_IDENTITY + " " if res.unset else "")
+        emit("deny", (GUARD + ": " + "; ".join(reasons) + ". " + advice
+                      + (HIJACK_SUFFIX if res.hijack else "")).rstrip())
+    elif res.deny:
         emit("deny", GUARD + ": " + "; ".join(res.deny) + ". " + PROHIBITED)
     elif res.ask and CODEX:
         emit("deny", GUARD + ": " + "; ".join(res.ask) + ". " + CODEX_CHECKPOINT)
