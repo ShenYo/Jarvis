@@ -21,7 +21,7 @@ How an entry is written:
 - Nothing here is a dependency of any project, so no entry has an upgrade path
   for a consumer.
 
-## Unreleased
+## v1.1.0 (2026-10-29)
 
 A MINOR release: new scripts run, and the guard hook gains a switch that is off.
 
