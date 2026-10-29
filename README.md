@@ -641,7 +641,7 @@ read-only forms (`view`, `list`, `status`, `diff`, `checks`, `search`,
 not a `GET` or a GraphQL query. Nothing sets the switch; the owner turns it on
 after this machine passes `--check`, by adding it to the `env` of
 `~/.claude/settings.json`. It applies in Codex too, but the script writes only
-Claude Code's environment, so Codex needs the marker in its own.
+Claude Code's environment under this mode; see the Codex part below.
 
 Once the identity is applied (the marker is set), the guard also refuses a
 GitHub write that would not act as the agent, whether or not the switch is on:
@@ -673,6 +673,81 @@ separate machine account, and sign in as it in a private window. And keep the
 agent's key off the default paths (`~/.ssh/id_ed25519` and the like) and out of
 `ssh-agent`: otherwise a plain `ssh` presents it too, and the operator check
 reports the agent's own login as the operator's.
+
+**Codex.** `--codex` gives Codex the same identity: the same account, its own SSH key
+(so that key can be revoked alone) and the author name `Codex`. The mechanism is
+different, because Codex strips `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`,
+`GIT_CONFIG_VALUE_n` and `GIT_CONFIG_PARAMETERS` from the commands it runs, so the
+forced-SSH git config above cannot travel that way. What does reach every command is
+`[shell_environment_policy] set` in `~/.codex/config.toml` (`$CODEX_HOME` if set), and
+it carries `GIT_CONFIG_GLOBAL`: a gitconfig of ours, `agent-identity.gitconfig`, that
+includes your own global config, empties `credential.helper` after it, and rewrites
+`https://github.com/` to SSH. The same `set` carries the author and committer name and email, `GIT_SSH_COMMAND`,
+`GH_CONFIG_DIR` and `JARVIS_AGENT_IDENTITY` as the Claude Code environment does, and blanks `GH_TOKEN`, `GITHUB_TOKEN`,
+`GH_ENTERPRISE_TOKEN`, `GITHUB_ENTERPRISE_TOKEN` and `GH_HOST`, because Codex hands
+its whole environment on. A real `--codex` run, once every check passes, writes that
+gitconfig (mode 600), appends one delimited block to `config.toml` (the rest of the
+file stays byte-identical, and the previous copy is `config.toml.agent-identity-backup`),
+and records both in `agent-identity.applied.json` beside them. A
+`shell_environment_policy` that this script did not write, in `config.toml`, in a
+profile, or in the `.codex/config.toml` of a project you trust, is reported and never
+overwritten. Reading `config.toml` needs a `python3` with `tomllib` (Python 3.11+) on
+`PATH`. `--unapply --codex` removes the block only if it is byte-identical to the
+record. The Codex guard cannot see that policy (a Codex hook gets Codex's own
+environment, not its commands'), so it takes the record's presence as "the identity is
+applied" and then refuses the same overrides as above; it does not compare its own
+environment with anything. `JARVIS_REQUIRE_AGENT_IDENTITY` is still not set anywhere;
+how Codex will receive it is a later change.
+
+`--check --codex` also reports a state that is only partly there as `MISSING`: a record
+with no `agent-identity.gitconfig` (the policy's `GIT_CONFIG_GLOBAL` would point at
+nothing, and git would fall back to your own credentials over HTTPS), or a record whose
+block is gone from `config.toml`. The fix is the plain `--codex` run. The Codex guard
+likewise trusts the record only while its block is in `config.toml` exactly once and the
+gitconfig still has the recorded sha256, and refuses GitHub writes until `--check --codex`
+is clean again. The same `set` carries `GIT_TERMINAL_PROMPT` as `0`, and `GIT_ASKPASS` and
+`SSH_ASKPASS` as `/usr/bin/false`, so an HTTPS push that slips through fails instead of
+asking for a password.
+
+Codex strips `GIT_CONFIG_COUNT`, so a repository's own `.git/config`, or an `includeIf`, is
+read after our gitconfig and can add a credential helper, or a `pushInsteadOf` back to
+HTTPS. `--check --codex` runs the URL, last-helper, remote and `git credential fill`
+checks inside every project that `config.toml` trusts and that is a Git work tree, and
+reports the rule and the file it comes from. Other clones are not checked. To check one
+by hand, from inside it, run
+`printf 'protocol=https\nhost=github.com\n\n' | env -u GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL=~/.codex/agent-identity.gitconfig GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false SSH_ASKPASS=/usr/bin/false git credential fill`:
+it must fail (a URL-specific `credential.<url>.helper` shows up only here, not in the
+helper list), and with the same `env`, `git remote get-url` and `git remote get-url --push`
+for each GitHub remote must print `git@github.com:…`. Not checked
+either: a nested `.codex/` directory below a project root and managed configuration
+(`/etc/codex/managed_config.toml`, or an MDM profile), neither of which has been verified
+to matter here, and `codex -c` or `--profile` on the command line, which are your own
+overrides.
+
+Two more config keys, used only by `--codex`: `codex_ssh_key`, required, Codex's own
+private key, which must not be `ssh_key`; and `codex_author_name`, optional, default
+`Codex`. Claude Code ignores them. On a new machine:
+
+```sh
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --setup --codex   # appends the keys to the config file after asking, generates Codex's key
+# add the printed .pub to the machine account on GitHub
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --codex           # writes the three files
+# then restart Codex: a running session keeps the old environment
+```
+
+Not yet verified: commands Codex runs outside its sandbox after an approval, and
+commands you type yourself with `!` in the Codex TUI. Whether the policy reaches them
+is untested; treat them as running with your own identity until it is checked.
+
+Codex can use a separate GitHub account instead of sharing this one. Add `codex_login`,
+`codex_email` and `codex_gh_config_dir` to the config file by hand (`--setup --codex`
+never adds them), log `gh` in as that account in its own directory, and invite it to
+every repository. With `codex_login` different from `login`, the other two are
+required and the `gh` directory must differ from `gh_config_dir`; every `--codex`
+check, and what is written, then use that account. `codex_login` equal to `login`
+means the same as not set. A `codex_email` or `codex_gh_config_dir` without `codex_login` is an
+error, and `codex_email` must differ from `email`.
 
 ## Bridge status and limitations
 
