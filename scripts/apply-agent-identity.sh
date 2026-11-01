@@ -26,6 +26,16 @@
 #   gh_config_dir  required  the GH_CONFIG_DIR the agent's gh uses (~ ok)
 #   repos          required  comma-separated owner/repo list the agent works in
 #   author_name    optional  commit author name, default "Claude Code"
+#   codex_ssh_key  --codex   Codex's own private key for the same account (~ ok);
+#                            a second key, so it can be revoked alone
+#   codex_author_name optional  commit author name under Codex, default "Codex"
+#   codex_login, codex_email, codex_gh_config_dir
+#                  optional  a separate GitHub account for Codex (--codex only). None
+#                            set: Codex uses login, email and gh_config_dir. codex_login
+#                            different from login: then codex_email and
+#                            codex_gh_config_dir are required, and the gh dir must be
+#                            another one than gh_config_dir. codex_login equal to login
+#                            is the same as not set. --setup never adds these keys.
 #
 # The checks follow the order a new machine is set up in, and the last line
 # names the earliest step still failing:
@@ -47,14 +57,35 @@
 # --setup walks a new machine through steps 1 to 4. It is interactive, does
 # only safe local things after asking, and never writes settings.json.
 #
-# Usage: apply-agent-identity.sh [--check | --setup | --unapply]
+# --codex does the same for Codex, with the same account and its own key. Codex
+# strips GIT_CONFIG_COUNT/KEY_n/VALUE_n and GIT_CONFIG_PARAMETERS from the
+# commands it runs, so the forced-SSH git config cannot travel that way. What
+# does reach every command is [shell_environment_policy] set in
+# $CODEX_HOME/config.toml (default ~/.codex), and that carries GIT_CONFIG_GLOBAL:
+# a gitconfig of ours that includes the operator's, resets credential.helper and
+# rewrites https://github.com/ to SSH. A real --codex run writes, only when every
+# check passes: $CODEX_HOME/agent-identity.gitconfig (mode 600), a delimited block
+# appended to config.toml (the rest of the file stays byte-identical, a backup is
+# config.toml.agent-identity-backup), and $CODEX_HOME/agent-identity.applied.json
+# (the set map, the gitconfig and its sha256, the exact block). That record is also
+# how the Codex guard knows the identity is applied: a Codex hook does not see
+# `set`. A shell_environment_policy this script did not write is a CONFLICT,
+# reported and never overwritten. Reading config.toml needs a python3 with tomllib
+# (Python 3.11+) on PATH. A new Codex session picks the policy up; a running one
+# keeps the old.
+#
+# Usage: apply-agent-identity.sh [--codex] [--check | --setup | --unapply]
 #   (none)     run every check; when all pass, write the identity into settings
 #   --check    run every check and write nothing
 #   --setup    guided setup of steps 1-4 on a new machine (needs a terminal)
 #   --unapply  remove exactly what a real run recorded, and the record
+#   --codex    the same, for Codex instead of Claude Code
 #   Exit: 0 all checks pass; 1 something to fix (nothing written); 2 usage or
 #   internal error.
 set -uo pipefail
+
+target=claude   # or codex, with --codex
+run_mode=apply  # apply | check: a --check also says an applied state that is stale or partial
 
 usage() { sed -n '/^# Usage:/,/2 usage or internal error/s/^# \{0,1\}//p' "$0"; }
 
@@ -108,7 +139,7 @@ step_name() {
     3) echo "add the key's .pub to the machine account on GitHub" ;;
     4) echo "log gh in as the machine account" ;;
     5) echo "make the machine account a Write collaborator on the repository" ;;
-    6) echo "apply the identity to the Claude Code settings" ;;
+    6) if [ "${target:-claude}" = codex ]; then echo "apply the identity to the Codex config"; else echo "apply the identity to the Claude Code settings"; fi ;;
   esac
 }
 print_next() { # all_ok_message
@@ -215,7 +246,7 @@ validate_author() {
 
 # --- the config file -----------------------------------------------------------------
 
-CFG_KEYS="login email ssh_key gh_config_dir repos author_name"
+CFG_KEYS="login email ssh_key gh_config_dir repos author_name codex_ssh_key codex_author_name codex_login codex_email codex_gh_config_dir"
 cfg_bad=0
 
 bad_line() { # line, what, fix
@@ -285,6 +316,7 @@ parse_config() {
     printf -v "cfg_$key" '%s' "$value"
   done <"$cfg_file"
   [ -n "$cfg_author_name" ] || cfg_author_name="Claude Code"
+  [ -n "$cfg_codex_author_name" ] || cfg_codex_author_name="Codex"
 }
 
 chk_value() { # key validator
@@ -316,12 +348,35 @@ load_config() { # parse and validate; prints the problems
   chk_value repos validate_repos
   if [ "$line_author_name" != 0 ]; then chk_value author_name validate_author; else valid_author_name=1; fi
   [ "$valid_author_name" = 1 ] || cfg_author_name="Claude Code"
-  key_path=""; cfg_gh=""
+  if [ "$line_codex_author_name" != 0 ]; then chk_value codex_author_name validate_author; else valid_codex_author_name=1; fi
+  [ "$valid_codex_author_name" = 1 ] || cfg_codex_author_name="Codex"
+  # Codex's own key: only --codex needs it, and then it must be another key than ssh_key,
+  # so it can be revoked alone. Claude mode only checks the syntax of a line that is there.
+  if [ "$line_codex_ssh_key" != 0 ]; then chk_value codex_ssh_key validate_path; fi
+  [ "$line_codex_login" = 0 ] || chk_value codex_login validate_login
+  [ "$line_codex_email" = 0 ] || chk_value codex_email validate_email
+  [ "$line_codex_gh_config_dir" = 0 ] || chk_value codex_gh_config_dir validate_gh_dir
+  codex_effective
+  if [ "$target" = codex ]; then
+    if [ "$line_codex_ssh_key" = 0 ]; then
+      say MISSING "config key codex_ssh_key (required for --codex) is not in $cfg_file"
+      fix "append Codex's key to $cfg_file: printf '%s\\n' $(shq "codex_ssh_key=~/.ssh/id_ed25519_agent_codex_$(host_tag)") >>$(q "$cfg_file")   (or: bash $self --setup --codex)"
+    elif [ "$valid_codex_ssh_key" = 1 ] && [ "$valid_ssh_key" = 1 ] && same_file "$(expand_path "$cfg_codex_ssh_key")" "$(expand_path "$cfg_ssh_key")"; then
+      valid_codex_ssh_key=0
+      say WRONG "config line $line_codex_ssh_key: codex_ssh_key=$cfg_codex_ssh_key is the same key as ssh_key=$cfg_ssh_key (line $line_ssh_key); Codex's key must be its own, so it can be revoked alone"
+      fix "edit line $line_codex_ssh_key of $cfg_file: give codex_ssh_key another path, for example ~/.ssh/id_ed25519_agent_codex_$(host_tag)"
+    fi
+  else
+    [ "$line_codex_ssh_key" != 0 ] || valid_codex_ssh_key=1
+  fi
+  key_path=""; cfg_gh=""; ckey_path=""
   [ "$valid_ssh_key" = 1 ] && key_path=$(expand_path "$cfg_ssh_key")
+  [ "$valid_codex_ssh_key" = 1 ] && ckey_path=$(expand_path "$cfg_codex_ssh_key")
   [ "$valid_gh_config_dir" = 1 ] && cfg_gh=$(expand_path "$cfg_gh_config_dir")
   cfg_ready=0
   if [ "$cfg_bad" = 0 ] && [ "$valid_login" = 1 ] && [ "$valid_email" = 1 ] && [ "$valid_ssh_key" = 1 ] \
-    && [ "$valid_gh_config_dir" = 1 ] && [ "$valid_repos" = 1 ] && [ "$valid_author_name" = 1 ]; then
+    && [ "$valid_gh_config_dir" = 1 ] && [ "$valid_repos" = 1 ] && [ "$valid_author_name" = 1 ] \
+    && [ "$valid_codex_author_name" = 1 ] && [ "$valid_codex_ssh_key" = 1 ]; then
     cfg_ready=1
   fi
   return 0
@@ -345,6 +400,65 @@ EOF
 chmod 600 $(q "$cfg_file")
 then replace every value with this machine's real ones; the directory must be
 ignored by Git (a rule for config-local/ in .gitignore, or in .git/info/exclude)"
+}
+# Under --codex, which account Codex acts as. By default the same as Claude Code's (login,
+# email, gh_config_dir). With codex_login set to another login it is a separate account:
+# codex_email and codex_gh_config_dir are then required, and the effective values replace
+# login, email and gh_config_dir for every check and for what is written. codex_login equal to
+# login is the same as not set.
+codex_effective() {
+  codex_separate=0
+  [ "$target" = codex ] || return 0
+  local k
+  if [ "$line_codex_login" = 0 ] || [ "$valid_codex_login" != 1 ]; then
+    # codex_email or codex_gh_config_dir without a usable codex_login: a half-written second
+    # account. Ignoring it would run Codex as the shared account while the file says otherwise.
+    local why="is not set"
+    [ "$line_codex_login" = 0 ] || why="is invalid"
+    for k in codex_email codex_gh_config_dir; do
+      local ln=line_$k
+      if [ "${!ln}" != 0 ]; then
+        say WRONG "config line ${!ln}: $k is set, but codex_login $why, so it is unclear which account Codex acts as"
+        fix "set codex_login to the second account's login, or delete line ${!ln} of $cfg_file"
+      fi
+    done
+    return 0
+  fi
+  if [ "$valid_login" = 1 ] && [ "$(lc "$cfg_codex_login")" = "$(lc "$cfg_login")" ]; then
+    say OK "codex_login=$cfg_codex_login is the same account as login: Codex shares it, and codex_email and codex_gh_config_dir are ignored"
+    return 0
+  fi
+  codex_separate=1
+  if [ "$line_codex_email" = 0 ]; then
+    say MISSING "config key codex_email (required when codex_login differs from login) is not in $cfg_file"
+    fix "append it to $cfg_file: printf '%s\\n' $(shq "codex_email=<the verified email of $cfg_codex_login>") >>$(q "$cfg_file")   (edit the value)"
+  fi
+  if [ "$valid_codex_email" = 1 ] && [ "$valid_email" = 1 ] && [ "$(lc "$cfg_codex_email")" = "$(lc "$cfg_email")" ]; then
+    valid_codex_email=0
+    say WRONG "config line $line_codex_email: codex_email=$cfg_codex_email is the same email as email (line $line_email); commits are attributed by email, so two accounts need two"
+    fix "edit line $line_codex_email of $cfg_file: set codex_email to the verified email of $cfg_codex_login"
+  fi
+  if [ "$line_codex_gh_config_dir" = 0 ]; then
+    say MISSING "config key codex_gh_config_dir (required when codex_login differs from login) is not in $cfg_file"
+    fix "append it to $cfg_file: printf '%s\\n' 'codex_gh_config_dir=~/.config/gh-agent-codex' >>$(q "$cfg_file")"
+  elif [ "$valid_codex_gh_config_dir" = 1 ] && [ "$valid_gh_config_dir" = 1 ] \
+    && [ "$(norm_dir "$(expand_path "$cfg_codex_gh_config_dir")")" = "$(norm_dir "$(expand_path "$cfg_gh_config_dir")")" ]; then
+    valid_codex_gh_config_dir=0
+    say WRONG "config line $line_codex_gh_config_dir: codex_gh_config_dir=$cfg_codex_gh_config_dir is the same gh config dir as gh_config_dir (line $line_gh_config_dir); one gh config dir cannot be logged in as two accounts"
+    fix "edit line $line_codex_gh_config_dir of $cfg_file: give codex_gh_config_dir its own path, for example ~/.config/gh-agent-codex"
+  fi
+  cfg_login=$cfg_codex_login; valid_login=1
+  cfg_email=$cfg_codex_email; valid_email=$valid_codex_email
+  cfg_gh_config_dir=$cfg_codex_gh_config_dir; valid_gh_config_dir=$valid_codex_gh_config_dir
+}
+# How a message names the login being checked: login=<x> normally, codex_login=<x> and its line
+# when Codex has an account of its own.
+lref() { if [ "${codex_separate:-0}" = 1 ]; then printf 'codex_login=%s (line %s)' "$cfg_login" "$line_codex_login"; else printf 'login=%s' "$cfg_login"; fi; }
+lkey() { if [ "${codex_separate:-0}" = 1 ]; then printf 'codex_login'; else printf 'login'; fi; }
+cfg_author() { if [ "$target" = codex ]; then printf '%s' "$cfg_codex_author_name"; else printf '%s' "$cfg_author_name"; fi; }
+same_file() { # two expanded paths: equal as text, or the same file on disk
+  [ "$1" = "$2" ] && return 0
+  [ -e "$1" ] && [ -e "$2" ] && [ "$1" -ef "$2" ]
 }
 host_tag() { (hostname -s 2>/dev/null || hostname 2>/dev/null || echo host) | head -n 1 | tr -c 'A-Za-z0-9_\n-' '_'; }
 
@@ -440,7 +554,7 @@ chk_config_file() {
   # 4: keys and values
   load_config
   if [ "$cfg_bad" = 0 ] && [ "$cfg_ready" = 1 ]; then
-    say OK "config values valid: login=$cfg_login, $(printf '%s\n' "$cfg_repos" | tr ',' '\n' | wc -l | tr -d ' ') repo(s), author_name=$cfg_author_name"
+    say OK "config values valid: $(lref)$([ "$codex_separate" = 1 ] && echo " (Codex's own account)"), $(printf '%s\n' "$cfg_repos" | tr ',' '\n' | wc -l | tr -d ' ') repo(s), author_name=$(cfg_author)"
   fi
 }
 
@@ -482,18 +596,20 @@ probe_gh() { # sets gh_state: ok | none | net | bad, gh_who, gh_out, gh_accounts
 }
 
 chk_ssh() {
-  local key pub keyok=1 m
-  if [ "$valid_ssh_key" != 1 ] || [ "$valid_login" != 1 ]; then
-    say SKIP "SSH key and GitHub's answer to it (need a valid login and ssh_key in the config)"; return
+  local key pub keyok=1 m kvalid=$valid_ssh_key kname=ssh_key hint="--setup"
+  key=$key_path
+  if [ "$target" = codex ]; then kvalid=$valid_codex_ssh_key; kname=codex_ssh_key; key=$ckey_path; hint="--setup --codex"; fi
+  if [ "$kvalid" != 1 ] || [ "$valid_login" != 1 ]; then
+    say SKIP "SSH key and GitHub's answer to it (need a valid login and $kname in the config)"; return
   fi
-  key=$key_path; pub=$key.pub
+  pub=$key.pub
   step 2
   if ! command -v ssh >/dev/null; then
     say MISSING "ssh is not installed"; fix "install an OpenSSH client"; return
   fi
   if [ ! -f "$key" ]; then
     say MISSING "SSH key file $key does not exist"
-    fix "ssh-keygen -t ed25519 -N '' -C $(q "$cfg_login") -f $(q "$key")   (or: bash $self --setup)"
+    fix "ssh-keygen -t ed25519 -N '' -C $(q "$cfg_login") -f $(q "$key")   (or: bash $self $hint)"
     keyok=0
   else
     m=$(mode_of "$key")
@@ -539,7 +655,7 @@ chk_ssh() {
       if [ "$(lc "$ssh_who")" = "$(lc "$cfg_login")" ]; then
         say OK "SSH: GitHub answers \"Hi $ssh_who!\" for $key"
       else
-        say WRONG "SSH: $key authenticates as $ssh_who, but the config says login=$cfg_login"
+        say WRONG "SSH: $key authenticates as $ssh_who, but the config says $(lref)"
         fix "register $(q "$pub") on the account $cfg_login at https://github.com/settings/ssh/new (signed in as $cfg_login) and remove it from $ssh_who; also check ~/.ssh/config for another IdentityFile for github.com"
       fi ;;
     net)
@@ -581,7 +697,7 @@ chk_gh() {
       fix "$(gh_login_cmd "$cfg_gh")   (sign in as $cfg_login)" ;;
     ok)
       if [ "$(lc "$gh_who")" != "$(lc "$cfg_login")" ]; then
-        say WRONG "gh: $cfg_gh is logged in as $gh_who, but the config says login=$cfg_login"
+        say WRONG "gh: $cfg_gh is logged in as $gh_who, but the config says $(lref)"
         fix "GH_CONFIG_DIR=$dirq gh auth logout --hostname github.com && $(gh_login_cmd "$cfg_gh")   (sign in as $cfg_login)"
       else
         say OK "gh: GH_CONFIG_DIR=$cfg_gh is logged in as $gh_who"
@@ -596,6 +712,13 @@ chk_gh() {
 
 chk_tokens() {
   step 4
+  if [ "$target" = codex ]; then
+    # Codex passes its whole environment on, tokens included, but the policy blanks these
+    # for every command it runs, and gh treats an empty token or host as unset. This
+    # process's own environment is not what Codex's commands get.
+    say OK "the policy this script writes blanks GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN, GITHUB_ENTERPRISE_TOKEN and GH_HOST for every command Codex runs, so none of them can override the agent's gh login"
+    return
+  fi
   local v val found=0 why
   # The process this script runs in: anything exported here by a shell profile is in
   # the agent's environment too, unless the settings env overrides it.
@@ -633,18 +756,18 @@ chk_operator() {
   who=$(gh_operator api user -q .login --hostname github.com); rc=$?
   if [ "$rc" != 0 ]; then
     if is_network "$who"; then
-      say WARN "could not reach github.com to read the operator's own gh login (network), so it was not compared with login=$cfg_login"
+      say WARN "could not reach github.com to read the operator's own gh login (network), so it was not compared with $(lref)"
     else
-      say WARN "the operator's own gh is not logged in (default config dir), so it was not compared with login=$cfg_login"
+      say WARN "the operator's own gh is not logged in (default config dir), so it was not compared with $(lref)"
     fi
     return
   fi
   who=$(printf '%s' "$who" | tr -d ' \r\n')
   if [ "$(lc "$who")" = "$(lc "$cfg_login")" ]; then
-    say WRONG "login=$cfg_login is the operator's own gh login: the agent would be the owner again and could not be reviewed by them"
-    fix "create a separate machine account on GitHub and set login= (and its key and gh login) to that account in $cfg_file"
+    say WRONG "$(lref) is the operator's own gh login: the agent would be the owner again and could not be reviewed by them"
+    fix "create a separate machine account on GitHub and set $(lkey)= (and its key and gh login) to that account in $cfg_file"
   else
-    say OK "the operator's own gh login ($who) differs from login=$cfg_login"
+    say OK "the operator's own gh login ($who) differs from $(lref)"
   fi
 }
 
@@ -659,12 +782,12 @@ chk_operator_ssh() {
   out=$(ssh -T -o BatchMode=yes -o ConnectTimeout=15 git@github.com </dev/null 2>&1)
   if [[ $out =~ $re ]]; then who=${BASH_REMATCH[1]}; fi
   if [ -z "$who" ]; then
-    say SKIP "the operator's own SSH identity could not be read ($(is_network "$out" && echo "network" || echo "no key offered or refused")), so it was not compared with login=$cfg_login"
+    say SKIP "the operator's own SSH identity could not be read ($(is_network "$out" && echo "network" || echo "no key offered or refused")), so it was not compared with $(lref)"
   elif [ "$(lc "$who")" = "$(lc "$cfg_login")" ]; then
-    say WRONG "login=$cfg_login is the account the operator's own SSH key authenticates as (ssh git@github.com answers \"Hi $who!\"): the agent would be the owner again"
-    fix "create a separate machine account on GitHub and set login= (and its key and gh login) to that account in $cfg_file; if $who is in fact the agent's account, its key is on a default path or in ssh-agent, so plain ssh offers it too: move it off ~/.ssh/id_* and run ssh-add -d on it"
+    say WRONG "$(lref) is the account the operator's own SSH key authenticates as (ssh git@github.com answers \"Hi $who!\"): the agent would be the owner again"
+    fix "create a separate machine account on GitHub and set $(lkey)= (and its key and gh login) to that account in $cfg_file; if $who is in fact the agent's account, its key is on a default path or in ssh-agent, so plain ssh offers it too: move it off ~/.ssh/id_* and run ssh-add -d on it"
   else
-    say OK "the operator's own SSH identity ($who) differs from login=$cfg_login"
+    say OK "the operator's own SSH identity ($who) differs from $(lref)"
   fi
 }
 
@@ -730,7 +853,7 @@ chk_repos() {
     owner=$(jq -r '.owner.login // ""' <<<"$repo_json")
     if [ "$(lc "$owner")" = "$(lc "$cfg_login")" ]; then
       say WRONG "repo $r: $cfg_login owns it, so the agent would be the owner and could approve its own work"
-      fix "use a separate machine account as login= in $cfg_file; $cfg_login must not be the owner of $r"
+      fix "use a separate machine account as $(lkey)= in $cfg_file; $cfg_login must not be the owner of $r"
     elif [ "$(jq -r '.owner.type // ""' <<<"$repo_json")" = Organization ]; then
       mem=$(gh_agent api "user/memberships/orgs/$owner") && \
         [ "$(jq -r '.role // ""' 2>/dev/null <<<"$mem")" = admin ] && {
@@ -1051,13 +1174,656 @@ do_unapply() {
   return 0
 }
 
+# --- --codex: the policy block in config.toml, its gitconfig and its record -----------------------------
+
+CODEX_START='# >>> jarvis agent-identity: written by apply-agent-identity.sh --codex; change it through that script'
+CODEX_END='# <<< jarvis agent-identity'
+TAB=$'\t'
+
+# The byte-exact work on config.toml, in Python because bash cannot hold every byte and
+# only Python 3.11+ has a TOML parser. Run as `python3 -I -c "$CODEX_PY" <op> args`; only
+# `inspect` needs tomllib. Prints tab-separated findings, never a traceback.
+IFS= read -r -d '' CODEX_PY <<'PY' || true
+import hashlib, json, os, sys
+
+START = "# >>> jarvis agent-identity:"
+
+
+def read(path):
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def flat(text):
+    return str(text).replace("\n", " ").replace("\t", " ")[:300]
+
+
+def sha256(path):
+    print(hashlib.sha256(read(path)).hexdigest())
+
+
+def edit(config, out, old, new, prefix):
+    # old "-": append prefix + new. new "-": remove old (and the prefix before it).
+    # Both: replace old by new. Exit 3 unless old occurs exactly once.
+    data = read(config)
+    pre = prefix.encode("utf-8")
+    if old == "-":
+        data = data + pre + read(new)
+    else:
+        old_b = read(old)
+        if data.count(old_b) != 1:
+            sys.exit(3)
+        i = data.index(old_b)
+        if new == "-":
+            cut = len(pre) if pre and data[:i].endswith(pre) else 0
+            data = data[:i - cut] + data[i + len(old_b):]
+        else:
+            data = data[:i] + read(new) + data[i + len(old_b):]
+    with open(out, "wb") as fh:
+        fh.write(data)
+
+
+def inspect(config, expected, block):
+    data = read(config)
+    text = data.decode("utf-8", "replace")
+    print("MARKERS\t%d" % sum(1 for line in text.split("\n") if line.startswith(START)))
+    if block != "-":
+        b = read(block)
+        print("BLOCK\t%d" % data.count(b))
+        if data.count(b) == 1:
+            rest = data[data.index(b) + len(b):].decode("utf-8", "replace").split("\n")
+            for line in rest:
+                t = line.strip()
+                if t == "" or t.startswith("#"):
+                    continue
+                if t.startswith("["):
+                    break
+                print("TRAILING\t" + flat(t))
+                break
+    try:
+        import tomllib
+    except ImportError:
+        print("NO_TOMLLIB")
+        return
+    try:
+        conf = tomllib.loads(data.decode("utf-8"))
+    except Exception as exc:
+        print("PARSE_ERR\t" + flat(exc))
+        return
+    pol = conf.get("shell_environment_policy")
+    if pol is None:
+        print("POLICY\tabsent\t")
+    elif expected != "-" and pol == {"set": json.loads(expected)}:
+        print("POLICY\tequal\t")
+    else:
+        print("POLICY\tdiffers\t" + flat(json.dumps(pol, sort_keys=True)))
+    profiles = conf.get("profiles")
+    if isinstance(profiles, dict):
+        for name in sorted(profiles):
+            if isinstance(profiles[name], dict) and "shell_environment_policy" in profiles[name]:
+                print("PROFILE\t" + flat(name))
+    projects = conf.get("projects")
+    if isinstance(projects, dict):
+        for path in sorted(projects):
+            if not (isinstance(projects[path], dict) and projects[path].get("trust_level") == "trusted"):
+                continue
+            print("TRUSTED\t" + flat(path))
+            pc = os.path.join(path, ".codex", "config.toml")
+            if not os.path.isfile(pc):
+                continue
+            try:
+                sub = tomllib.loads(read(pc).decode("utf-8"))
+            except Exception as exc:
+                print("PROJECT_ERR\t%s\t%s" % (flat(pc), flat(exc)))
+                continue
+            if "shell_environment_policy" in sub:
+                print("PROJECT\t%s\t%s" % (flat(pc), flat(json.dumps(sub["shell_environment_policy"], sort_keys=True))))
+            sub_profiles = sub.get("profiles")
+            if isinstance(sub_profiles, dict):
+                for name in sorted(sub_profiles):
+                    if isinstance(sub_profiles[name], dict) and "shell_environment_policy" in sub_profiles[name]:
+                        print("PROJECT_PROFILE\t%s\t%d %s" % (flat(pc), 1 if sub.get("profile") == name else 0, flat(name)))
+
+
+def main():
+    op, args = sys.argv[1], sys.argv[2:]
+    {"sha256": sha256, "edit": edit, "inspect": inspect}[op](*args)
+
+
+main()
+PY
+
+pyrun() { local py=$1; shift; "$py" -I -c "$CODEX_PY" "$@"; }
+
+# The python3 on PATH that has tomllib (3.11+), and any python3 at all. Sets py_toml, py_any.
+find_python() {
+  local p
+  py_toml=""; py_any=""
+  while IFS= read -r p; do
+    [ -x "$p" ] || continue
+    "$p" -I -c 'import sys' >/dev/null 2>&1 || continue
+    [ -n "$py_any" ] || py_any=$p
+    if "$p" -I -c 'import tomllib' >/dev/null 2>&1; then py_toml=$p; return 0; fi
+  done < <(type -ap python3 python3.14 python3.13 python3.12 python3.11 2>/dev/null)
+  return 0
+}
+
+gitcfg_value() { # a value for a gitconfig line, quoted only when it needs it
+  case $1 in
+    ""|*[!A-Za-z0-9_./+@:%,=~-]*) printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# What a --codex run would write, from the config: cset (the env Codex gives every command,
+# as JSON), cblock (the text appended to config.toml), cg_content (the gitconfig), both
+# ending in a newline.
+build_codex_want() {
+  local xdg inner
+  cset=$(jq -n --arg name "$cfg_codex_author_name" --arg email "$cfg_email" --arg key "$ckey_path" \
+    --arg gh "$cfg_gh" --arg login "$cfg_login" --arg gc "$cg_file" '{
+      GIT_AUTHOR_NAME: $name, GIT_COMMITTER_NAME: $name,
+      GIT_AUTHOR_EMAIL: $email, GIT_COMMITTER_EMAIL: $email,
+      GIT_SSH_COMMAND: ("ssh -F /dev/null -i " + $key + " -o IdentitiesOnly=yes"),
+      GIT_CONFIG_GLOBAL: $gc, GH_CONFIG_DIR: $gh, JARVIS_AGENT_IDENTITY: $login,
+      GH_TOKEN: "", GITHUB_TOKEN: "", GH_ENTERPRISE_TOKEN: "", GITHUB_ENTERPRISE_TOKEN: "", GH_HOST: "",
+      GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/usr/bin/false", SSH_ASKPASS: "/usr/bin/false"}')
+  inner=$(jq -r 'to_entries | map("\(.key) = \(.value | tojson)") | join(", ")' <<<"$cset")
+  cblock=$(printf '%s\n[shell_environment_policy]\nset = { %s }\n%s\n' "$CODEX_START" "$inner" "$CODEX_END"; printf x)
+  cblock=${cblock%x}
+  xdg="${XDG_CONFIG_HOME:-$HOME/.config}/git/config"
+  cg_content=$(printf '%s\n[include]\n\tpath = %s\n\tpath = %s\n[credential]\n\thelper =\n[url "git@github.com:"]\n\tinsteadOf = https://github.com/\n' \
+    "# Written by apply-agent-identity.sh --codex: the global Git config of commands Codex runs. Change it through that script." \
+    "$(gitcfg_value "$xdg")" "$(gitcfg_value "$HOME/.gitconfig")"; printf x)
+  cg_content=${cg_content%x}
+}
+
+# Scratch files for a run: the gitconfig that would be written, the block, the old block.
+codex_scratch() {
+  [ -n "${codex_tmp:-}" ] && return 0
+  codex_tmp=$(mktemp -d "${TMPDIR:-/tmp}/apply-agent-identity-codex.XXXXXX") || die "cannot create a temporary directory"
+  tmpdirs="$tmpdirs
+$codex_tmp"
+}
+
+codex_record_ok() { # JSON text -> 0 when it is a usable record
+  jq -e 'type == "object" and (.set | type) == "object" and (.gitconfig | type) == "string"
+    and (.gitconfig_sha256 | type) == "string" and (.block | type) == "string" and (.prefix | type) == "string"' >/dev/null 2>&1 <<<"$1"
+}
+
+snapshot_codex() {
+  crec_state=absent; crec_json='{}'; crec_block=""; crec_prefix=""
+  if [ -e "$cg_record" ] || [ -L "$cg_record" ]; then
+    crec_json=$(cat "$cg_record" 2>/dev/null)
+    if codex_record_ok "$crec_json"; then
+      crec_state=ok
+      # command substitution drops trailing newlines, which the block and the prefix end in
+      crec_block=$(jq -j '.block' <<<"$crec_json"; printf x); crec_block=${crec_block%x}
+      crec_prefix=$(jq -j '.prefix' <<<"$crec_json"; printf x); crec_prefix=${crec_prefix%x}
+    else
+      crec_state=bad; crec_json='{}'
+    fi
+  fi
+}
+
+chk_codex_config() {
+  step 6
+  cplan_cfg=none; cplan_git=none; cplan_rec=none; codex_pending=0
+  codex_trusted=(); codex_def_ok=(); codex_def_miss=()
+  snapshot_codex
+  if [ ! -e "$codex_cfg" ]; then
+    say MISSING "$codex_cfg does not exist"
+    fix "mkdir -p $(q "$(dirname "$codex_cfg")") && : >>$(q "$codex_cfg")"
+    return
+  fi
+  if [ ! -f "$codex_cfg" ] || [ ! -r "$codex_cfg" ]; then
+    say WRONG "$codex_cfg is not a readable regular file"
+    fix "chmod u+r $(q "$codex_cfg")   (or replace it with a plain file)"
+    return
+  fi
+  find_python
+  if [ -z "$py_toml" ]; then
+    say MISSING "no python3 with tomllib on PATH, so $codex_cfg cannot be parsed (it needs Python 3.11+)"
+    fix "install Python 3.11+"
+    return
+  fi
+  codex_scratch
+  local exp="-" blockf="-" out kind a b
+  codex_trusted=()
+  if [ "$crec_state" = ok ]; then
+    exp=$(jq -c '.set' <<<"$crec_json")
+    blockf="$codex_tmp/recorded.block"
+    printf '%s' "$crec_block" >"$blockf"
+  fi
+  out=$(pyrun "$py_toml" inspect "$codex_cfg" "$exp" "$blockf" 2>&1) || out="PARSE_ERR${TAB}python failed: $(first_line "$out")"
+  local i_markers=0 i_block=0 i_trailing="" i_policy=absent i_desc="" i_parse="" profiles=() projects=() perrs=() pprofiles=()
+  codex_trusted=()
+  while IFS=$'\t' read -r kind a b; do
+    case $kind in
+      MARKERS) i_markers=$a ;;
+      BLOCK) i_block=$a ;;
+      TRAILING) i_trailing=$a ;;
+      PARSE_ERR) i_parse=$a ;;
+      POLICY) i_policy=$a; i_desc=$b ;;
+      PROFILE) profiles+=("$a") ;;
+      PROJECT) projects+=("$a$TAB$b") ;;
+      PROJECT_PROFILE) pprofiles+=("$a$TAB$b") ;;
+      TRUSTED) codex_trusted+=("$a") ;;
+      PROJECT_ERR) perrs+=("$a$TAB$b") ;;
+    esac
+  done <<<"$out"
+  local bad_before=$problems
+  if [ -n "$i_parse" ]; then
+    say WRONG "$codex_cfg does not parse as TOML: $i_parse"
+    fix "repair $(q "$codex_cfg") by hand (Codex cannot read it either); nothing was changed"
+    return
+  fi
+  say OK "$codex_cfg parses as TOML"
+  for a in ${profiles[@]+"${profiles[@]}"}; do
+    say WRONG "profile \"$a\" in $codex_cfg sets shell_environment_policy; Codex would use it instead of the agent identity's whenever that profile is chosen"
+    fix "remove [profiles.$a.shell_environment_policy] from $(q "$codex_cfg") (this script does not merge policies)"
+  done
+  for a in ${projects[@]+"${projects[@]}"}; do
+    kind=${a%%"$TAB"*}
+    say WRONG "the trusted project config $kind sets shell_environment_policy; Codex would apply it over the agent identity's in that project"
+    fix "remove shell_environment_policy from $(q "$kind"), or stop trusting that project in $(q "$codex_cfg")"
+  done
+  for a in ${pprofiles[@]+"${pprofiles[@]}"}; do
+    kind=${a%%"$TAB"*}; b=${a#*"$TAB"}
+    say WRONG "the trusted project config $kind defines profile \"${b#* }\" with a shell_environment_policy$([ "${b%% *}" = 1 ] && echo ", and selects it with profile = \"${b#* }\""); Codex would use it instead of the agent identity's in that project"
+    fix "remove [profiles.${b#* }.shell_environment_policy] from $(q "$kind"), or stop trusting that project in $(q "$codex_cfg")"
+  done
+  for a in ${perrs[@]+"${perrs[@]}"}; do
+    say WARN "the trusted project config ${a%%"$TAB"*} does not parse (${a#*"$TAB"}), so whether it sets shell_environment_policy was not checked"
+    fix "repair $(q "${a%%"$TAB"*}") by hand"
+  done
+  if [ "$crec_state" = bad ]; then
+    say WRONG "$cg_record is not a record this script wrote (a JSON object with set, gitconfig, gitconfig_sha256, block and prefix)"
+    fix "inspect $(q "$cg_record"); if its block is not in $(q "$codex_cfg") you can delete it, then re-run"
+    return
+  fi
+  # the block and the table
+  local cfg_state=append    # append | same | pending-none
+  if [ "$crec_state" = absent ]; then
+    if [ "$i_markers" != 0 ]; then
+      say WRONG "CONFLICT: $codex_cfg holds a jarvis agent-identity block, but there is no record of this script writing it at $cg_record"
+      fix "remove that block from $(q "$codex_cfg") by hand (from the '# >>> jarvis agent-identity' line to the '# <<<' line), then re-run"
+    elif [ "$i_policy" != absent ]; then
+      say WRONG "CONFLICT: $codex_cfg already sets shell_environment_policy ($i_desc), which this script did not write; it is never overwritten"
+      fix "merge by hand or remove it, then re-run: this script needs shell_environment_policy.set to carry the agent identity's variables (the README's Agent identity section lists them)"
+    else
+      say OK "$codex_cfg has no shell_environment_policy: the block can be appended"
+    fi
+  else
+    if [ "$i_markers" = 0 ] && [ "$i_policy" = absent ]; then
+      codex_pending=1
+      if [ "$run_mode" = check ]; then
+        say MISSING "the record at $cg_record lists a block that is no longer in $codex_cfg, so Codex runs without the agent identity"
+        fix "bash $self --codex"
+      else
+        codex_def_ok+=("the record lists a block that is not in $codex_cfg: a real run appends it again")
+        codex_def_miss+=("the record at $cg_record lists a block that is no longer in $codex_cfg, and this run writes nothing because of the problems above, so Codex runs without the agent identity")
+      fi
+    elif [ "$i_markers" = 0 ]; then
+      say WRONG "CONFLICT: $codex_cfg sets shell_environment_policy ($i_desc), which this script did not write; the record at $cg_record lists a block that is no longer in the file"
+      fix "remove that table from $(q "$codex_cfg") (or delete the record if the identity is no longer wanted), then re-run"
+    elif [ "$i_markers" != 1 ]; then
+      say WRONG "$codex_cfg holds $i_markers jarvis agent-identity blocks; this script wrote one"
+      fix "remove all but the one the record describes: jq -j .block $(q "$cg_record")"
+    elif [ "$i_block" != 1 ]; then
+      say WRONG "the jarvis agent-identity block in $codex_cfg is not what this script wrote (edited since)"
+      fix "restore it: jq -j .block $(q "$cg_record") shows the exact text; or remove the block by hand and delete $(q "$cg_record"), then re-run"
+    elif [ -n "$i_trailing" ]; then
+      say WRONG "a key follows the block's end marker in $codex_cfg (\"$i_trailing\"), so it belongs to our shell_environment_policy table"
+      fix "move that line above the '# >>> jarvis agent-identity' line, or under its own [table], in $(q "$codex_cfg")"
+    elif [ "$i_policy" != equal ]; then
+      say WRONG "shell_environment_policy in $codex_cfg is not what this script wrote: $i_desc"
+      fix "restore the block: jq -j .block $(q "$cg_record") shows the exact text"
+    else
+      say OK "the block in $codex_cfg is what this script wrote, and shell_environment_policy equals the record"
+      cfg_state=same
+    fi
+  fi
+  # the gitconfig
+  if [ "$crec_state" = ok ]; then
+    local recg recsha
+    recg=$(jq -r '.gitconfig' <<<"$crec_json"); recsha=$(jq -r '.gitconfig_sha256' <<<"$crec_json")
+    if [ "$recg" != "$cg_file" ]; then
+      say WRONG "the record names the gitconfig $recg, but this run would use $cg_file (CODEX_HOME differs)"
+      fix "run it with the same CODEX_HOME as the apply, or --unapply --codex there first"
+    elif [ -e "$cg_file" ] || [ -L "$cg_file" ]; then
+      if [ "$(pyrun "$py_toml" sha256 "$cg_file" 2>/dev/null)" = "$recsha" ]; then
+        say OK "$cg_file is what this script wrote (sha256 matches the record)"
+      else
+        say WRONG "CONFLICT: $cg_file was changed since this script wrote it (sha256 differs from the record)"
+        fix "restore it, or move it away and re-run; this script does not overwrite a gitconfig it did not write"
+      fi
+    elif [ "$run_mode" = check ]; then
+      say MISSING "$cg_file is missing although the record exists: the policy's GIT_CONFIG_GLOBAL points at nothing, and git would fall back to the operator's credential helper and HTTPS"
+      fix "bash $self --codex"
+    else
+      codex_def_ok+=("$cg_file is not there: a real run writes it again")
+      codex_def_miss+=("$cg_file is missing although the record exists, and this run writes nothing because of the problems above, so the policy's GIT_CONFIG_GLOBAL points at nothing")
+    fi
+  elif [ -e "$cg_file" ] || [ -L "$cg_file" ]; then
+    say WRONG "CONFLICT: $cg_file exists, but there is no record of this script writing it"
+    fix "move it away if it is a stale copy, then re-run"
+  fi
+  if [ "$cfg_ready" != 1 ]; then
+    say SKIP "the block and the gitconfig this script would write (need a valid config)"; return
+  fi
+  [ "$problems" = "$bad_before" ] || return 0
+  # what a run would change
+  build_codex_want
+  printf '%s' "$cg_content" >"$codex_tmp/want.gitconfig"
+  cwant_sha=$(pyrun "$py_toml" sha256 "$codex_tmp/want.gitconfig")
+  printf '%s' "$cblock" >"$codex_tmp/want.block"
+  local k
+  if [ -s "$codex_cfg" ] && [ "$(tail -c 1 "$codex_cfg" | od -An -tx1 | tr -d ' \n')" != 0a ]; then k=$'\n\n'
+  elif [ -s "$codex_cfg" ]; then k=$'\n'
+  else k=""; fi
+  if [ "$crec_state" = ok ]; then cprefix=$crec_prefix; else cprefix=$k; fi
+  if [ "$cfg_state" = same ]; then
+    [ "$crec_block" = "$cblock" ] || cplan_cfg=replace
+  else
+    cplan_cfg=append
+    [ "$crec_state" = ok ] && cprefix=$k
+  fi
+  cplan_git=write
+  if [ -f "$cg_file" ] && [ "$(pyrun "$py_toml" sha256 "$cg_file")" = "$cwant_sha" ]; then cplan_git=none; fi
+  cnew_record=$(jq -n --argjson set "$cset" --arg gc "$cg_file" --arg sha "$cwant_sha" --arg block "$cblock" \
+    --arg prefix "$cprefix" --arg cfg "$codex_cfg" \
+    '{version: 1, set: $set, gitconfig: $gc, gitconfig_sha256: $sha, block: $block, prefix: $prefix, config: $cfg}')
+  if [ "$crec_state" = ok ] && [ "$(jq -S . <<<"$cnew_record")" = "$(jq -S . <<<"$crec_json")" ]; then cplan_rec=none; else cplan_rec=write; fi
+  local n=0
+  [ "$cplan_cfg" = none ] || n=$((n + 1))
+  [ "$cplan_git" = none ] || n=$((n + 1))
+  [ "$cplan_rec" = none ] || n=$((n + 1))
+  say OK "Codex config: $n file(s) to write ($cplan_cfg config.toml block, $cplan_git gitconfig, $cplan_rec record), the rest already in place"
+}
+
+# "A real run writes it again" is only true when every other check passes; if one does not, the
+# plain run writes nothing and the state stays as it is, so it is reported as MISSING instead.
+flush_codex_deferred() {
+  local i=0 others=$problems
+  step 6
+  while [ "$i" -lt "${#codex_def_ok[@]}" ]; do
+    if [ "$others" = 0 ]; then
+      say OK "${codex_def_ok[$i]}"
+    else
+      say MISSING "${codex_def_miss[$i]}"
+      fix "bash $self --codex"
+    fi
+    i=$((i + 1))
+  done
+  codex_def_ok=(); codex_def_miss=()
+}
+
+# Under the env Codex would give a command (GIT_CONFIG_GLOBAL and GIT_SSH_COMMAND from the
+# policy, and no GIT_CONFIG_COUNT, which Codex strips), what does git do with each
+# configured repository's HTTPS and SSH remotes, and what is the last credential.helper?
+chk_codex_git() {
+  step 6
+  if [ "$cfg_ready" != 1 ]; then say SKIP "the agent's git under Codex's env (needs a valid config)"; return; fi
+  codex_scratch
+  build_codex_want
+  printf '%s' "$cg_content" >"$codex_tmp/git.gitconfig"
+  local gitenv=("GIT_CONFIG_GLOBAL=$codex_tmp/git.gitconfig") kv
+  while IFS= read -r kv; do gitenv+=("$kv"); done < <(jq -r 'to_entries[] | select(.key | IN("GIT_SSH_COMMAND", "GIT_TERMINAL_PROMPT", "GIT_ASKPASS", "SSH_ASKPASS")) | "\(.key)=\(.value)"' <<<"$cset")
+  agent_git() { env -u GIT_CONFIG_PARAMETERS -u GIT_CONFIG_COUNT "${gitenv[@]}" env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE git "$@"; }
+  local r list fetch push want_url origins form helper
+  gitc init -q --bare "$codex_tmp/r.git" 2>/dev/null || { say WRONG "git could not create a scratch repository in $codex_tmp"; fix "check that git works and $codex_tmp is writable"; return; }
+  gitc -C "$codex_tmp/r.git" remote add origin https://github.com/placeholder/placeholder.git 2>/dev/null
+  list=$(printf '%s' "$cfg_repos" | tr ',' '\n')
+  while IFS= read -r r; do
+    for form in "https://github.com/$r.git" "git@github.com:$r.git"; do
+      gitc -C "$codex_tmp/r.git" remote set-url origin "$form" 2>/dev/null
+      fetch=$(agent_git -C "$codex_tmp/r.git" remote get-url origin 2>&1)
+      push=$(agent_git -C "$codex_tmp/r.git" remote get-url --push origin 2>&1)
+      want_url="git@github.com:$r.git"
+      if [ "$fetch" = "$want_url" ] && [ "$push" = "$want_url" ]; then
+        say OK "git: $form fetches and pushes as $want_url under Codex's env"
+      else
+        origins=$(agent_git -C "$codex_tmp/r.git" config --show-origin --get-regexp '^url\..*' 2>/dev/null | head -n 8)
+        say WRONG "git: $form becomes $fetch (fetch) and $push (push) under Codex's env, not $want_url, so Codex could push over HTTPS as another account"
+        fix "remove or change the url rewrite that wins (for example a pushInsteadOf back to HTTPS in your ~/.gitconfig), so it no longer touches https://github.com/ or git@github.com: (file, then key and value)
+${origins:-no url.* line is set in any git config file; check includeIf and .git/config of the repository}"
+      fi
+    done
+  done <<<"$list"
+  helper=$(agent_git -C "$codex_tmp/r.git" config --get-all credential.helper 2>/dev/null | tail -n 1)
+  if [ "$(agent_git -C "$codex_tmp/r.git" config --get-all credential.helper 2>/dev/null | grep -c '')" = 0 ] || [ -n "$helper" ]; then
+    origins=$(agent_git -C "$codex_tmp/r.git" config --show-origin --get-all credential.helper 2>/dev/null | head -n 8)
+    say WRONG "git: the last credential.helper under Codex's env is \"$helper\", not the empty reset, so a helper (the operator's) could answer for github.com"
+    fix "find what sets it after the agent identity's gitconfig and remove it:
+${origins:-no credential.helper line is set}"
+  else
+    say OK "git: the last credential.helper under Codex's env is the empty reset, so the operator's helper is never asked"
+  fi
+  # With no helper left and no prompt, asking for github.com credentials over HTTPS must fail.
+  if printf 'protocol=https\nhost=github.com\n\n' | agent_git -C "$codex_tmp/r.git" credential fill >/dev/null 2>&1; then
+    say WRONG "git: under Codex's env asking for HTTPS credentials for github.com succeeds, so a push over HTTPS would use someone's account"
+    fix "find the credential helper or askpass that answers: run it under the policy's env (GIT_CONFIG_GLOBAL=$(q "$cg_file") GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false git credential fill) and look at git config --show-origin --get-all credential.helper"
+  else
+    say OK "git: under Codex's env asking for HTTPS credentials for github.com fails without a prompt, so Codex cannot push over HTTPS"
+  fi
+  # A repository's own config, or an includeIf, is read after the agent identity's gitconfig and
+  # Codex cannot override it (it strips GIT_CONFIG_COUNT). Check the projects it trusts.
+  local pdir
+  for pdir in ${codex_trusted[@]+"${codex_trusted[@]}"}; do
+    [ -d "$pdir" ] || continue
+    [ "$(gitc -C "$pdir" rev-parse --is-inside-work-tree 2>/dev/null)" = true ] || continue
+    chk_codex_project_git "$pdir"
+  done
+}
+
+# The push URL git derives for a remote whose url is <form>, from the url.*.pushInsteadOf and
+# url.*.insteadOf rules the repository sees under the agent's env: the longest matching
+# pushInsteadOf prefix, else the longest insteadOf one, else the form itself. (git remote get-url
+# --push needs a remote that is in a config file, and cannot be given one on the command line.)
+codex_push_url() { # repo form
+  local p=$1 form=$2 line key val base best_push="" best_len=-1 best_f="" best_flen=-1
+  # -z: "key<newline>value" ends in NUL, so a subsection name with a space in it stays whole
+  while IFS= read -r -d '' line; do
+    case $line in
+      *$'\n'*) key=${line%%$'\n'*}; val=${line#*$'\n'} ;;
+      *) key=$line; val="" ;;
+    esac
+    case $key in
+      url.*.pushinsteadof) base=${key#url.}; base=${base%.pushinsteadof}
+        case $form in "$val"*) [ "${#val}" -gt "$best_len" ] && { best_len=${#val}; best_push="$base${form#"$val"}"; } ;; esac ;;
+      url.*.insteadof) base=${key#url.}; base=${base%.insteadof}
+        case $form in "$val"*) [ "${#val}" -gt "$best_flen" ] && { best_flen=${#val}; best_f="$base${form#"$val"}"; } ;; esac ;;
+    esac
+  done < <(agent_git -C "$p" config -z --get-regexp '^url\..*\.(pushinsteadof|insteadof)$' 2>/dev/null)
+  if [ "$best_len" -ge 0 ]; then printf '%s' "$best_push"
+  elif [ "$best_flen" -ge 0 ]; then printf '%s' "$best_f"
+  else printf '%s' "$form"; fi
+}
+
+# The same resolution and last-helper checks, inside one trusted project's repository.
+chk_codex_project_git() { # path
+  local p=$1 r list form fetch push want_url origins helper n bad=0
+  list=$(printf '%s' "$cfg_repos" | tr ',' '\n')
+  while IFS= read -r r; do
+    for form in "https://github.com/$r.git" "git@github.com:$r.git"; do
+      want_url="git@github.com:$r.git"
+      fetch=$(agent_git -C "$p" ls-remote --get-url "$form" 2>&1)
+      push=$(codex_push_url "$p" "$form")
+      if [ "$fetch" != "$want_url" ] || [ "$push" != "$want_url" ]; then
+        bad=1
+        origins=$(agent_git -C "$p" config --show-origin --get-regexp '^url\..*' 2>/dev/null | head -n 8)
+        say WRONG "git: in the trusted project $p, $form becomes $fetch (fetch) and $push (push) under Codex's env, not $want_url: the repository's own config (or an includeIf) is read after the agent identity's gitconfig and Codex cannot override it"
+        fix "remove or change the url rewrite that wins in that repository (file, then key and value):
+${origins:-no url.* line is set in any git config file; check includeIf}"
+      fi
+    done
+  done <<<"$list"
+  n=$(agent_git -C "$p" config --get-all credential.helper 2>/dev/null | grep -c '')
+  helper=$(agent_git -C "$p" config --get-all credential.helper 2>/dev/null | tail -n 1)
+  if [ "$n" = 0 ] || [ -n "$helper" ]; then
+    bad=1
+    origins=$(agent_git -C "$p" config --show-origin --get-all credential.helper 2>/dev/null | head -n 8)
+    say WRONG "git: in the trusted project $p, the last credential.helper under Codex's env is \"$helper\", not the empty reset: the repository's own config (or an includeIf) adds a helper after the agent identity's gitconfig"
+    fix "remove that credential.helper from the repository's config (file, then key and value):
+${origins:-no credential.helper line is set}"
+  fi
+  # The repository's own remotes, as git resolves them (a pushurl is not rewritten by pushInsteadOf).
+  local name f u
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    f=$(agent_git -C "$p" remote get-url "$name" 2>&1)
+    u=$(agent_git -C "$p" remote get-url --push "$name" 2>&1)
+    case "$f $u" in *[Gg][Ii][Tt][Hh][Uu][Bb].[Cc][Oo][Mm]*) ;; *) continue ;; esac
+    case $f in git@github.com:*) case $u in git@github.com:*) continue ;; esac ;; esac
+    bad=1
+    origins=$(agent_git -C "$p" config --show-origin --get-regexp "^(remote\\.$name\\.(url|pushurl)|url\\..*)" 2>/dev/null | head -n 8)
+    say WRONG "git: in the trusted project $p, the remote $name fetches from $f and pushes to $u under Codex's env, but a github.com remote must use git@github.com: for both"
+    fix "change the remote's url or pushurl, or the rule that rewrites it, in that repository (file, then key and value):
+${origins:-no remote or url.* line was found}"
+  done < <(agent_git -C "$p" remote 2>/dev/null)
+  # What the helper list above cannot show: a URL-specific helper such as credential.https://github.com.helper.
+  if printf 'protocol=https\nhost=github.com\n\n' | agent_git -C "$p" credential fill >/dev/null 2>&1; then
+    bad=1
+    origins=$(agent_git -C "$p" config --show-origin --get-regexp '^credential\.' 2>/dev/null | head -n 8)
+    say WRONG "git: in the trusted project $p, asking for HTTPS credentials for github.com succeeds under Codex's env, so a push over HTTPS would use someone's account (a credential.<url>.helper in the repository's config, for one)"
+    fix "remove the credential helper that answers from that repository's config (file, then key and value):
+${origins:-no credential.* line was found; run git credential fill there under the policy env}"
+  fi
+  if [ "$bad" = 0 ]; then
+    say OK "git: in the trusted project $p, both forms of each configured repository resolve to SSH, its remotes use SSH, the last credential.helper is the empty reset, and asking for HTTPS credentials fails"
+  fi
+}
+
+sum_of() { if [ -e "$1" ]; then cksum <"$1"; else echo absent; fi; }
+changed_since_read_codex() { [ "$(sum_of "$codex_cfg")" != "$ccfg_sum" ]; }
+
+do_apply_codex() {
+  if [ "$cplan_cfg" = none ] && [ "$cplan_git" = none ] && [ "$cplan_rec" = none ]; then
+    echo "apply-agent-identity: $codex_cfg already carries the agent identity"
+    return 0
+  fi
+  local tmp_rec="" tmp_git="" tmp_cfg="" old new
+  if [ "$cplan_cfg" != none ]; then
+    tmp_cfg=$(mktemp "$codex_cfg.XXXXXX") || die "cannot create a temporary file beside $codex_cfg"
+    tmpfiles="$tmpfiles
+$tmp_cfg"
+    cp -p "$codex_cfg" "$tmp_cfg"
+    old="-"
+    if [ "$cplan_cfg" = replace ]; then old="$codex_tmp/recorded.block"; fi
+    pyrun "$py_toml" edit "$codex_cfg" "$tmp_cfg" "$old" "$codex_tmp/want.block" "$cprefix" || die "could not prepare the new $codex_cfg; nothing was written"
+    # Someone may have saved the file since it was read; writing now would drop their change.
+    if changed_since_read_codex; then
+      die "$codex_cfg changed while this ran; nothing was written, run it again"
+    fi
+  fi
+  if [ "$cplan_rec" != none ]; then
+    mkdir -p "$codex_home"
+    tmp_rec=$(mktemp "$cg_record.XXXXXX") || die "cannot create a temporary file beside $cg_record"
+    tmpfiles="$tmpfiles
+$tmp_rec"
+    jq . <<<"$cnew_record" >"$tmp_rec"
+    chmod 600 "$tmp_rec"
+  fi
+  if [ "$cplan_git" != none ]; then
+    mkdir -p "$codex_home"
+    tmp_git=$(mktemp "$cg_file.XXXXXX") || die "cannot create a temporary file beside $cg_file"
+    tmpfiles="$tmpfiles
+$tmp_git"
+    printf '%s' "$cg_content" >"$tmp_git"
+    chmod 600 "$tmp_git"
+  fi
+  # The record goes in first, then the gitconfig, and config.toml last: it is what makes
+  # Codex use them, and a run that stops earlier leaves nothing half-applied.
+  if [ -n "$tmp_rec" ]; then mv "$tmp_rec" "$cg_record"; fi
+  if [ -n "$tmp_git" ]; then mv "$tmp_git" "$cg_file"; fi
+  if [ -n "$tmp_cfg" ]; then
+    cp -p "$codex_cfg" "$codex_cfg.agent-identity-backup"
+    mv "$tmp_cfg" "$codex_cfg"
+    echo "apply-agent-identity: wrote the block to $codex_cfg (previous copy: $codex_cfg.agent-identity-backup), $cg_file and $cg_record"
+  else
+    echo "apply-agent-identity: $codex_cfg already carried the block; wrote $cg_file and $cg_record as needed"
+  fi
+  echo "apply-agent-identity: restart Codex to pick the policy up; a running session keeps the old environment."
+  echo "apply-agent-identity: the guard's JARVIS_REQUIRE_AGENT_IDENTITY switch is not touched; this script never sets it."
+}
+
+do_unapply_codex() {
+  step 6
+  ccfg_sum=$(sum_of "$codex_cfg")
+  snapshot_codex
+  if [ "$crec_state" = absent ]; then
+    say OK "no record at $cg_record: nothing to remove"
+    return 0
+  fi
+  if [ "$crec_state" = bad ]; then
+    say WRONG "$cg_record is not a record this script wrote"
+    fix "inspect $(q "$cg_record") by hand; nothing was changed"
+    return 1
+  fi
+  find_python
+  local py=${py_toml:-$py_any}
+  if [ -z "$py" ]; then
+    say MISSING "no python3 on PATH, which removing the block from $codex_cfg needs"
+    fix "install Python 3"
+    return 1
+  fi
+  codex_scratch
+  local blockf="$codex_tmp/recorded.block" out kind a b markers=0 nblock=0 trailing="" tmp_cfg="" recg recsha
+  printf '%s' "$crec_block" >"$blockf"
+  recg=$(jq -r '.gitconfig' <<<"$crec_json"); recsha=$(jq -r '.gitconfig_sha256' <<<"$crec_json")
+  if [ -f "$codex_cfg" ]; then
+    out=$(pyrun "$py" inspect "$codex_cfg" "-" "$blockf" 2>&1)
+    while IFS=$'\t' read -r kind a b; do
+      case $kind in MARKERS) markers=$a ;; BLOCK) nblock=$a ;; TRAILING) trailing=$a ;; esac
+    done <<<"$out"
+  fi
+  if [ "$markers" != 0 ] && { [ "$nblock" != 1 ] || [ "$markers" != 1 ]; }; then
+    say WRONG "the jarvis agent-identity block in $codex_cfg is not byte-identical to what this script wrote (edited, or more than one)"
+    fix "restore it (jq -j .block $(q "$cg_record") shows the exact text) or remove the block by hand and delete $(q "$cg_record"); nothing was changed"
+    return 1
+  fi
+  if [ "$markers" = 1 ] && [ -n "$trailing" ]; then
+    say WRONG "a key follows the block's end marker in $codex_cfg (\"$trailing\"); removing the block would move it into another table"
+    fix "move that line out from under the block, then re-run --unapply --codex; nothing was changed"
+    return 1
+  fi
+  if [ "$markers" = 1 ]; then
+    tmp_cfg=$(mktemp "$codex_cfg.XXXXXX") || die "cannot create a temporary file beside $codex_cfg"
+    tmpfiles="$tmpfiles
+$tmp_cfg"
+    cp -p "$codex_cfg" "$tmp_cfg"
+    pyrun "$py" edit "$codex_cfg" "$tmp_cfg" "$blockf" "-" "$crec_prefix" || die "could not prepare the new $codex_cfg; nothing was written"
+    if changed_since_read_codex; then
+      die "$codex_cfg changed while this ran; nothing was written, run it again"
+    fi
+    cp -p "$codex_cfg" "$codex_cfg.agent-identity-backup"
+    mv "$tmp_cfg" "$codex_cfg"
+    echo "apply-agent-identity: removed the block from $codex_cfg (previous copy: $codex_cfg.agent-identity-backup)"
+  else
+    echo "apply-agent-identity: the block is not in $codex_cfg"
+  fi
+  if [ -e "$recg" ] || [ -L "$recg" ]; then
+    if [ -f "$recg" ] && [ "$(pyrun "$py" sha256 "$recg")" = "$recsha" ]; then
+      rm -f "$recg"
+      echo "apply-agent-identity: removed $recg"
+    else
+      say WARN "$recg was changed since this script wrote it, so it was left in place; nothing refers to it any more"
+      fix "delete it by hand if you do not need it: rm -- $(q "$recg")"
+    fi
+  fi
+  rm -f "$cg_record"
+  echo "apply-agent-identity: removed $cg_record; a new Codex session drops the identity"
+  return 0
+}
+
 # --- the checks, in the order a new machine is set up ----------------------------------------------
 
 run_checks() {
   problems=0 warns=0 next_step=0 next_cmd="" next_net=0 last_bad=0
   gh_ok=0; plan_n_write=0
   valid_login=0 valid_ssh_key=0 valid_gh_config_dir=0 valid_repos=0 cfg_ready=0
-  snapshot_settings
+  if [ "$target" = codex ]; then ccfg_sum=$(sum_of "$codex_cfg"); else snapshot_settings; fi
   chk_config_file
   if [ "$have_cfg" = 1 ]; then
     chk_ssh
@@ -1070,13 +1836,23 @@ run_checks() {
   chk_operator
   chk_operator_ssh
   if [ "$have_cfg" = 1 ]; then chk_repos; fi
-  chk_settings
-  chk_git_urls
+  if [ "$target" = codex ]; then
+    chk_codex_config
+    chk_codex_git
+    flush_codex_deferred
+  else
+    chk_settings
+    chk_git_urls
+  fi
 }
 
 finish_checks() { # prints Next and the summary
   local ready_msg="run without --check to apply"
-  if [ "$problems" = 0 ]; then
+  if [ "$problems" = 0 ] && [ "$target" = codex ]; then
+    if [ "$cplan_cfg" = none ] && [ "$cplan_git" = none ] && [ "$cplan_rec" = none ]; then
+      ready_msg="nothing — the identity is already applied; a new Codex session uses it"
+    fi
+  elif [ "$problems" = 0 ]; then
     plan_settings 2>/dev/null
     if [ "${settings_same:-0}" = 1 ] && [ "${record_same:-0}" = 1 ]; then
       ready_msg="nothing — the identity is already applied; a new Claude Code session uses it"
@@ -1112,16 +1888,77 @@ pause() { # message
   [ -t 0 ] || echo
 }
 
+validate_codex_key() { # a path for Codex's key: valid, and not the Claude key
+  validate_path "$1" || return 1
+  if same_file "$(expand_path "$1")" "$(expand_path "$cfg_ssh_key")"; then
+    echo "is the same key as ssh_key=$cfg_ssh_key; Codex's key must be its own, so it can be revoked alone"
+    return 1
+  fi
+  return 0
+}
+
+# --setup --codex, step 1: the config file exists already (Claude Code was set up first); add
+# Codex's key to it after asking, changing none of its lines.
+setup_codex_config() {
+  local host add="" now tmp
+  host=$(host_tag)
+  if [ ! -e "$cfg_file" ]; then
+    echo "  does not exist. Codex uses the same account as Claude Code, so create the file first:"
+    echo "    bash $self --setup"
+    echo "  then re-run: bash $self --setup --codex"
+    return 1
+  fi
+  if [ ! -f "$cfg_file" ] || [ ! -r "$cfg_file" ]; then
+    echo "  $cfg_file is not a readable regular file; fix that first (the check below says how)."
+    return 0
+  fi
+  parse_config >/dev/null
+  if [ "$line_codex_ssh_key" != 0 ]; then
+    echo "  already has codex_ssh_key (line $line_codex_ssh_key): left as it is (edit it by hand to change a value)."
+    return 0
+  fi
+  add="codex_ssh_key=~/.ssh/id_ed25519_agent_codex_$host"
+  if [ "$line_codex_author_name" = 0 ]; then add="$add
+codex_author_name=Codex"; fi
+  echo "  $cfg_file has no codex_ssh_key. These lines would be appended; every existing line stays as it is:"
+  printf '%s\n' "$add" | sed 's/^/    /'
+  if ! confirm "  append them?"; then
+    echo "  skipped: nothing was appended."
+    return 0
+  fi
+  now=$(cksum <"$cfg_file")
+  [ "$now" = "$setup_cfg_sum" ] || die "$cfg_file changed since it was read; nothing was written, run --setup --codex again"
+  tmp=$(mktemp "$cfg_file.XXXXXX") || die "cannot create a temporary file beside $cfg_file"
+  tmpfiles="$tmpfiles
+$tmp"
+  cp -p "$cfg_file" "$tmp"
+  { if [ -s "$cfg_file" ] && [ "$(tail -c 1 "$cfg_file" | od -An -tx1 | tr -d ' \n')" != 0a ]; then printf '\n'; fi
+    printf '%s\n' "$add"; } >>"$tmp"
+  [ "$(cksum <"$cfg_file")" = "$setup_cfg_sum" ] || die "$cfg_file changed while this ran; nothing was written, run --setup --codex again"
+  mv "$tmp" "$cfg_file"
+  echo "  appended to $cfg_file"
+  return 0
+}
+
 setup_steps() {
   gh_state=none; gh_who=""; gh_ok=0
-  local host dir ans_login ans_email ans_key ans_gh ans_repos ans_author comment pub body
+  local host dir ans_login ans_email ans_key ans_gh ans_repos ans_author comment pub body skey
   host=$(host_tag)
-  echo "Agent identity setup for this machine."
-  echo "It creates the config file and this machine's SSH key after asking, and tells you what to do on GitHub."
-  echo "It never writes $settings and never touches your own gh login or keys."
+  setup_cfg_sum=absent
+  [ ! -f "$cfg_file" ] || setup_cfg_sum=$(cksum <"$cfg_file")
+  echo "Agent identity setup for this machine$([ "$target" = codex ] && echo ", for Codex")."
+  if [ "$target" = codex ]; then
+    echo "It adds Codex's own SSH key to the config file and creates it after asking, and tells you what to do on GitHub."
+    echo "It never writes $codex_cfg and never touches your own gh login or keys."
+  else
+    echo "It creates the config file and this machine's SSH key after asking, and tells you what to do on GitHub."
+    echo "It never writes $settings and never touches your own gh login or keys."
+  fi
   echo
   echo "== Step 1 of 5: the config file ($cfg_file)"
-  if [ -e "$cfg_file" ]; then
+  if [ "$target" = codex ]; then
+    setup_codex_config || return 1
+  elif [ -e "$cfg_file" ]; then
     echo "  already exists: left as it is (edit it by hand to change a value)."
   else
     ask "  machine account login" validate_login; ans_login=$ASK
@@ -1156,30 +1993,45 @@ author_name=$ans_author"
   parse_config >/dev/null
   chk_value login validate_login >/dev/null; chk_value ssh_key validate_path >/dev/null
   chk_value gh_config_dir validate_gh_dir >/dev/null; chk_value repos validate_repos >/dev/null
-  if [ "$valid_login" != 1 ] || [ "$valid_ssh_key" != 1 ] || [ "$valid_gh_config_dir" != 1 ]; then
+  if [ "$target" = codex ]; then
+    if [ "$line_codex_ssh_key" != 0 ]; then
+      chk_value codex_ssh_key validate_codex_key >/dev/null
+    fi
+    chk_value email validate_email >/dev/null
+    [ "$line_codex_login" = 0 ] || chk_value codex_login validate_login >/dev/null
+    [ "$line_codex_email" = 0 ] || chk_value codex_email validate_email >/dev/null
+    [ "$line_codex_gh_config_dir" = 0 ] || chk_value codex_gh_config_dir validate_gh_dir >/dev/null
+    codex_effective >/dev/null
+  fi
+  if [ "$valid_login" != 1 ] || [ "$valid_ssh_key" != 1 ] || [ "$valid_gh_config_dir" != 1 ] \
+    || { [ "$target" = codex ] && [ "$valid_email" != 1 ]; } \
+    || { [ "$target" = codex ] && [ "$valid_codex_ssh_key" != 1 ]; }; then
     echo; echo "The config file has problems that need editing by hand; the check below lists them."
     echo
     run_checks; print_next "run without --check to apply"
     [ "$problems" = 0 ]; return
   fi
   key_path=$(expand_path "$cfg_ssh_key"); cfg_gh=$(expand_path "$cfg_gh_config_dir")
-  pub=$key_path.pub
+  skey=$key_path
+  [ "$target" != codex ] || { ckey_path=$(expand_path "$cfg_codex_ssh_key"); skey=$ckey_path; }
+  pub=$skey.pub
 
   echo
-  echo "== Step 2 of 5: this machine's SSH key ($key_path)"
-  if [ -e "$key_path" ] || [ -L "$key_path" ]; then
+  echo "== Step 2 of 5: $([ "$target" = codex ] && echo "Codex's own" || echo "this machine's") SSH key ($skey)"
+  if [ -e "$skey" ] || [ -L "$skey" ]; then
     echo "  the key file already exists: left untouched, never overwritten."
   elif [ -e "$pub" ] || [ -L "$pub" ]; then
-    echo "  $pub exists but $key_path does not. Not generating: ssh-keygen would overwrite that .pub."
-    echo "  Move $pub away, or point ssh_key at the matching private key, then re-run."
+    echo "  $pub exists but $skey does not. Not generating: ssh-keygen would overwrite that .pub."
+    echo "  Move $pub away, or point $([ "$target" = codex ] && echo codex_ssh_key || echo ssh_key) at the matching private key, then re-run."
   else
     comment="$cfg_login@$host"
-    echo "  will run: ssh-keygen -t ed25519 -N '' -C $comment -f $key_path"
+    [ "$target" != codex ] || comment="$cfg_login@$host-codex"
+    echo "  will run: ssh-keygen -t ed25519 -N '' -C $comment -f $skey"
     echo "  (no passphrase: the agent runs unattended; the key is mode 600 and works for one account only)"
     if confirm "  generate it?"; then
-      mkdir -p -m 700 "$(dirname "$key_path")" || die "cannot create $(dirname "$key_path")"
-      ssh-keygen -t ed25519 -N '' -C "$comment" -f "$key_path" >/dev/null || die "ssh-keygen failed; nothing else was changed"
-      echo "  generated $key_path and $pub"
+      mkdir -p -m 700 "$(dirname "$skey")" || die "cannot create $(dirname "$skey")"
+      ssh-keygen -t ed25519 -N '' -C "$comment" -f "$skey" >/dev/null || die "ssh-keygen failed; nothing else was changed"
+      echo "  generated $skey and $pub"
     else
       echo "  skipped: no key was generated."
     fi
@@ -1187,8 +2039,8 @@ author_name=$ans_author"
 
   echo
   echo "== Step 3 of 5: the key on the machine account's GitHub profile"
-  if [ -f "$key_path" ] && command -v ssh >/dev/null; then
-    probe_ssh "$key_path"
+  if [ -f "$skey" ] && command -v ssh >/dev/null; then
+    probe_ssh "$skey"
     if [ "$ssh_state" = hi ] && [ "$(lc "$ssh_who")" = "$(lc "$cfg_login")" ]; then
       echo "  GitHub already answers \"Hi $ssh_who!\" for this key: nothing to add."
     elif [ -f "$pub" ]; then
@@ -1198,7 +2050,7 @@ author_name=$ans_author"
       sed 's/^/    /' "$pub"
       pause "  Press Enter when it is added."
     else
-      echo "  $pub is missing; create it with: ssh-keygen -y -f $(q "$key_path") >$(q "$pub")"
+      echo "  $pub is missing; create it with: ssh-keygen -y -f $(q "$skey") >$(q "$pub")"
     fi
   else
     echo "  no key file yet: nothing to add."
@@ -1209,7 +2061,7 @@ author_name=$ans_author"
   if command -v gh >/dev/null; then
     probe_gh
     if [ "$gh_state" = ok ] && [ "$(lc "$gh_who")" = "$(lc "$cfg_login")" ]; then
-      echo "  $cfg_gh is already logged in as $gh_who: nothing to do."
+      echo "  $cfg_gh is already logged in as $gh_who$([ "$target" = codex ] && echo " (the login is shared with Claude Code)"): nothing to do."
     else
       echo "  Run this in another terminal and sign in as $cfg_login, not as yourself:"
       echo "    $(gh_login_cmd "$cfg_gh")"
@@ -1235,6 +2087,7 @@ author_name=$ans_author"
 
   echo
   echo "== The full check"
+  run_mode=check
   run_checks
   print_next "run without --check to apply"
   [ "$problems" = 0 ]
@@ -1242,7 +2095,7 @@ author_name=$ans_author"
 
 setup_main() {
   if [ ! -t 0 ]; then
-    die "--setup is interactive and needs a terminal, but stdin is not one. Run it yourself: bash $self --setup"
+    die "--setup is interactive and needs a terminal, but stdin is not one. Run it yourself: bash $self --setup$([ "$target" = codex ] && echo " --codex")"
   fi
   setup_steps
 }
@@ -1258,24 +2111,34 @@ init() {
   claude_home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
   settings=$(resolve_links "$claude_home/settings.json")
   record="$claude_home/agent-identity.applied.json"
+  codex_home="${CODEX_HOME:-$HOME/.codex}"
+  codex_cfg=$(resolve_links "$codex_home/config.toml")
+  cg_file="$codex_home/agent-identity.gitconfig"
+  cg_record="$codex_home/agent-identity.applied.json"
 }
 
 main() {
-  local mode=apply
-  if [ "$#" -gt 1 ]; then usage >&2; exit 2; fi
-  if [ "$#" = 1 ]; then
-    case $1 in
-      --check) mode=check ;;
-      --setup) mode=setup ;;
-      --unapply) mode=unapply ;;
-      -h|--help) usage; exit 0 ;;
+  local mode=apply have_mode=0 have_codex=0 a
+  for a in "$@"; do
+    case $a in
+      --codex) [ "$have_codex" = 0 ] || { usage >&2; exit 2; }; have_codex=1; target=codex ;;
+      --check|--setup|--unapply|-h|--help)
+        [ "$have_mode" = 0 ] || { usage >&2; exit 2; }
+        have_mode=1
+        case $a in
+          --check) mode=check ;;
+          --setup) mode=setup ;;
+          --unapply) mode=unapply ;;
+          *) usage; exit 0 ;;
+        esac ;;
       *) usage >&2; exit 2 ;;
     esac
-  fi
+  done
   trap cleanup EXIT
   init
+  run_mode=$mode
   case $mode in
-    unapply) do_unapply; exit $? ;;
+    unapply) if [ "$target" = codex ]; then do_unapply_codex; else do_unapply; fi; exit $? ;;
     setup) setup_main; exit $? ;;
   esac
   run_checks
@@ -1293,7 +2156,7 @@ main() {
     fi
     exit 0
   fi
-  do_apply
+  if [ "$target" = codex ]; then do_apply_codex; else do_apply; fi
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then main "$@"; fi

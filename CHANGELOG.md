@@ -21,6 +21,56 @@ How an entry is written:
 - Nothing here is a dependency of any project, so no entry has an upgrade path
   for a consumer.
 
+## Unreleased
+
+A MINOR release: the agent identity reaches Codex, and the tests no longer depend on the session they run in.
+
+- **Codex identity.** `scripts/apply-agent-identity.sh --codex` (with `--check`,
+  `--setup`, `--unapply`) gives Codex the same machine account with its own SSH
+  key (`codex_ssh_key`, which must differ from `ssh_key`, so it can be revoked
+  alone) and the author name `Codex` (`codex_author_name`). Codex strips
+  `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n` and `GIT_CONFIG_PARAMETERS` from its
+  commands, so the forced-SSH git config travels differently: a block appended to
+  `~/.codex/config.toml` sets `[shell_environment_policy] set` with
+  `GIT_CONFIG_GLOBAL` pointing at `~/.codex/agent-identity.gitconfig` (it includes
+  the owner's global config, empties `credential.helper`, rewrites
+  `https://github.com/` to SSH) and blanks the token variables and `GH_HOST`.
+  Nothing else in `config.toml` changes; a `shell_environment_policy` of the
+  owner's, in the file, a profile or a trusted project, is a reported conflict,
+  never overwritten. Reading it needs a `python3` with `tomllib` (3.11+). The record
+  is `~/.codex/agent-identity.applied.json`. The same `set` carries
+  `GIT_TERMINAL_PROMPT=0` and `GIT_ASKPASS`/`SSH_ASKPASS=/usr/bin/false`, so an HTTPS
+  push that slips past fails instead of prompting. `--check --codex` reports a partly
+  applied state (a record without the gitconfig, or a block gone from `config.toml`)
+  as `MISSING`, and checks the URL rules, the last credential helper, the repository's own remotes and
+  `git credential fill` inside every project `config.toml` trusts, since a repository's own
+  config is read after ours. A plain run that cannot write (another check fails) no longer
+  prints "a real run writes it again" as OK.
+- **Codex guard.** Under `--codex` the guard takes that record's presence as "the
+  identity is applied" (a Codex hook cannot see the policy's environment), refuses
+  the same overrides as under Claude Code, skips the hook-environment comparison, and
+  refuses GitHub writes if the record is unreadable, or if what it lists is gone (its
+  block is not in `config.toml` exactly once, or the gitconfig is missing or has another
+  sha256). With no record, its answers are byte-identical to before over the whole probe
+  corpus.
+- **Optional separate Codex account.** `codex_login`, `codex_email` and
+  `codex_gh_config_dir` (typed by hand; `--setup` never adds them) make Codex a second
+  GitHub account, with its own `gh` login directory and repository invitations; messages
+  then name `codex_login` and its line. Not set, or `codex_login` equal to `login`: Codex
+  shares the account. `codex_email` or `codex_gh_config_dir` without `codex_login`, or a
+  `codex_email` equal to `email`, is an error.
+- **Tests are hermetic.** The suites strip the applied identity's variables from the
+  environment before setting their own, so they pass inside an agent session as
+  well as in CI (two cases of `tests/agent-identity.sh` failed in a session before).
+- **What the owner does on this machine:** nothing is required. To give Codex the
+  identity, follow the README's [Agent identity](./README.md#agent-identity), Codex part:
+  `bash ~/.Jarvis/scripts/apply-agent-identity.sh --setup --codex`, add the printed
+  `.pub` to the machine account, then `--check --codex`, the plain `--codex` run, and
+  restart Codex. Re-run `bash ~/.Jarvis/scripts/apply-codex-guard.sh` to install the
+  updated hook and trust it again in `/hooks`. Commands Codex runs outside its sandbox
+  after an approval, and commands typed with `!` in the Codex TUI, are not yet verified
+  to receive the policy.
+
 ## v1.1.0 (2026-10-29)
 
 A MINOR release: new scripts run, and the guard hook gains a switch that is off.

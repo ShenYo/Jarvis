@@ -14,16 +14,48 @@
 # fail before the code exists.
 set -uo pipefail
 
+# Hermetic: this suite may run inside an agent session, whose environment carries the
+# applied identity (GIT_CONFIG_COUNT/KEY_n/VALUE_n, GIT_SSH_COMMAND, GIT_AUTHOR_*, GH_CONFIG_DIR,
+# JARVIS_AGENT_IDENTITY...). None of it may reach the script or the git it runs; each case sets
+# its own.
+for v in $(compgen -e | grep -E '^(GIT_CONFIG_|GIT_AUTHOR_|GIT_COMMITTER_)'); do unset "$v"; done
+unset GIT_SSH_COMMAND GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GH_CONFIG_DIR GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN \
+  GITHUB_ENTERPRISE_TOKEN GH_HOST JARVIS_AGENT_IDENTITY JARVIS_REQUIRE_AGENT_IDENTITY CODEX_HOME CLAUDE_CONFIG_DIR XDG_CONFIG_HOME
+
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 apply="${APPLY_AGENT_IDENTITY:-$repo/scripts/apply-agent-identity.sh}"
 orig_path=$PATH
 root=$(mktemp -d "${TMPDIR:-/tmp}/agent-identity-test.XXXXXX")
 echo "sandboxes: $root"
 
+# Every run of the script under test gets a session of its own: no controlling terminal, so a git
+# that wants to prompt cannot sit waiting on /dev/tty, and a time limit, so a hang is a failure
+# (TEST_RUN_TIMEOUT seconds, exit 124). macOS has no setsid binary; python's os.setsid does it.
+# (the interpreter itself, not a pyenv shim, which would put its own bin directory on PATH)
+det_py=$(python3 -c 'import sys; print(sys.executable)' 2>/dev/null || true)
+cat >"$root/detach.py" <<'PY'
+import os, signal, subprocess, sys
+limit, cmd = int(sys.argv[1]), sys.argv[2:]
+proc = subprocess.Popen(cmd, preexec_fn=os.setsid)
+try:
+    rc = proc.wait(timeout=limit)
+except subprocess.TimeoutExpired:
+    os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait()
+    rc = 124
+sys.exit(rc)
+PY
+DET=()
+[ -z "$det_py" ] || DET=("$det_py" -I "$root/detach.py" "${TEST_RUN_TIMEOUT:-300}")
+# The sandboxes sit inside a work tree of their own, with a credential helper in it, as when TMPDIR is
+# inside a repository; the ceiling keeps the script's git from walking up into it.
+git init -q "$root"; git -C "$root" config credential.helper store
+export GIT_CEILING_DIRECTORIES="$root"
+
 fails=0
 n=0
 ok()   { echo "ok   $1"; }
-fail() { echo "FAIL $1"; fails=$((fails + 1)); }
+fail() { echo "FAIL $1"; fails=$((fails + 1)); if [ -n "${TEST_VERBOSE:-}" ] && [ -f "$dir/out" ]; then sed "s/^/    | /" "$dir/out"; fi; }
 check() { # name, then a command that must succeed
   local name=$1; shift
   if "$@"; then ok "$name"; else fail "$name"; fi
@@ -55,6 +87,15 @@ esac
 case " $* " in *" IdentitiesOnly=yes "*) ;; *) echo "stub ssh: IdentitiesOnly=yes missing" >&2; exit 97 ;; esac
 case " $* " in *" BatchMode=yes "*) ;; *) echo "stub ssh: BatchMode=yes missing" >&2; exit 97 ;; esac
 case " $* " in *" git@github.com "*) ;; *) echo "stub ssh: unexpected target: $*" >&2; exit 97 ;; esac
+# an answer for one key, named by its file name: ssh.<key>.out / ssh.<key>.rc
+kf=""; prev=""
+for a in "$@"; do [ "$prev" = -i ] && kf=$a; prev=$a; done
+kb=$(basename "$kf")
+if [ -f "$STUB_DIR/ssh.$kb.out" ]; then
+  cat "$STUB_DIR/ssh.$kb.out"
+  rc=1; [ -f "$STUB_DIR/ssh.$kb.rc" ] && rc=$(cat "$STUB_DIR/ssh.$kb.rc")
+  exit "$rc"
+fi
 [ -f "$STUB_DIR/ssh.out" ] && cat "$STUB_DIR/ssh.out"
 rc=1; [ -f "$STUB_DIR/ssh.rc" ] && rc=$(cat "$STUB_DIR/ssh.rc")
 exit "$rc"
@@ -70,6 +111,8 @@ done
 [ -f "$d/touch_settings" ] && printf ' ' >>"$STUB_SETTINGS"
 who=agent; [ -n "${GH_CONFIG_DIR:-}" ] || who=operator
 a="$d/gh-$who"
+# a config dir with answers of its own (a second account) is answered from gh-by-dir/<name>
+[ -z "${GH_CONFIG_DIR:-}" ] || [ ! -d "$d/gh-by-dir/$(basename "$GH_CONFIG_DIR")" ] || a="$d/gh-by-dir/$(basename "$GH_CONFIG_DIR")"
 emit() {
   local f="$a/$1" rc=0
   if [ ! -f "$f.out" ] && [ ! -f "$f.err" ] && [ ! -f "$f.rc" ]; then echo "stub gh: no answer prepared for $who $*" >&2; exit 97; fi
@@ -117,6 +160,8 @@ sandbox() { # a machine where every check passes
   dir="$root/$n"; home="$dir/home"; jar="$dir/jarvis"; cfgdir="$jar/config-local"; cfg="$cfgdir/agent-identity"
   stub="$dir/stub"; key="$home/.ssh/agent_key"; settings="$home/.claude/settings.json"
   record="$home/.claude/agent-identity.applied.json"; ghdir="$home/.config/gh-agent"
+  codex="$home/.codex"; toml="$codex/config.toml"; cg="$codex/agent-identity.gitconfig"; crec="$codex/agent-identity.applied.json"
+  ckey="$home/.ssh/codex_key"
   mkdir -p "$home/.claude" "$home/.ssh" "$cfgdir" "$stub/gh-agent" "$stub/gh-operator"
   chmod 700 "$cfgdir" "$home/.ssh"
   git init -q "$jar"
@@ -146,10 +191,10 @@ EOF
 base_env() {
   env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GH_HOST -u GH_CONFIG_DIR \
     -u XDG_CONFIG_HOME -u GIT_DIR -u GIT_WORK_TREE \
-    HOME="$home" CLAUDE_CONFIG_DIR="$home/.claude" JARVIS_AGENT_IDENTITY_FILE="$cfg" STUB_DIR="$stub" \
+    HOME="$home" CLAUDE_CONFIG_DIR="$home/.claude" CODEX_HOME="$codex" JARVIS_AGENT_IDENTITY_FILE="$cfg" STUB_DIR="$stub" \
     STUB_SETTINGS="$settings" GIT_CONFIG_NOSYSTEM=1 PATH="${TEST_PATH:-$root/bin:$PATH}" $XENV "$@"
 }
-run() { (cd "$dir" && base_env bash "$apply" "$@" </dev/null) >"$dir/out" 2>&1; }
+run() { (cd "$dir" && base_env ${DET[@]+"${DET[@]}"} bash "$apply" "$@" </dev/null) >"$dir/out" 2>&1; }
 has()  { grep -qF -- "$1" "$dir/out"; }
 hasl() { grep -qxF -- "$1" "$dir/out"; }
 hasn() { ! grep -qF -- "$1" "$dir/out"; }
@@ -164,6 +209,7 @@ cfg_set() { # replace the file by the given text
   printf '%s\n' "$1" >"$cfg"; chmod 600 "$cfg"
 }
 jqs() { jq -S "$@"; }
+jx() { jq -e "$@" >/dev/null; }
 sx() { jq -e "$1" "$settings" >/dev/null; }
 
 # =================================================================================
@@ -212,7 +258,7 @@ check "no file: Next names step 1" hasl "Next: step 1 of 6 — create the config
 check "no file: nothing written" cmp -s "$dir/snap.before" "$dir/snap.after"
 check "no file: neither ssh nor gh was run" bash -c "! grep -q . '$stub/calls.log' 2>/dev/null || ! grep -Eq '^(ssh|gh GH_CONFIG_DIR=$ghdir) ' '$stub/calls.log'"
 # the default path, without the test override
-(cd "$dir" && base_env env -u JARVIS_AGENT_IDENTITY_FILE bash "$apply" --check </dev/null) >"$dir/out" 2>&1
+(cd "$dir" && base_env ${DET[@]+"${DET[@]}"} env -u JARVIS_AGENT_IDENTITY_FILE bash "$apply" --check </dev/null) >"$dir/out" 2>&1
 check "no file: the default path is under ~/.Jarvis/config-local" has "MISSING  config file $home/.Jarvis/config-local/agent-identity does not exist"
 
 sandbox
@@ -258,14 +304,14 @@ badline() { # name, line to append (line 7), expected text, expected fix text
   check "line: $1: fix names the line and the file" has "  fix: edit line 7 of $cfg: $fixtxt"
   check "line: $1: Next names step 1" bash -c "grep -q '^Next: step 1 of 6 — create the config file — edit line 7 of $cfg' '$dir/out'"
 }
-badline "unknown key" 'colour=red' 'unknown key "colour"' 'use one of: login email ssh_key gh_config_dir repos author_name'
+badline "unknown key" 'colour=red' 'unknown key "colour"' 'use one of: login email ssh_key gh_config_dir repos author_name codex_ssh_key codex_author_name codex_login codex_email codex_gh_config_dir'
 badline "duplicate key" 'login=other' 'duplicate key "login" (first on line 2)' 'delete one of the two lines'
 badline "empty value" 'author_name=' 'author_name has an empty value' 'give author_name a value, or delete the line'
 badline "quotes" 'author_name="Bot"' 'author_name has quotes around its value' 'remove the quotes; values are taken literally'
 badline "single quotes" "author_name='Bot'" 'author_name has quotes around its value' 'remove the quotes; values are taken literally'
 badline "trailing space" 'author_name=Bot ' 'author_name has trailing whitespace' 'remove the trailing spaces'
 badline "leading value space" 'author_name= Bot' 'author_name has whitespace before its value' 'remove the space after ='
-badline "spaces around =" 'author_name = Bot' 'key "author_name " has characters other than a-z and _ (no spaces around =)' 'write it as key=value with no spaces, using one of: login email ssh_key gh_config_dir repos author_name'
+badline "spaces around =" 'author_name = Bot' 'key "author_name " has characters other than a-z and _ (no spaces around =)' 'write it as key=value with no spaces, using one of: login email ssh_key gh_config_dir repos author_name codex_ssh_key codex_author_name codex_login codex_email codex_gh_config_dir'
 badline "CRLF" 'author_name=Bot\r' 'ends with a carriage return (CRLF line ending)' "save the file with LF line endings (tr -d '\\r' <@CFG@ >@CFG@.new && chmod 600 @CFG@.new && mv @CFG@.new @CFG@)" raw
 badline "indented line" '  author_name=Bot' 'starts with whitespace' 'remove the leading whitespace (comments start with # in column 1)'
 badline "whitespace-only line" '   ' 'contains only whitespace' 'make it an empty line or delete it'
@@ -711,7 +757,7 @@ check "setup without a terminal: nothing created" cmp -s "$dir/snap.before" "$di
 # The prompts are driven by sourcing the script (it runs main only when executed)
 # and feeding lines on stdin; nothing in a real run can do that.
 setup_run() { # input file
-  (cd "$dir" && base_env bash -c 'source "$1"; trap cleanup EXIT; init; setup_steps' _ "$apply" <"$1") >"$dir/out" 2>&1
+  (cd "$dir" && base_env ${DET[@]+"${DET[@]}"} bash -c 'source "$1"; trap cleanup EXIT; init; setup_steps' _ "$apply" <"$1") >"$dir/out" 2>&1
 }
 host=$(hostname -s 2>/dev/null || hostname); host=$(printf '%s' "$host" | tr -c 'A-Za-z0-9_\n-' '_')
 
@@ -820,9 +866,12 @@ if command -v python3 >/dev/null; then
   sandbox
   (cd "$dir" && base_env python3 -I - "$apply" --setup <<'PY'
 import os, pty, sys
+import signal
 pid, fd = pty.fork()
 if pid == 0:
     os.execvp("bash", ["bash"] + sys.argv[1:])
+signal.signal(signal.SIGALRM, lambda *a: (os.kill(pid, signal.SIGKILL), os._exit(124)))
+signal.alarm(300)
 out = b""
 while True:
     try:
@@ -1032,6 +1081,893 @@ check "CRLF fix: removes the CR and keeps mode 600" bash -c "test \$(stat -c %a 
 run --check; rc=$?
 check "CRLF fix: the file then passes" test "$rc" = 0
 check "docs: the login command is explained once in the script" bash -c "grep -c 'setup-git' '$repo/scripts/apply-agent-identity.sh' | grep -q '^1\$'"
+
+# =================================================================================
+echo "== --codex: the same account, Codex's own key, a policy block in config.toml"
+tpy=""
+for p in $(type -ap python3 python3.14 python3.13 python3.12 python3.11 2>/dev/null); do
+  if "$p" -I -c 'import tomllib' 2>/dev/null; then tpy=$p; break; fi
+done
+check "codex: a python3 with tomllib (3.11+) is on PATH for these cases" test -n "$tpy"
+toml_orig=$'model = "gpt-5"\n\n[projects."/nonexistent/trusted"]\ntrust_level = "trusted"\n'
+csandbox() { # a machine where every --codex check passes
+  sandbox
+  put "$toml" "$toml_orig"
+  cfg_append 'codex_ssh_key=~/.ssh/codex_key'
+  put "$ckey" "FAKE CODEX KEY"; chmod 600 "$ckey"
+  put "$ckey.pub" "ssh-ed25519 AAAAFAKECODEX bot-agent"
+}
+crun() { run --codex "$@"; }
+expect_cg() {
+  printf '# Written by apply-agent-identity.sh --codex: the global Git config of commands Codex runs. Change it through that script.\n[include]\n\tpath = %s\n\tpath = %s\n[credential]\n\thelper =\n[url "git@github.com:"]\n\tinsteadOf = https://github.com/\n' \
+    "$home/.config/git/config" "$home/.gitconfig"
+}
+expect_set() { # author name
+  printf 'set = { GIT_AUTHOR_NAME = "%s", GIT_COMMITTER_NAME = "%s", GIT_AUTHOR_EMAIL = "1+bot-agent@users.noreply.github.com", GIT_COMMITTER_EMAIL = "1+bot-agent@users.noreply.github.com", GIT_SSH_COMMAND = "ssh -F /dev/null -i %s -o IdentitiesOnly=yes", GIT_CONFIG_GLOBAL = "%s", GH_CONFIG_DIR = "%s", JARVIS_AGENT_IDENTITY = "bot-agent", GH_TOKEN = "", GITHUB_TOKEN = "", GH_ENTERPRISE_TOKEN = "", GITHUB_ENTERPRISE_TOKEN = "", GH_HOST = "", GIT_TERMINAL_PROMPT = "0", GIT_ASKPASS = "/usr/bin/false", SSH_ASKPASS = "/usr/bin/false" }' \
+    "${1:-Codex}" "${1:-Codex}" "$ckey" "$cg" "$ghdir"
+}
+expect_block() {
+  printf '%s\n[shell_environment_policy]\n%s\n%s\n' "# >>> jarvis agent-identity: written by apply-agent-identity.sh --codex; change it through that script" "$(expect_set "${1:-Codex}")" "# <<< jarvis agent-identity"
+}
+table_set() { "$tpy" -I -c 'import sys,tomllib,json; c=tomllib.load(open(sys.argv[1],"rb")); print(json.dumps(c["shell_environment_policy"]["set"],sort_keys=True,separators=(",",":"),ensure_ascii=False))' "$1"; }
+prefix_ok() { "$tpy" -I -c 'import sys; sys.exit(0 if open(sys.argv[1],"rb").read().startswith(open(sys.argv[2],"rb").read()) else 1)' "$1" "$2"; }
+export -f prefix_ok; export tpy
+sha_of() { "$tpy" -I -c 'import sys,hashlib; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"; }
+
+# --- the checks
+csandbox
+snapshot >"$dir/snap.before"
+crun --check; rc=$?
+snapshot >"$dir/snap.after"
+check "codex pass: exit 0" test "$rc" = 0
+check "codex pass: no MISSING or WRONG line" bash -c "! grep -Eq '^(MISSING|WRONG)  ' '$dir/out'"
+check "codex pass: every line has the documented shape" bash -c "! grep -Ev '^(OK|WARN|SKIP|MISSING|WRONG)  |^  fix: |^       |^Next: |^apply-agent-identity: ' '$dir/out' | grep -q ."
+check "codex pass: the config values name Codex as the author" has "author_name=Codex"
+check "codex pass: SSH answer verified for Codex's own key" has "OK  SSH: GitHub answers \"Hi bot-agent!\" for $ckey"
+check "codex pass: ssh -G offers only Codex's key" has "OK  ssh offers only the agent key $ckey under the command git will run"
+check "codex pass: the Claude key is never probed" bash -c "! grep -q -- '-i $key ' '$stub/calls.log'"
+check "codex pass: one OK line for the tokens, from the policy" has "OK  the policy this script writes blanks GH_TOKEN, GITHUB_TOKEN, GH_ENTERPRISE_TOKEN, GITHUB_ENTERPRISE_TOKEN and GH_HOST for every command Codex runs"
+check "codex pass: config.toml parses and has no policy" bash -c "grep -q '^OK  $toml parses as TOML' '$dir/out' && grep -q '^OK  $toml has no shell_environment_policy: the block can be appended' '$dir/out'"
+check "codex pass: git resolution under Codex's env, fetch and push, both forms" bash -c "grep -q '^OK  git: https://github.com/acme/app.git fetches and pushes as git@github.com:acme/app.git under Codex.s env' '$dir/out' && grep -q '^OK  git: git@github.com:acme/app.git fetches and pushes as git@github.com:acme/app.git under Codex.s env' '$dir/out'"
+check "codex pass: the last credential.helper is the empty reset" has "OK  git: the last credential.helper under Codex's env is the empty reset, so the operator's helper is never asked"
+check "codex pass: Next line" hasl "Next: run without --check to apply"
+check "codex pass: --check writes nothing" cmp -s "$dir/snap.before" "$dir/snap.after"
+check "codex pass: no Claude settings message" hasn "$settings"
+csandbox
+rm "$settings"
+XENV="GH_TOKEN=ghp_notreal GIT_CONFIG_PARAMETERS='core.abbrev=9'"
+crun --check; rc=$?
+check "codex: Claude's settings and this process's tokens are irrelevant" test "$rc" = 0
+
+echo "== --codex: usage"
+csandbox
+for args in "--codex --codex" "--codex --check --unapply" "--check --codex --setup" "--codex --bogus"; do
+  # shellcheck disable=SC2086
+  run $args; rc=$?
+  check "codex usage: '$args' exits 2" test "$rc" = 2
+done
+run --check --codex; rc=$?
+check "codex usage: --check --codex (either order) works" test "$rc" = 0
+run --codex --help; rc=$?
+check "codex usage: --help prints the --codex line" bash -c "test $rc = 0 && grep -q '^Usage: apply-agent-identity.sh \\[--codex\\] \\[--check | --setup | --unapply\\]' '$dir/out'"
+
+echo "== --codex: step 1, the two new config keys"
+sandbox
+crun --check; rc=$?
+check "no codex_ssh_key: exit 1" test "$rc" = 1
+check "no codex_ssh_key: MISSING" has "MISSING  config key codex_ssh_key (required for --codex) is not in $cfg"
+check "no codex_ssh_key: the fix is the exact line to append" has "  fix: append Codex's key to $cfg: printf '%s\\n' 'codex_ssh_key=~/.ssh/id_ed25519_agent_codex_$host' >>$cfg   (or: bash $apply --setup --codex)"
+check "no codex_ssh_key: Next names step 1" hasl "Next: step 1 of 6 — create the config file — append Codex's key to $cfg: printf '%s\\n' 'codex_ssh_key=~/.ssh/id_ed25519_agent_codex_$host' >>$cfg   (or: bash $apply --setup --codex)"
+check "no codex_ssh_key: the SSH check is skipped, not guessed" has "SKIP  SSH key and GitHub's answer to it (need a valid login and codex_ssh_key in the config)"
+run --check; rc=$?
+check "no codex_ssh_key: Claude mode does not need it" test "$rc" = 0
+crun --check
+fixline=$(sed -n "s/^  fix: append Codex's key to [^:]*: \\(printf .*\\)   (or: .*)\$/\\1/p" "$dir/out" | head -n 1)
+bash -c "$fixline"
+check "no codex_ssh_key: running the fix line appends exactly that line" bash -c "tail -n 1 '$cfg' | grep -qx 'codex_ssh_key=~/.ssh/id_ed25519_agent_codex_$host'"
+sandbox
+cfg_append 'codex_ssh_key=~/.ssh/agent_key'
+crun --check; rc=$?
+check "same key: exit 1" test "$rc" = 1
+check "same key: WRONG naming both lines" has "WRONG  config line 7: codex_ssh_key=~/.ssh/agent_key is the same key as ssh_key=~/.ssh/agent_key (line 4); Codex's key must be its own, so it can be revoked alone"
+check "same key: exact fix" has "  fix: edit line 7 of $cfg: give codex_ssh_key another path, for example ~/.ssh/id_ed25519_agent_codex_$host"
+check "same key: Next names step 1" bash -c "grep -q '^Next: step 1 of 6 — create the config file — edit line 7 of $cfg: give codex_ssh_key another path' '$dir/out'"
+run --check; rc=$?
+check "same key: Claude mode ignores the codex keys" test "$rc" = 0
+sandbox
+ln -s "$key" "$home/.ssh/alias_key"
+cfg_append 'codex_ssh_key=~/.ssh/alias_key'
+crun --check
+check "same key through a link: still the same key" has "is the same key as ssh_key"
+sandbox
+cfg_append 'codex_ssh_key=keys/x'
+run --check; rc=$?
+check "codex_ssh_key syntax is checked in Claude mode too" bash -c "test $rc = 1 && grep -qF 'WRONG  config line 7: codex_ssh_key=keys/x must be an absolute path or start with ~/' '$dir/out'"
+sandbox
+cfg_append 'codex_ssh_key=~/.ssh/a'; cfg_append 'codex_ssh_key=~/.ssh/b'
+run --check
+check "codex_ssh_key duplicate: reported with the first line" has "WRONG  config line 8: duplicate key \"codex_ssh_key\" (first on line 7)"
+sandbox
+cfg_append 'codex_author_name='
+run --check
+check "codex_author_name empty: reported" has "WRONG  config line 7: codex_author_name has an empty value"
+sandbox
+cfg_append 'codex_author_name="Bot"'
+run --check
+check "codex_author_name quotes: reported" has "WRONG  config line 7: codex_author_name has quotes around its value"
+csandbox
+cfg_append 'codex_author_name=Co<dex'
+crun --check; rc=$?
+check "codex_author_name with <: WRONG" bash -c "test $rc = 1 && grep -qF 'WRONG  config line 8: codex_author_name=Co<dex must not contain control characters, < or >' '$dir/out'"
+
+echo "== --codex: step 2 and 3, Codex's key"
+csandbox
+rm "$ckey" "$ckey.pub"
+crun --check; rc=$?
+check "codex key missing: MISSING" has "MISSING  SSH key file $ckey does not exist"
+check "codex key missing: exact fix names --setup --codex" has "  fix: ssh-keygen -t ed25519 -N '' -C bot-agent -f $ckey   (or: bash $apply --setup --codex)"
+check "codex key missing: Next names step 2" bash -c "grep -q '^Next: step 2 of 6' '$dir/out'"
+csandbox
+chmod 644 "$ckey"
+crun --check
+check "codex key mode: WRONG with the chmod fix" bash -c "grep -qF 'WRONG  SSH key $ckey has mode 644' '$dir/out' && grep -qxF '  fix: chmod 600 $ckey' '$dir/out'"
+csandbox
+put "$stub/ssh.codex_key.out" "Hi owner-person! You've successfully authenticated, but GitHub does not provide shell access."
+crun --check; rc=$?
+check "codex key answers for another login: exit 1" test "$rc" = 1
+check "codex key answers for another login: WRONG names both" has "WRONG  SSH: $ckey authenticates as owner-person, but the config says login=bot-agent"
+check "codex key answers for another login: exact fix" has "  fix: register $ckey.pub on the account bot-agent at https://github.com/settings/ssh/new (signed in as bot-agent) and remove it from owner-person; also check ~/.ssh/config for another IdentityFile for github.com"
+check "codex key answers for another login: Next names step 3" bash -c "grep -q '^Next: step 3 of 6' '$dir/out'"
+csandbox
+put "$stub/ssh.codex_key.out" "git@github.com: Permission denied (publickey)."; put "$stub/ssh.codex_key.rc" 255
+crun --check
+check "codex key not on the account: MISSING with the .pub fix" bash -c "grep -qF 'MISSING  SSH: GitHub rejected $ckey (Permission denied)' '$dir/out' && grep -qxF '  fix: sign in to GitHub as bot-agent, open https://github.com/settings/ssh/new and paste the contents of $ckey.pub' '$dir/out'"
+csandbox
+put "$stub/ssh.G.extra" "identityfile /elsewhere/operator_key"
+crun --check
+check "codex key: another identity file still offered is WRONG" has "WRONG  ssh would offer identity files other than the agent key $ckey: "
+
+echo "== --codex: step 6, config.toml and git"
+csandbox
+rm "$toml"
+crun --check; rc=$?
+check "no config.toml: MISSING" has "MISSING  $toml does not exist"
+check "no config.toml: exact fix" has "  fix: mkdir -p $codex && : >>$toml"
+check "no config.toml: Next names step 6 of the Codex config" bash -c "test $rc = 1 && grep -q '^Next: step 6 of 6 — apply the identity to the Codex config — mkdir -p' '$dir/out'"
+csandbox
+mkdir -p "$dir/bin-nopy"
+ln -sf "$root/bin/ssh" "$dir/bin-nopy/ssh"; ln -sf "$root/bin/gh" "$dir/bin-nopy/gh"; ln -sf "$root/bin/ssh-keygen" "$dir/bin-nopy/ssh-keygen"
+for tool in bash git jq sed tr cat cut grep wc awk head tail mkdir rm mv cp mktemp stat dirname basename readlink cksum env ls chmod hostname sort find uname date ln touch id perl tee printf test od; do
+  p=$(PATH="$orig_path" command -v "$tool" 2>/dev/null) && [ -x "$p" ] && ln -sf "$p" "$dir/bin-nopy/$tool"
+done
+TEST_PATH="$dir/bin-nopy" crun --check; rc=$?
+check "no tomllib python: exit 1, MISSING, never a crash" bash -c "test $rc = 1 && grep -qF 'MISSING  no python3 with tomllib on PATH, so $toml cannot be parsed (it needs Python 3.11+)' '$dir/out' && ! grep -qi 'traceback\\|unbound' '$dir/out'"
+check "no tomllib python: exact fix" has "  fix: install Python 3.11+"
+check "no tomllib python: Next names step 6" hasl "Next: step 6 of 6 — apply the identity to the Codex config — install Python 3.11+"
+# a python3 that exists but has no tomllib is skipped the same way
+cat >"$dir/bin-nopy/python3" <<'EOF'
+#!/bin/sh
+case "$*" in *tomllib*) exit 1 ;; *) exit 0 ;; esac
+EOF
+chmod +x "$dir/bin-nopy/python3"
+TEST_PATH="$dir/bin-nopy" crun --check; rc=$?
+check "a python3 without tomllib: the same MISSING" bash -c "test $rc = 1 && grep -qF 'MISSING  no python3 with tomllib on PATH' '$dir/out'"
+
+csandbox
+put "$toml" $'model = \n'
+cp "$toml" "$dir/toml.before"
+crun --check; rc=$?
+check "unparsable config.toml: exit 1, WRONG with the parser's message" bash -c "test $rc = 1 && grep -q '^WRONG  $toml does not parse as TOML: .' '$dir/out'"
+check "unparsable config.toml: exact fix" has "  fix: repair $toml by hand (Codex cannot read it either); nothing was changed"
+crun; rc=$?
+check "unparsable config.toml: a real run writes nothing" bash -c "test $rc = 1 && cmp -s '$toml' '$dir/toml.before' && test ! -e '$cg' && test ! -e '$crec'"
+
+csandbox
+put "$toml" $'model = "x"\n[shell_environment_policy]\ninherit = "core"\n'
+cp "$toml" "$dir/toml.before"; snapshot >"$dir/snap.before"
+crun; rc=$?
+snapshot >"$dir/snap.after"
+check "foreign policy: exit 1" test "$rc" = 1
+check "foreign policy: CONFLICT naming what is there" has "WRONG  CONFLICT: $toml already sets shell_environment_policy ({\"inherit\": \"core\"}), which this script did not write; it is never overwritten"
+check "foreign policy: exact fix" has "  fix: merge by hand or remove it, then re-run: this script needs shell_environment_policy.set to carry the agent identity's variables (the README's Agent identity section lists them)"
+check "foreign policy: never overwritten, nothing written" cmp -s "$dir/snap.before" "$dir/snap.after"
+check "foreign policy: Next names step 6" bash -c "grep -q '^Next: step 6 of 6 — apply the identity to the Codex config — merge by hand' '$dir/out'"
+csandbox
+put "$toml" $'[shell_environment_policy]\nset = { FOO = "1" }\n'
+crun --check; rc=$?
+check "partial foreign policy (only a set): still a CONFLICT" bash -c "test $rc = 1 && grep -qF 'WRONG  CONFLICT: $toml already sets shell_environment_policy ({\"set\": {\"FOO\": \"1\"}})' '$dir/out'"
+csandbox
+put "$toml" $'shell_environment_policy.inherit = "all"\n'
+crun --check; rc=$?
+check "dotted-key foreign policy: a CONFLICT too" bash -c "test $rc = 1 && grep -qF 'WRONG  CONFLICT: $toml already sets shell_environment_policy' '$dir/out'"
+csandbox
+put "$toml" $'# >>> jarvis agent-identity: written by apply-agent-identity.sh --codex; change it through that script\nmodel = "x"\n'
+crun --check; rc=$?
+check "marker without a record: CONFLICT, remove by hand" bash -c "test $rc = 1 && grep -qF 'WRONG  CONFLICT: $toml holds a jarvis agent-identity block, but there is no record of this script writing it at $crec' '$dir/out'"
+
+csandbox
+put "$toml" $'[profiles.work]\nmodel = "x"\n\n[profiles.work.shell_environment_policy]\ninherit = "core"\n'
+crun --check; rc=$?
+check "profile policy: exit 1 and WRONG naming the profile" bash -c "test $rc = 1 && grep -qF 'WRONG  profile \"work\" in $toml sets shell_environment_policy; Codex would use it instead of the agent identity' '$dir/out'"
+check "profile policy: exact fix" has "  fix: remove [profiles.work.shell_environment_policy] from $toml (this script does not merge policies)"
+csandbox
+put "$toml" $'[profiles.other]\nshell_environment_policy = { inherit = "none" }\n[profiles.fine]\nmodel = "y"\n'
+crun --check
+check "profile policy as an inline table: found; a profile without one is not named" bash -c "grep -qF 'WRONG  profile \"other\"' '$dir/out' && ! grep -qF 'profile \"fine\"' '$dir/out'"
+
+csandbox
+mkdir -p "$dir/proj/.codex" "$dir/proj2/.codex" "$dir/proj3/.codex"
+put "$dir/proj/.codex/config.toml" $'[shell_environment_policy]\ninherit = "core"\n'
+put "$dir/proj2/.codex/config.toml" $'[shell_environment_policy]\ninherit = "core"\n'
+put "$dir/proj3/.codex/config.toml" $'model = "z"\n'
+put "$toml" "[projects.\"$dir/proj\"]
+trust_level = \"trusted\"
+
+[projects.\"$dir/proj2\"]
+trust_level = \"untrusted\"
+
+[projects.\"$dir/proj3\"]
+trust_level = \"trusted\"
+"
+crun --check; rc=$?
+check "trusted project policy: exit 1 and WRONG naming the file" bash -c "test $rc = 1 && grep -qF 'WRONG  the trusted project config $dir/proj/.codex/config.toml sets shell_environment_policy; Codex would apply it over the agent identity' '$dir/out'"
+check "trusted project policy: exact fix" has "  fix: remove shell_environment_policy from $dir/proj/.codex/config.toml, or stop trusting that project in $toml"
+check "trusted project policy: an untrusted project and a trusted one without a policy are not named" bash -c "! grep -q 'proj2' '$dir/out' && ! grep -q 'proj3' '$dir/out'"
+csandbox
+mkdir -p "$dir/proj/.codex"
+put "$dir/proj/.codex/config.toml" $'model = '
+put "$toml" "[projects.\"$dir/proj\"]
+trust_level = \"trusted\"
+"
+crun --check; rc=$?
+check "trusted project config that does not parse: WARN, not guessed" bash -c "test $rc = 0 && grep -q '^WARN  the trusted project config $dir/proj/.codex/config.toml does not parse' '$dir/out'"
+
+csandbox
+printf '[url "https://github.com/"]\n\tpushInsteadOf = git@github.com:\n' >"$home/.gitconfig"
+crun --check; rc=$?
+check "operator pushInsteadOf back to HTTPS: exit 1, WRONG naming both URLs" bash -c "test $rc = 1 && grep -qF 'WRONG  git: git@github.com:acme/app.git becomes git@github.com:acme/app.git (fetch) and https://github.com/acme/app.git (push) under Codex' '$dir/out'"
+check "operator pushInsteadOf back to HTTPS: the rule is named, from the operator's file via the include" bash -c "grep -q 'file:$home/.gitconfig.*url.https://github.com/.pushinsteadof' '$dir/out'"
+check "operator pushInsteadOf back to HTTPS: Next names step 6" bash -c "grep -q '^Next: step 6 of 6 — apply the identity to the Codex config — remove or change the url rewrite that wins' '$dir/out'"
+csandbox
+printf '[url "ssh://other.example/"]\n\tinsteadOf = https://github.com/acme/\n' >"$home/.gitconfig"
+crun --check; rc=$?
+check "operator insteadOf to another host: WRONG under Codex's env" bash -c "test $rc = 1 && grep -qF 'WRONG  git: https://github.com/acme/app.git becomes ssh://other.example/app.git (fetch)' '$dir/out'"
+csandbox
+GIT_CFG_OP="$home/.config/git/config"; mkdir -p "$(dirname "$GIT_CFG_OP")"
+printf '[url "https://github.com/"]\n\tpushInsteadOf = git@github.com:\n' >"$GIT_CFG_OP"
+crun --check; rc=$?
+check "operator rule in the XDG git config is found through the include too" bash -c "test $rc = 1 && grep -q 'file:$GIT_CFG_OP.*pushinsteadof' '$dir/out'"
+csandbox
+printf '[credential]\n\thelper = osxkeychain\n' >"$home/.gitconfig"
+crun --check; rc=$?
+check "operator credential helper: fine, the reset comes after it" test "$rc" = 0
+
+echo "== --codex: a real run"
+csandbox
+cp "$toml" "$dir/toml.orig"
+printf '[credential]\n\thelper = "!f() { echo called >>%s/helper.log; }; f"\n' "$home" >"$home/.gitconfig"
+cp "$settings" "$dir/settings.orig"
+crun; rc=$?
+check "apply: exit 0" test "$rc" = 0
+{ cat "$dir/toml.orig"; printf '\n'; expect_block; } >"$dir/toml.expected"
+check "apply: config.toml is the original, a blank line and the block, byte for byte" cmp -s "$toml" "$dir/toml.expected"
+check "apply: the rest of the file is byte-identical (the original is its prefix)" bash -c "prefix_ok '$toml' '$dir/toml.orig'"
+check "apply: backup is the previous config.toml" cmp -s "$toml.agent-identity-backup" "$dir/toml.orig"
+expect_cg >"$dir/cg.expected"
+check "apply: gitconfig content" cmp -s "$cg" "$dir/cg.expected"
+check "apply: gitconfig mode 600" test "$(mode "$cg")" = 600
+check "apply: record mode 600" test "$(mode "$crec")" = 600
+check "apply: record holds the set map, the gitconfig and its sha256" jx --arg cg "$cg" --arg sha "$(sha_of "$cg")" '.version == 1 and .set.JARVIS_AGENT_IDENTITY == "bot-agent" and .set.GH_TOKEN == "" and .gitconfig == $cg and .gitconfig_sha256 == $sha and .prefix == "\n"' "$crec"
+expect_block >"$dir/block.expected"; jq -j .block "$crec" >"$dir/rec.block"
+check "apply: the recorded block is the one in the file, exactly" cmp -s "$dir/rec.block" "$dir/block.expected"
+check "apply: tomllib reads back the table the record holds" bash -c "test \"\$($tpy -I -c 'import sys,tomllib,json; print(json.dumps(tomllib.load(open(sys.argv[1],\"rb\"))[\"shell_environment_policy\"][\"set\"],sort_keys=True,separators=(\",\",\":\")))' '$toml')\" = \"\$(jq -cS .set '$crec')\""
+check "apply: the existing tables are still there" bash -c "$tpy -I -c 'import sys,tomllib; c=tomllib.load(open(sys.argv[1],\"rb\")); assert c[\"model\"]==\"gpt-5\" and c[\"projects\"][\"/nonexistent/trusted\"][\"trust_level\"]==\"trusted\"' '$toml'"
+check "apply: Claude's settings and record are not touched" bash -c "cmp -s '$settings' '$dir/settings.orig' && test ! -e '$record'"
+check "apply: says to restart Codex" has "restart Codex"
+check "apply: says the switch is not touched" has "JARVIS_REQUIRE_AGENT_IDENTITY switch is not touched"
+check "apply: no temporary file left" bash -c "test \$(ls -A '$codex' | grep -c '\\.[A-Za-z0-9]\\{6\\}\$') = 0"
+# real git under the written gitconfig
+git init -q "$dir/clone"; git -C "$dir/clone" remote add origin https://github.com/o/r.git
+cenv=(); while IFS= read -r kv; do cenv+=("$kv"); done < <(table_set "$toml" | jq -r 'to_entries[] | "\(.key)=\(.value)"')
+ccmd() { env GIT_CONFIG_NOSYSTEM=1 HOME="$home" "${cenv[@]}" "$@"; }
+check "apply: the policy carries GIT_CONFIG_GLOBAL, and no GIT_CONFIG_COUNT" jx --arg cg "$cg" '.set.GIT_CONFIG_GLOBAL == $cg and (.set | has("GIT_CONFIG_COUNT") | not)' "$crec"
+check "git under the written gitconfig: the HTTPS remote resolves to SSH" test "$(ccmd git -C "$dir/clone" ls-remote --get-url origin)" = "git@github.com:o/r.git"
+check "git under the written gitconfig: its push URL too" test "$(ccmd git -C "$dir/clone" remote get-url --push origin)" = "git@github.com:o/r.git"
+git -C "$dir/clone" remote set-url origin git@github.com:o/r.git
+check "git under the written gitconfig: the SSH form stays SSH, fetch and push" test "$(ccmd git -C "$dir/clone" ls-remote --get-url origin)" = "git@github.com:o/r.git" -a "$(ccmd git -C "$dir/clone" remote get-url --push origin)" = "git@github.com:o/r.git"
+check "git under the written gitconfig: the last credential.helper is empty" test "$(ccmd git config --get-all credential.helper | tail -n 1)" = ""
+check "git under the written gitconfig: the operator's helper is listed before it (the include works)" bash -c "env GIT_CONFIG_NOSYSTEM=1 HOME='$home' GIT_CONFIG_GLOBAL='$cg' git config --get-all credential.helper | grep -q called"
+rm -f "$home/helper.log"
+printf 'protocol=https\nhost=github.com\n\n' | ccmd env GIT_TERMINAL_PROMPT=0 git credential fill >/dev/null 2>&1
+check "git under the written gitconfig: the operator's credential helper is never asked" test ! -e "$home/helper.log"
+printf 'protocol=https\nhost=github.com\n\n' | env GIT_CONFIG_NOSYSTEM=1 HOME="$home" GIT_TERMINAL_PROMPT=0 git credential fill >/dev/null 2>&1
+check "git without the gitconfig: it is asked (the control)" test -f "$home/helper.log"
+rm -f "$home/.gitconfig"
+
+cp "$toml" "$dir/toml.after1"; cp "$crec" "$dir/rec1"; cp "$cg" "$dir/cg1"; cp "$toml.agent-identity-backup" "$dir/bak1"
+crun; rc=$?
+check "codex idempotent: exit 0" test "$rc" = 0
+check "codex idempotent: says already applied" has "already carries the agent identity"
+check "codex idempotent: config, record, gitconfig and backup unchanged" bash -c "cmp -s '$toml' '$dir/toml.after1' && cmp -s '$crec' '$dir/rec1' && cmp -s '$cg' '$dir/cg1' && cmp -s '$toml.agent-identity-backup' '$dir/bak1'"
+crun --check; rc=$?
+check "codex check after apply: exit 0" test "$rc" = 0
+check "codex check after apply: the block and table verified" bash -c "grep -q '^OK  the block in $toml is what this script wrote, and shell_environment_policy equals the record' '$dir/out' && grep -q '^OK  $cg is what this script wrote (sha256 matches the record)' '$dir/out'"
+check "codex check after apply: Next says applied" bash -c "grep -q '^Next: nothing — the identity is already applied; a new Codex session uses it' '$dir/out'"
+check "codex check after apply: the policy table is not reported as foreign" hasn "CONFLICT"
+
+# the record is what the guard reads
+check "codex apply: the record is where the Codex guard looks" test -f "$codex/agent-identity.applied.json"
+
+# a block edited after apply
+cp "$toml" "$dir/toml.good"
+sed 's/GIT_AUTHOR_NAME = "Codex"/GIT_AUTHOR_NAME = "Mallory"/' "$dir/toml.good" >"$toml"
+snapshot >"$dir/snap.before"
+crun --check; rc=$?
+crun; rc2=$?
+snapshot >"$dir/snap.after"
+check "edited block: --check exits 1" test "$rc" = 1
+check "edited block: WRONG, edited since" has "WRONG  the jarvis agent-identity block in $toml is not what this script wrote (edited since)"
+check "edited block: exact fix" has "  fix: restore it: jq -j .block $crec shows the exact text; or remove the block by hand and delete $crec, then re-run"
+check "edited block: a real run exits 1" test "$rc2" = 1
+check "edited block: a real run writes nothing" cmp -s "$dir/snap.before" "$dir/snap.after"
+cp "$dir/toml.good" "$toml"
+printf 'extra = 1\n' >>"$toml"
+crun --check; rc=$?
+check "key appended after the end marker: exit 1" test "$rc" = 1
+check "key appended after the end marker: WRONG" has "WRONG  a key follows the block's end marker in $toml (\"extra = 1\"), so it belongs to our shell_environment_policy table"
+cp "$dir/toml.good" "$toml"
+printf '\n[other]\nextra = 1\n' >>"$toml"
+crun --check; rc=$?
+check "a table after the end marker is fine" test "$rc" = 0
+cp "$dir/toml.good" "$toml"
+sed 's/^\[shell_environment_policy\]$/[shell_environment_policy]\ninherit = "all"/' "$dir/toml.good" >"$toml"
+crun --check; rc=$?
+check "a key added inside the block: WRONG (edited)" bash -c "test $rc = 1 && grep -q '^WRONG  the jarvis agent-identity block in $toml is not what this script wrote' '$dir/out'"
+cp "$dir/toml.good" "$toml"
+printf '# changed\n' >>"$cg"
+crun --check; rc=$?
+check "gitconfig edited after apply: CONFLICT" bash -c "test $rc = 1 && grep -qF 'WRONG  CONFLICT: $cg was changed since this script wrote it (sha256 differs from the record)' '$dir/out'"
+cp "$dir/cg1" "$cg"
+crun --check; rc=$?
+check "restoring the files makes it pass again" test "$rc" = 0
+rm "$cg"
+crun --check; rc=$?
+check "gitconfig removed after apply: --check exits 1" test "$rc" = 1
+check "gitconfig removed after apply: MISSING, naming the consequence" has "MISSING  $cg is missing although the record exists: the policy's GIT_CONFIG_GLOBAL points at nothing, and git would fall back to the operator's credential helper and HTTPS"
+check "gitconfig removed after apply: fix is the --codex run" has "  fix: bash $apply --codex"
+check "gitconfig removed after apply: Next names step 6" hasl "Next: step 6 of 6 — apply the identity to the Codex config — bash $apply --codex"
+snapshot >"$dir/snap.before"; crun --check >/dev/null; snapshot >"$dir/snap.after"
+check "gitconfig removed after apply: --check writes nothing" cmp -s "$dir/snap.before" "$dir/snap.after"
+crun; rc=$?
+check "gitconfig removed after apply: the run restores it" bash -c "test $rc = 0 && cmp -s '$cg' '$dir/cg1' && cmp -s '$toml' '$dir/toml.good'"
+check "gitconfig removed after apply: a plain run that will write says OK" bash -c "grep -q '^OK  $cg is not there: a real run writes it again' '$dir/out'"
+check "gitconfig restored: mode 600" test "$(mode "$cg")" = 600
+# the block removed by hand, the record kept: a run appends it again
+cp "$dir/toml.orig" "$toml"
+crun --check; rc=$?
+check "block removed by hand: --check exits 1" test "$rc" = 1
+check "block removed by hand: MISSING, Codex runs without the identity" has "MISSING  the record at $crec lists a block that is no longer in $toml, so Codex runs without the agent identity"
+check "block removed by hand: fix is the --codex run, step 6" hasl "Next: step 6 of 6 — apply the identity to the Codex config — bash $apply --codex"
+crun; rc=$?
+check "block removed by hand: the run puts it back" bash -c "test $rc = 0 && cmp -s '$toml' '$dir/toml.good'"
+
+# an edit to the config updates the block in place
+cfg_set $'login=bot-agent\nemail=2+bot-agent@users.noreply.github.com\nssh_key=~/.ssh/agent_key\ngh_config_dir=~/.config/gh-agent\nrepos=acme/app\ncodex_ssh_key=~/.ssh/codex_key'
+printf '[other]\nkeep = 1\n' >>"$toml"
+cp "$toml" "$dir/toml.pre"
+crun; rc=$?
+check "update: the block follows the config" bash -c "test $rc = 0 && grep -qF 'GIT_AUTHOR_EMAIL = \"2+bot-agent@users.noreply.github.com\"' '$toml' && jq -e '.set.GIT_AUTHOR_EMAIL == \"2+bot-agent@users.noreply.github.com\"' '$crec' >/dev/null"
+check "update: everything outside the block is untouched" bash -c "diff <(grep -v -e GIT_AUTHOR_EMAIL '$dir/toml.pre') <(grep -v -e GIT_AUTHOR_EMAIL '$toml')"
+check "update: still exactly one block" bash -c "test \$(grep -c '^# >>> jarvis agent-identity' '$toml') = 1"
+check "update: the backup is the file before the update" cmp -s "$toml.agent-identity-backup" "$dir/toml.pre"
+
+# --unapply --codex
+csandbox
+cp "$toml" "$dir/toml.orig"
+crun; crun --unapply; rc=$?
+check "codex unapply: exit 0" test "$rc" = 0
+check "codex unapply: config.toml is byte-identical to before the apply" cmp -s "$toml" "$dir/toml.orig"
+check "codex unapply: gitconfig and record are gone" bash -c "test ! -e '$cg' && test ! -e '$crec'"
+check "codex unapply: says what it removed" bash -c "grep -q 'removed the block from $toml' '$dir/out' && grep -q 'removed $cg' '$dir/out' && grep -q 'removed $crec' '$dir/out'"
+check "codex unapply: a backup was written" test -f "$toml.agent-identity-backup"
+crun --unapply; rc=$?
+check "codex unapply: a second time has nothing to do" bash -c "test $rc = 0 && grep -q 'nothing to remove' '$dir/out'"
+for variant in "no trailing newline" "empty file" "crlf file" "no blank line needed"; do
+  csandbox
+  case $variant in
+    "no trailing newline") put "$toml" 'model = "x"' ;;
+    "empty file") put "$toml" '' ;;
+    "crlf file") put "$toml" $'model = "x"\r\n' ;;
+    "no blank line needed") put "$toml" $'model = "x"\n\n' ;;
+  esac
+  cp "$toml" "$dir/toml.orig"
+  crun; rc=$?
+  check "codex apply, $variant: exit 0 and the original is the prefix" bash -c "test $rc = 0 && prefix_ok '$toml' '$dir/toml.orig' && $tpy -I -c 'import sys,tomllib; tomllib.load(open(sys.argv[1],\"rb\"))' '$toml'"
+  crun --unapply
+  check "codex unapply, $variant: byte-identical to before" cmp -s "$toml" "$dir/toml.orig"
+done
+csandbox
+crun
+cp "$toml" "$dir/toml.mid"
+printf '[mine]\nx = 1\n' >>"$toml"
+crun --unapply; rc=$?
+check "codex unapply: a table added after the block stays, the block goes" bash -c "test $rc = 0 && ! grep -q 'jarvis agent-identity' '$toml' && grep -q '^\\[mine\\]' '$toml' && grep -q 'model = ' '$toml'"
+csandbox
+crun
+sed 's/GH_HOST = ""/GH_HOST = "evil.example"/' "$toml" >"$dir/t" && cp "$dir/t" "$toml"
+snapshot >"$dir/snap.before"
+crun --unapply; rc=$?
+snapshot >"$dir/snap.after"
+check "codex unapply, block edited: exit 1, refuses and explains" bash -c "test $rc = 1 && grep -qF 'WRONG  the jarvis agent-identity block in $toml is not byte-identical to what this script wrote (edited, or more than one)' '$dir/out'"
+check "codex unapply, block edited: exact fix" has "  fix: restore it (jq -j .block $crec shows the exact text) or remove the block by hand and delete $crec; nothing was changed"
+check "codex unapply, block edited: nothing was changed" cmp -s "$dir/snap.before" "$dir/snap.after"
+csandbox
+crun
+printf 'extra = 1\n' >>"$toml"
+snapshot >"$dir/snap.before"
+crun --unapply; rc=$?
+snapshot >"$dir/snap.after"
+check "codex unapply, a key after the end marker: refuses" bash -c "test $rc = 1 && grep -q 'removing the block would move it into another table' '$dir/out'"
+check "codex unapply, a key after the end marker: nothing changed" cmp -s "$dir/snap.before" "$dir/snap.after"
+csandbox
+crun
+printf '# mine\n' >>"$cg"
+crun --unapply; rc=$?
+check "codex unapply, gitconfig edited: the block goes, the gitconfig stays with a WARN" bash -c "test $rc = 0 && test -f '$cg' && ! grep -q 'jarvis agent-identity' '$toml' && grep -q '^WARN  $cg was changed since this script wrote it, so it was left in place' '$dir/out' && test ! -e '$crec'"
+csandbox
+put "$crec" '{"x":'
+crun --unapply; rc=$?
+check "codex unapply, a bad record: WRONG, exit 1" bash -c "test $rc = 1 && grep -q '^WRONG  $crec is not a record this script wrote' '$dir/out' && test -e '$crec'"
+
+echo "== --codex: links, escapes, concurrency"
+csandbox
+mkdir -p "$dir/dotfiles"; mv "$toml" "$dir/dotfiles/config.toml"; ln -s "$dir/dotfiles/config.toml" "$toml"
+cp "$dir/dotfiles/config.toml" "$dir/toml.orig"
+crun; rc=$?
+check "codex link: exit 0, still a link, written through" bash -c "test $rc = 0 && test -L '$toml' && grep -q 'jarvis agent-identity' '$dir/dotfiles/config.toml'"
+check "codex link: the backup sits beside the target" bash -c "cmp -s '$dir/dotfiles/config.toml.agent-identity-backup' '$dir/toml.orig'"
+crun --unapply
+check "codex link: unapply restores the target and keeps the link" bash -c "test -L '$toml' && cmp -s '$dir/dotfiles/config.toml' '$dir/toml.orig'"
+
+csandbox
+cfg_append 'codex_author_name=Co"d\ex'
+crun; rc=$?
+check "codex author with a quote and a backslash: applied" test "$rc" = 0
+check "codex author with a quote and a backslash: TOML-escaped in the file" grep -qF 'GIT_AUTHOR_NAME = "Co\"d\\ex"' "$toml"
+check "codex author: tomllib reads back the same name" bash -c "test \"\$($tpy -I -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],\"rb\"))[\"shell_environment_policy\"][\"set\"][\"GIT_AUTHOR_NAME\"])' '$toml')\" = 'Co\"d\\ex'"
+csandbox
+cfg_append 'codex_author_name=Cödex 日本'
+crun; rc=$?
+check "codex author with non-ASCII characters: tomllib reads it back" bash -c "test $rc = 0 && test \"\$($tpy -I -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],\"rb\"))[\"shell_environment_policy\"][\"set\"][\"GIT_COMMITTER_NAME\"])' '$toml')\" = 'Cödex 日本'"
+
+csandbox
+: >"$stub/touch_settings"
+cp "$toml" "$dir/toml.orig"
+XENV="STUB_SETTINGS=$toml"
+crun; rc=$?
+check "codex concurrent change: exit 2" test "$rc" = 2
+check "codex concurrent change: refuses to write" has "changed while this ran; nothing was written, run it again"
+check "codex concurrent change: no record, no gitconfig, no backup" bash -c "test ! -e '$crec' && test ! -e '$cg' && test ! -e '$toml.agent-identity-backup'"
+check "codex concurrent change: the other writer's change is intact (a space was added)" bash -c "! cmp -s '$toml' '$dir/toml.orig' && ! grep -q 'jarvis agent-identity' '$toml'"
+
+csandbox
+printf 'stale\n' >"$cg"
+crun --check; rc=$?
+check "gitconfig exists with no record: CONFLICT" bash -c "test $rc = 1 && grep -qF 'WRONG  CONFLICT: $cg exists, but there is no record of this script writing it' '$dir/out'"
+csandbox
+put "$stub/ssh.codex_key.out" "git@github.com: Permission denied (publickey)."; put "$stub/ssh.codex_key.rc" 255
+snapshot >"$dir/snap.before"
+crun; rc=$?
+snapshot >"$dir/snap.after"
+check "no codex write on failure: exit 1" test "$rc" = 1
+check "no codex write on failure: nothing changed" cmp -s "$dir/snap.before" "$dir/snap.after"
+check "no codex write on failure: says so" has "apply-agent-identity: nothing was written"
+
+echo "== --codex: a separate GitHub account for Codex"
+cfg_sep() { # codex_login codex_email codex_gh_config_dir (an empty argument leaves that line out)
+  [ -z "${1-}" ] || cfg_append "codex_login=$1"
+  [ -z "${2-}" ] || cfg_append "codex_email=$2"
+  [ -z "${3-}" ] || cfg_append "codex_gh_config_dir=$3"
+}
+sepsandbox() { # every check passes for a second account, codex-bot, with its own key and gh dir
+  csandbox
+  cfg_sep codex-bot '2+codex-bot@users.noreply.github.com' '~/.config/gh-codex'   # lines 8 to 10 (7 is codex_ssh_key)
+  cghdir="$home/.config/gh-codex"; cs="$stub/gh-by-dir/gh-codex"
+  mkdir -p "$cs"
+  put "$stub/ssh.codex_key.out" "Hi codex-bot! You've successfully authenticated, but GitHub does not provide shell access."
+  put "$cs/auth_status.out" $'github.com\n  \xe2\x9c\x93 Logged in to github.com account codex-bot (keyring)\n  - Active account: true'
+  put "$cs/user.out" "codex-bot"
+  put "$cs/repo.acme__app.out" "$repo_ok"
+  put "$cs/rulesets.acme__app.out" "[]"
+  put "$cs/invitations.out" "[]"
+}
+sepsandbox
+snapshot >"$dir/snap.before"
+crun --check; rc=$?
+snapshot >"$dir/snap.after"
+check "separate account: all checks pass, exit 0" test "$rc" = 0
+check "separate account: the config line says so" has "OK  config values valid: codex_login=codex-bot (line 8) (Codex's own account), 1 repo(s), author_name=Codex"
+check "separate account: SSH answer for Codex's key is judged against codex_login" has "OK  SSH: GitHub answers \"Hi codex-bot!\" for $ckey"
+check "separate account: gh login in Codex's own dir" has "OK  gh: GH_CONFIG_DIR=$cghdir is logged in as codex-bot"
+check "separate account: repo access is checked for codex-bot" has "OK  repo acme/app: codex-bot can push"
+check "separate account: the operator comparison uses codex-bot" has "OK  the operator's own gh login (owner-person) differs from codex_login=codex-bot (line 8)"
+check "separate account: the Claude gh dir is never asked" bash -c "! grep -q 'GH_CONFIG_DIR=$ghdir' '$stub/calls.log'"
+check "separate account: --check writes nothing" cmp -s "$dir/snap.before" "$dir/snap.after"
+crun; rc=$?
+check "separate account: a real run exits 0" test "$rc" = 0
+check "separate account: the set map carries Codex's email, gh dir and marker" jx --arg d "$cghdir" '.set.GIT_AUTHOR_EMAIL == "2+codex-bot@users.noreply.github.com" and .set.GIT_COMMITTER_EMAIL == "2+codex-bot@users.noreply.github.com" and .set.GH_CONFIG_DIR == $d and .set.JARVIS_AGENT_IDENTITY == "codex-bot" and .set.GIT_AUTHOR_NAME == "Codex"' "$crec"
+check "separate account: and the block in config.toml says the same" bash -c "grep -qF 'GH_CONFIG_DIR = \"$cghdir\", JARVIS_AGENT_IDENTITY = \"codex-bot\"' '$toml' && grep -qF 'GIT_AUTHOR_EMAIL = \"2+codex-bot@users.noreply.github.com\"' '$toml'"
+run --check; rc=$?
+check "separate account: Claude mode ignores the three keys and still checks login" bash -c "test $rc = 0 && grep -q 'OK  gh: GH_CONFIG_DIR=$ghdir is logged in as bot-agent' '$dir/out'"
+
+sepsandbox
+put "$cs/auth_status.out" "You are not logged into any GitHub hosts."; put "$cs/auth_status.rc" 1
+crun --check; rc=$?
+check "separate account, gh not logged in: MISSING for Codex's dir" has "MISSING  gh: not logged in to github.com in $cghdir"
+check "separate account, gh not logged in: fix signs in as codex-bot" has "  fix: GH_CONFIG_DIR=$cghdir gh auth login --hostname github.com --git-protocol ssh --skip-ssh-key --web   (sign in as codex-bot, not as yourself)"
+sepsandbox
+rm "$cs/repo.acme__app.out"; put "$cs/repo.acme__app.err" "gh: Not Found (HTTP 404)"; put "$cs/repo.acme__app.rc" 1
+put "$cs/invitations.out" '[{"id":7,"repository":{"full_name":"acme/app"}}]'
+crun --check
+check "separate account, invitation pending for codex-bot: MISSING with its accept line" has "  fix: as codex-bot, accept the invitation at https://github.com/acme/app/invitations (or github.com/notifications)"
+sepsandbox
+put "$cs/repo.acme__app.out" '{"permissions":{"admin":true,"maintain":true,"push":true,"pull":true}}'
+crun --check
+check "separate account, admin role: WRONG names codex-bot" has "WRONG  repo acme/app: codex-bot holds the admin role; it must be Write"
+sepsandbox
+put "$stub/gh-operator/user.out" "codex-bot"
+crun --check
+check "separate account, codex-bot is the operator's own login: WRONG" has "WRONG  codex_login=codex-bot (line 8) is the operator's own gh login"
+sepsandbox
+put "$stub/ssh.codex_key.out" "Hi bot-agent! You've successfully authenticated, but GitHub does not provide shell access."
+crun --check
+check "separate account, Codex's key answers as the Claude account: WRONG" has "WRONG  SSH: $ckey authenticates as bot-agent, but the config says codex_login=codex-bot (line 8)"
+
+csandbox
+cfg_sep codex-bot '' '~/.config/gh-codex'
+crun --check; rc=$?
+check "separate account without codex_email: MISSING" bash -c "test $rc = 1 && grep -qF 'MISSING  config key codex_email (required when codex_login differs from login) is not in $cfg' '$dir/out'"
+check "separate account without codex_email: exact fix" has "  fix: append it to $cfg: printf '%s\\n' 'codex_email=<the verified email of codex-bot>' >>$cfg   (edit the value)"
+check "separate account without codex_email: Next names step 1" bash -c "grep -q '^Next: step 1 of 6 — create the config file — append it to $cfg' '$dir/out'"
+csandbox
+cfg_sep codex-bot '2+codex-bot@users.noreply.github.com' ''
+crun --check; rc=$?
+check "separate account without codex_gh_config_dir: MISSING" bash -c "test $rc = 1 && grep -qF 'MISSING  config key codex_gh_config_dir (required when codex_login differs from login) is not in $cfg' '$dir/out'"
+check "separate account without codex_gh_config_dir: exact fix" has "  fix: append it to $cfg: printf '%s\\n' 'codex_gh_config_dir=~/.config/gh-agent-codex' >>$cfg"
+csandbox
+cfg_sep codex-bot '2+codex-bot@users.noreply.github.com' '~/.config/gh-agent'
+crun --check; rc=$?
+check "codex gh dir equal to gh_config_dir: WRONG" bash -c "test $rc = 1 && grep -qF 'WRONG  config line 10: codex_gh_config_dir=~/.config/gh-agent is the same gh config dir as gh_config_dir (line 5); one gh config dir cannot be logged in as two accounts' '$dir/out'"
+check "codex gh dir equal to gh_config_dir: exact fix" has "  fix: edit line 10 of $cfg: give codex_gh_config_dir its own path, for example ~/.config/gh-agent-codex"
+csandbox
+cfg_sep codex-bot '2+codex-bot@users.noreply.github.com' '~/.config/gh'
+crun --check
+check "codex gh dir is the operator's default: refused by the same validator" has "WRONG  config line 10: codex_gh_config_dir=~/.config/gh is the default gh config dir"
+sandbox
+cfg_sep bad_login 'nope' '~/.config/gh'
+run --check; rc=$?
+check "codex_login, codex_email and codex_gh_config_dir are validated in Claude mode too" bash -c "test $rc = 1 && grep -qF 'WRONG  config line 7: codex_login=bad_login not a GitHub login' '$dir/out' && grep -qF 'WRONG  config line 8: codex_email=nope does not look like an email address' '$dir/out' && grep -qF 'WRONG  config line 9: codex_gh_config_dir=~/.config/gh is the default gh config dir' '$dir/out'"
+
+csandbox
+cfg_sep Bot-Agent '3+other@users.noreply.github.com' '~/.config/gh-other'
+crun --check; rc=$?
+check "codex_login equal to login (any case): treated as not set, exit 0" test "$rc" = 0
+check "codex_login equal to login: an OK line says Codex shares the account" has "OK  codex_login=Bot-Agent is the same account as login: Codex shares it, and codex_email and codex_gh_config_dir are ignored"
+check "codex_login equal to login: the shared gh dir and login are used" has "OK  gh: GH_CONFIG_DIR=$ghdir is logged in as bot-agent"
+crun; rc=$?
+check "codex_login equal to login: the set map has the shared values" jx --arg d "$ghdir" '.set.GH_CONFIG_DIR == $d and .set.JARVIS_AGENT_IDENTITY == "bot-agent" and .set.GIT_AUTHOR_EMAIL == "1+bot-agent@users.noreply.github.com"' "$crec"
+csandbox
+cfg_sep '' '3+other@users.noreply.github.com' ''
+snapshot >"$dir/snap.before"
+crun; rc=$?
+snapshot >"$dir/snap.after"
+check "codex_email without codex_login: WRONG, exit 1" test "$rc" = 1
+check "codex_email without codex_login: names the key and says it is not set" has "WRONG  config line 8: codex_email is set, but codex_login is not set, so it is unclear which account Codex acts as"
+check "codex_email without codex_login: exact fix" has "  fix: set codex_login to the second account's login, or delete line 8 of $cfg"
+check "codex_email without codex_login: Next names step 1" bash -c "grep -q '^Next: step 1 of 6 — create the config file — set codex_login to the second account' '$dir/out'"
+check "codex_email without codex_login: nothing is written" cmp -s "$dir/snap.before" "$dir/snap.after"
+csandbox
+cfg_sep '' '' '~/.config/gh-codex'
+crun --check
+check "codex_gh_config_dir without codex_login: WRONG too" has "WRONG  config line 8: codex_gh_config_dir is set, but codex_login is not set, so it is unclear which account Codex acts as"
+run --check; rc=$?
+check "codex_email without codex_login: Claude mode does not care" test "$rc" = 0
+csandbox
+cfg_sep bad_login '3+other@users.noreply.github.com' ''
+crun --check
+check "invalid codex_login with codex_email: the message says invalid, not not set" has "WRONG  config line 9: codex_email is set, but codex_login is invalid, so it is unclear which account Codex acts as"
+check "invalid codex_login with codex_email: the invalid login is reported too" has "WRONG  config line 8: codex_login=bad_login not a GitHub login"
+sepsandbox
+cfg_set "$(sed 's/^codex_email=.*$/codex_email=1+BOT-agent@users.noreply.github.com/' "$cfg")"
+crun --check; rc=$?
+check "codex_email equal to email (any case): WRONG, exit 1" test "$rc" = 1
+check "codex_email equal to email: names both keys and lines" has "WRONG  config line 9: codex_email=1+BOT-agent@users.noreply.github.com is the same email as email (line 3); commits are attributed by email, so two accounts need two"
+check "codex_email equal to email: exact fix" has "  fix: edit line 9 of $cfg: set codex_email to the verified email of codex-bot"
+
+echo "== --codex: a half-applied or stale state never reads as OK"
+csandbox
+crun; crun --check; rc=$?
+check "fresh apply passes --check" test "$rc" = 0
+rm "$cg"
+crun --check; rc=$?
+check "stale: gitconfig missing with a block and a record: exit 1" test "$rc" = 1
+check "stale: gitconfig missing is MISSING, never OK" bash -c "grep -q '^MISSING  $cg is missing' '$dir/out' && ! grep -q '^OK  $cg' '$dir/out'"
+
+echo "== --codex: the policy fails closed over HTTPS"
+csandbox
+crun; rc=$?
+check "askpass: the record carries GIT_TERMINAL_PROMPT, GIT_ASKPASS and SSH_ASKPASS" jx '.set.GIT_TERMINAL_PROMPT == "0" and .set.GIT_ASKPASS == "/usr/bin/false" and .set.SSH_ASKPASS == "/usr/bin/false"' "$crec"
+check "askpass: and so does the block, in this order after GH_HOST" grep -qF 'GH_HOST = "", GIT_TERMINAL_PROMPT = "0", GIT_ASKPASS = "/usr/bin/false", SSH_ASKPASS = "/usr/bin/false" }' "$toml"
+check "askpass: tomllib reads the three back" bash -c "test \"\$($tpy -I -c 'import sys,tomllib; s=tomllib.load(open(sys.argv[1],\"rb\"))[\"shell_environment_policy\"][\"set\"]; print(s[\"GIT_TERMINAL_PROMPT\"], s[\"GIT_ASKPASS\"], s[\"SSH_ASKPASS\"])' '$toml')\" = '0 /usr/bin/false /usr/bin/false'"
+csandbox
+printf '[credential]\n\thelper = "!f() { echo username=u; echo password=p; }; f"\n' >"$home/.gitconfig"
+crun --check; rc=$?
+check "askpass: with an operator helper that would answer, the check passes because the reset comes after it" test "$rc" = 0
+check "askpass: and says asking for HTTPS credentials fails without a prompt" has "OK  git: under Codex's env asking for HTTPS credentials for github.com fails without a prompt, so Codex cannot push over HTTPS"
+# a git that answers credential fill: the check must say so (kills a check that never asks)
+csandbox
+mkdir -p "$dir/shim"; real_git=$(PATH="$orig_path" command -v git)
+cat >"$dir/shim/git" <<EOF
+#!/bin/sh
+case " \$* " in *" credential fill "*) cat >/dev/null; printf 'username=u\npassword=p\n'; exit 0 ;; esac
+exec "$real_git" "\$@"
+EOF
+chmod +x "$dir/shim/git"
+TEST_PATH="$dir/shim:$root/bin:$PATH" crun --check; rc=$?
+check "askpass: credential fill that succeeds is WRONG" bash -c "test $rc = 1 && grep -qF 'WRONG  git: under Codex'\"'\"'s env asking for HTTPS credentials for github.com succeeds' '$dir/out'"
+
+echo "== --codex: mutants that must not survive"
+# a last credential.helper that is not empty fails the check (a git that appends one)
+csandbox
+mkdir -p "$dir/shim"; real_git=$(PATH="$orig_path" command -v git)
+cat >"$dir/shim/git" <<EOF
+#!/bin/sh
+case " \$* " in *" config --get-all credential.helper "*) "$real_git" "\$@"; echo '!evil'; exit 0 ;; esac
+exec "$real_git" "\$@"
+EOF
+chmod +x "$dir/shim/git"
+TEST_PATH="$dir/shim:$root/bin:$PATH" crun --check; rc=$?
+check "last helper not empty: exit 1" test "$rc" = 1
+check "last helper not empty: WRONG naming it" has "WRONG  git: the last credential.helper under Codex's env is \"!evil\", not the empty reset, so a helper (the operator's) could answer for github.com"
+# an exported GIT_CONFIG_COUNT with a rule that would turn SSH into HTTPS must not change the result
+csandbox
+XENV="GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf GIT_CONFIG_VALUE_0=git@github.com:"
+crun --check; rc=$?
+check "exported GIT_CONFIG_COUNT with an insteadOf: the Codex check ignores it (Codex strips it)" test "$rc" = 0
+# the written files are mode 600 even when mktemp makes world-readable ones
+csandbox
+mkdir -p "$dir/shim"; real_mktemp=$(PATH="$orig_path" command -v mktemp)
+cat >"$dir/shim/mktemp" <<EOF
+#!/bin/sh
+case " \$* " in *" -d "*) exec "$real_mktemp" "\$@" ;; esac
+p=\$("$real_mktemp" "\$@") || exit 1
+chmod 644 "\$p"
+printf '%s\n' "\$p"
+EOF
+chmod +x "$dir/shim/mktemp"
+TEST_PATH="$dir/shim:$root/bin:$PATH" crun; rc=$?
+check "mktemp makes 644 files: the apply succeeds" test "$rc" = 0
+check "mktemp makes 644 files: the gitconfig is still mode 600" test "$(mode "$cg")" = 600
+check "mktemp makes 644 files: and so is the record" test "$(mode "$crec")" = 600
+
+echo "== --codex: a trusted project's own git config is read after ours"
+trusted_toml() { # path...
+  local t="$toml_orig" pth
+  for pth in "$@"; do t="$t"$'\n'"[projects.\"$pth\"]"$'\n''trust_level = "trusted"'$'\n'; done
+  put "$toml" "$t"
+}
+mkrepo() { git init -q "$1"; }
+csandbox
+mkrepo "$dir/proj"
+trusted_toml "$dir/proj"
+crun --check; rc=$?
+check "trusted project, clean repo: passes with an OK line for it" bash -c "test $rc = 0 && grep -qF 'OK  git: in the trusted project $dir/proj, both forms of each configured repository resolve to SSH, its remotes use SSH, the last credential.helper is the empty reset, and asking for HTTPS credentials fails' '$dir/out'"
+csandbox
+mkrepo "$dir/proj"; git -C "$dir/proj" config credential.helper store
+trusted_toml "$dir/proj"
+crun --check; rc=$?
+check "trusted project with its own credential.helper: exit 1" test "$rc" = 1
+check "trusted project with its own credential.helper: WRONG naming the repo and the helper" has "WRONG  git: in the trusted project $dir/proj, the last credential.helper under Codex's env is \"store\", not the empty reset: the repository's own config (or an includeIf) adds a helper after the agent identity's gitconfig"
+check "trusted project with its own credential.helper: the origin is shown" bash -c "grep -q 'file:.*config.*store' '$dir/out'"
+check "trusted project with its own credential.helper: Next names step 6" bash -c "grep -q '^Next: step 6 of 6 — apply the identity to the Codex config — remove that credential.helper' '$dir/out'"
+csandbox
+mkrepo "$dir/proj"; git -C "$dir/proj" config 'url.https://github.com/.pushInsteadOf' 'git@github.com:'
+trusted_toml "$dir/proj"
+crun --check; rc=$?
+check "trusted project with a pushInsteadOf back to HTTPS: WRONG naming repo and rule" bash -c "test $rc = 1 && grep -qF 'WRONG  git: in the trusted project $dir/proj, git@github.com:acme/app.git becomes git@github.com:acme/app.git (fetch) and https://github.com/acme/app.git (push) under Codex' '$dir/out' && grep -q 'file:.*url.https://github.com/.pushinsteadof' '$dir/out'"
+csandbox
+mkrepo "$dir/proj"
+printf '[credential]\n\thelper = cache\n' >"$dir/extra.cfg"
+git -C "$dir/proj" config include.path "$dir/extra.cfg"
+trusted_toml "$dir/proj"
+crun --check; rc=$?
+check "trusted project that includes a config with a helper: WRONG" bash -c "test $rc = 1 && grep -qF 'in the trusted project $dir/proj, the last credential.helper under Codex' '$dir/out' && grep -q 'file:.*extra.cfg.*cache' '$dir/out'"
+csandbox
+mkrepo "$dir/proj"; git -C "$dir/proj" config credential.helper store
+mkdir -p "$dir/plain"
+trusted_toml "$dir/plain"
+printf '\n[projects."%s"]\ntrust_level = "untrusted"\n' "$dir/proj" >>"$toml"
+crun --check; rc=$?
+check "an untrusted project and a trusted plain directory are not checked" test "$rc" = 0
+csandbox
+mkrepo "$dir/cwdrepo"; git -C "$dir/cwdrepo" config credential.helper store
+(cd "$dir/cwdrepo" && base_env ${DET[@]+"${DET[@]}"} bash "$apply" --codex --check </dev/null) >"$dir/out" 2>&1; rc=$?
+check "the script's own git checks do not read the repository it is run from" test "$rc" = 0
+
+echo "== --codex: a trusted project's profile with a policy"
+csandbox
+mkdir -p "$dir/proj/.codex"
+put "$dir/proj/.codex/config.toml" $'profile = "w"\n\n[profiles.w.shell_environment_policy]\ninherit = "core"\n\n[profiles.other.shell_environment_policy]\ninherit = "none"\n'
+trusted_toml "$dir/proj"
+crun --check; rc=$?
+check "trusted project profile with a policy: exit 1" test "$rc" = 1
+check "trusted project selecting a profile with a policy: WRONG, says it selects it" has "WRONG  the trusted project config $dir/proj/.codex/config.toml defines profile \"w\" with a shell_environment_policy, and selects it with profile = \"w\"; Codex would use it instead of the agent identity's in that project"
+check "trusted project profile not selected: still WRONG" has "WRONG  the trusted project config $dir/proj/.codex/config.toml defines profile \"other\" with a shell_environment_policy; Codex would use it instead of the agent identity's in that project"
+check "trusted project profile: exact fix" has "  fix: remove [profiles.w.shell_environment_policy] from $dir/proj/.codex/config.toml, or stop trusting that project in $toml"
+
+echo "== --setup --codex"
+csandbox
+snapshot >"$dir/snap.before"
+run --setup --codex; rc=$?
+snapshot >"$dir/snap.after"
+check "setup --codex without a terminal: exit 2" test "$rc" = 2
+check "setup --codex without a terminal: clear message with the command" has "--setup is interactive and needs a terminal, but stdin is not one. Run it yourself: bash $apply --setup --codex"
+check "setup --codex without a terminal: nothing created" cmp -s "$dir/snap.before" "$dir/snap.after"
+
+csetup_run() { # input file
+  (cd "$dir" && base_env ${DET[@]+"${DET[@]}"} bash -c 'source "$1"; trap cleanup EXIT; target=codex; init; setup_steps' _ "$apply" <"$1") >"$dir/out" 2>&1
+}
+sandbox
+put "$toml" "$toml_orig"
+rm "$key.pub" 2>/dev/null; put "$key.pub" "ssh-ed25519 AAAAFAKE bot-agent"
+cp "$cfg" "$dir/cfg.before"; cp "$toml" "$dir/toml.before"
+dkey="$home/.ssh/id_ed25519_agent_codex_$host"
+put "$stub/ssh.id_ed25519_agent_codex_$host.out" "git@github.com: Permission denied (publickey)."; put "$stub/ssh.id_ed25519_agent_codex_$host.rc" 255
+printf 'y\ny\n\n\n\n' >"$dir/input"
+csetup_run "$dir/input"; rc=$?
+check "setup --codex: offers the two lines and appends them" bash -c "grep -q 'has no codex_ssh_key. These lines would be appended' '$dir/out' && tail -n 2 '$cfg' | head -n 1 | grep -qx 'codex_ssh_key=~/.ssh/id_ed25519_agent_codex_$host' && tail -n 1 '$cfg' | grep -qx 'codex_author_name=Codex'"
+check "setup --codex: every existing line of the config is byte-identical" bash -c "prefix_ok '$cfg' '$dir/cfg.before'"
+check "setup --codex: the key is generated for Codex with its own comment" bash -c "grep -q \"^ssh-keygen -t ed25519 -N  -C bot-agent@$host-codex -f $dkey\$\" '$stub/calls.log' && test -f '$dkey' && test -f '$dkey.pub'"
+check "setup --codex: the Claude key is not touched" bash -c "grep -q 'FAKE PRIVATE KEY' '$key' && ! grep -q -- '-f $key' '$stub/calls.log'"
+check "setup --codex: shows the .pub and where to add it" bash -c "grep -q 'AAAAFAKEKEY' '$dir/out' && grep -q 'Sign in to GitHub as bot-agent' '$dir/out'"
+check "setup --codex: the shared gh login is said to be done, not asked again" has "$ghdir is already logged in as bot-agent (the login is shared with Claude Code): nothing to do."
+check "setup --codex: ends with the full check and a Next line" bash -c "grep -q '== The full check' '$dir/out' && grep -q '^Next: ' '$dir/out'"
+check "setup --codex: never writes config.toml or the record" bash -c "cmp -s '$toml' '$dir/toml.before' && test ! -e '$crec' && test ! -e '$cg'"
+check "setup --codex: the full check was the Codex one" has "OK  the policy this script writes blanks GH_TOKEN"
+# rerun: nothing more to append, nothing to generate
+printf '\n\n\n' >"$dir/input"
+cp "$cfg" "$dir/cfg.mid"
+csetup_run "$dir/input"
+check "setup --codex rerun: the existing codex_ssh_key is left as it is" bash -c "grep -q 'already has codex_ssh_key (line 7): left as it is' '$dir/out' && cmp -s '$cfg' '$dir/cfg.mid' && grep -q 'the key file already exists: left untouched, never overwritten' '$dir/out'"
+
+sandbox
+printf 'n\n' >"$dir/input"
+cp "$cfg" "$dir/cfg.before"
+csetup_run "$dir/input"
+check "setup --codex: declining the append changes nothing" bash -c "grep -q 'skipped: nothing was appended' '$dir/out' && cmp -s '$cfg' '$dir/cfg.before'"
+sandbox
+rm "$cfg"
+: >"$dir/input"
+csetup_run "$dir/input"; rc=$?
+check "setup --codex: no config file yet: tells the user to run --setup first, exit 1" bash -c "test $rc = 1 && grep -q 'bash $apply --setup' '$dir/out' && test ! -e '$cfg'"
+sandbox
+printf 'login=bot-agent\nemail=1+bot-agent@users.noreply.github.com\nssh_key=~/.ssh/agent_key\ngh_config_dir=~/.config/gh-agent\nrepos=acme/app' >"$cfg"; chmod 600 "$cfg"
+cp "$cfg" "$dir/cfg.before"
+printf 'y\nn\n\n\n\n' >"$dir/input"
+csetup_run "$dir/input"
+check "setup --codex: a config without a final newline gets one before the appended lines, nothing else changed" bash -c "prefix_ok '$cfg' '$dir/cfg.before' && sed -n '5p' '$cfg' | grep -qx 'repos=acme/app' && sed -n '6p' '$cfg' | grep -q '^codex_ssh_key='"
+sandbox
+cp "$cfg" "$dir/cfg.before"
+(cd "$dir" && base_env ${DET[@]+"${DET[@]}"} bash -c 'source "$1"; trap cleanup EXIT; confirm() { printf "colour=1\n" >>"$JARVIS_AGENT_IDENTITY_FILE"; return 0; }; target=codex; init; setup_steps' _ "$apply" </dev/null) >"$dir/out" 2>&1; rc=$?
+check "setup --codex: a config that changed since it was read is not appended to" bash -c "test $rc = 2 && grep -q 'changed since it was read; nothing was written' '$dir/out' && ! grep -q codex_ssh_key '$cfg' && grep -q colour=1 '$cfg'"
+sandbox
+cfg_append 'codex_ssh_key=~/.ssh/agent_key'
+printf '\n\n\n' >"$dir/input"
+csetup_run "$dir/input"; rc=$?
+check "setup --codex: a codex_ssh_key equal to ssh_key goes to the full check, which says why" bash -c "test $rc = 1 && grep -q 'is the same key as ssh_key' '$dir/out' && grep -q '^Next: step 1 of 6' '$dir/out'"
+if command -v python3 >/dev/null; then
+  csandbox
+  (cd "$dir" && base_env python3 -I - "$apply" --setup --codex <<'PY'
+import os, pty, sys
+import signal
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp("bash", ["bash"] + sys.argv[1:])
+signal.signal(signal.SIGALRM, lambda *a: (os.kill(pid, signal.SIGKILL), os._exit(124)))
+signal.alarm(300)
+out = b""
+while True:
+    try:
+        d = os.read(fd, 4096)
+    except OSError:
+        break
+    if not d:
+        break
+    out += d
+_, st = os.waitpid(pid, 0)
+sys.stdout.buffer.write(out)
+sys.exit(os.WEXITSTATUS(st))
+PY
+  ) >"$dir/out" 2>&1; rc=$?
+  check "setup --codex on a pseudo-terminal: runs end to end, exits 0 when all is in place" bash -c "test $rc = 0 && grep -q 'Step 5 of 5' '$dir/out' && grep -q 'Next: run without --check to apply' '$dir/out'"
+fi
+
+echo "== --codex: more of a trusted project's own git config"
+csandbox
+mkrepo "$dir/proj"; git -C "$dir/proj" config 'credential.https://github.com.helper' '!f() { echo username=u; echo password=p; }; f'
+trusted_toml "$dir/proj"
+crun --check; rc=$?
+check "URL-specific helper in a trusted project: exit 1" test "$rc" = 1
+check "URL-specific helper: git credential fill there succeeds, which is WRONG" has "WRONG  git: in the trusted project $dir/proj, asking for HTTPS credentials for github.com succeeds under Codex's env, so a push over HTTPS would use someone's account (a credential.<url>.helper in the repository's config, for one)"
+check "URL-specific helper: the origin is shown" bash -c "grep -q 'file:.*credential.https://github.com.helper' '$dir/out'"
+check "URL-specific helper: the plain helper list alone would have missed it" bash -c "! grep -q 'the last credential.helper under Codex.s env is \"[^\"]' '$dir/out'"
+csandbox
+mkrepo "$dir/proj"; git -C "$dir/proj" remote add origin https://github.com/acme/app.git
+git -C "$dir/proj" remote add elsewhere ssh://other.example/x.git
+trusted_toml "$dir/proj"
+crun --check; rc=$?
+check "trusted project whose github remote resolves to SSH, and a non-github remote: passes" test "$rc" = 0
+git -C "$dir/proj" config remote.origin.pushurl 'https://ShenYo@github.com/acme/app.git'
+crun --check; rc=$?
+check "trusted project remote with an HTTPS pushurl: exit 1" test "$rc" = 1
+check "trusted project remote with an HTTPS pushurl: WRONG naming remote, fetch and push URL" has "WRONG  git: in the trusted project $dir/proj, the remote origin fetches from git@github.com:acme/app.git and pushes to https://ShenYo@github.com/acme/app.git under Codex's env, but a github.com remote must use git@github.com: for both"
+check "trusted project remote with an HTTPS pushurl: the origin of the rule is shown" bash -c "grep -q 'file:.*remote.origin.pushurl' '$dir/out'"
+csandbox
+mkrepo "$dir/proj"; git -C "$dir/proj" config 'url.https://github.com/.pushInsteadOf' 'https://github.com/'
+trusted_toml "$dir/proj"
+crun --check; rc=$?
+check "project pushInsteadOf beside the SSH insteadOf: the push rule wins, so push stays HTTPS (WRONG)" bash -c "test $rc = 1 && grep -qF 'WRONG  git: in the trusted project $dir/proj, https://github.com/acme/app.git becomes git@github.com:acme/app.git (fetch) and https://github.com/acme/app.git (push) under Codex' '$dir/out'"
+csandbox
+mkrepo "$dir/proj"
+git -C "$dir/proj" config 'url.ssh://other.example/acme/.insteadOf' 'https://github.com/acme/'
+git -C "$dir/proj" config 'url.git@github.com:acme/.pushInsteadOf' 'https://github.com/acme/'
+trusted_toml "$dir/proj"
+crun --check; rc=$?
+check "fetch wrong but push right: still WRONG, showing both" bash -c "test $rc = 1 && grep -qF 'WRONG  git: in the trusted project $dir/proj, https://github.com/acme/app.git becomes ssh://other.example/acme/app.git (fetch) and git@github.com:acme/app.git (push) under Codex' '$dir/out'"
+csandbox
+mkrepo "$dir/proj"; git -C "$dir/proj" config 'url.ssh://h/a b/.pushInsteadOf' 'https://github.com/'
+trusted_toml "$dir/proj"
+crun --check; rc=$?
+check "a url rule whose base has a space in it is read whole" bash -c "test $rc = 1 && grep -qF 'and ssh://h/a b/acme/app.git (push) under Codex' '$dir/out'"
+
+echo "== --codex: a plain run that cannot write says so, not OK"
+csandbox
+crun; rm "$cg"
+put "$stub/ssh.codex_key.out" "git@github.com: Permission denied (publickey)."; put "$stub/ssh.codex_key.rc" 255
+crun; rc=$?
+check "plain run, gitconfig missing and another check failing: exit 1" test "$rc" = 1
+check "plain run, gitconfig missing and another check failing: MISSING, and nothing is written" bash -c "grep -q '^MISSING  $cg is missing although the record exists, and this run writes nothing' '$dir/out' && test ! -e '$cg'"
+check "plain run, gitconfig missing and another check failing: no OK line promising a write" bash -c "! grep -q 'a real run writes it again' '$dir/out'"
+csandbox
+crun; put "$toml" "$toml_orig"
+put "$stub/ssh.codex_key.out" "git@github.com: Permission denied (publickey)."; put "$stub/ssh.codex_key.rc" 255
+crun; rc=$?
+check "plain run, block gone and another check failing: MISSING, no OK line promising a write" bash -c "test $rc = 1 && grep -q '^MISSING  the record at $crec lists a block that is no longer in $toml, and this run writes nothing' '$dir/out' && ! grep -q 'a real run appends it again' '$dir/out'"
+csandbox
+crun; rm "$cg"
+crun; rc=$?
+check "plain run, gitconfig missing and everything else fine: writes it, and said so with OK" bash -c "test $rc = 0 && test -f '$cg'"
+
+echo "== --codex: the fix text names codex_login in a separate account"
+sepsandbox
+put "$stub/gh-operator/user.out" "codex-bot"
+crun --check
+check "separate account, operator's own gh login: the fix says codex_login=" has "  fix: create a separate machine account on GitHub and set codex_login= (and its key and gh login) to that account in $cfg"
+sepsandbox
+put "$stub/ssh.default.out" "Hi codex-bot! You've successfully authenticated, but GitHub does not provide shell access."
+crun --check
+check "separate account, operator's own SSH identity: the fix says codex_login=" bash -c "grep -qF '  fix: create a separate machine account on GitHub and set codex_login= (and its key and gh login) to that account in $cfg; if codex-bot is in fact' '$dir/out'"
+sepsandbox
+put "$cs/repo.acme__app.out" '{"owner":{"login":"codex-bot","type":"User"},"permissions":{"admin":false,"push":true}}'
+crun --check
+check "separate account, codex-bot owns the repository: the fix says codex_login=" has "  fix: use a separate machine account as codex_login= in $cfg; codex-bot must not be the owner of acme/app"
+
+echo "== --setup --codex: its final check is a check, not an apply"
+csandbox
+crun; rm "$cg"
+: >"$dir/input"
+csetup_run "$dir/input"
+check "setup --codex: a missing gitconfig is MISSING in its full check" has "MISSING  $cg is missing although the record exists"
 
 echo "== no account is named in the script"
 check "the script names no account of its own" bash -c "! grep -n -i 'shenyo' '$repo/scripts/apply-agent-identity.sh' | grep -q ."

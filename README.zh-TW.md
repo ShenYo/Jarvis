@@ -570,7 +570,7 @@ Guard 為此有一個開關，目前是關的。環境裡有 `JARVIS_REQUIRE_AGE
 `diff`、`checks`、`search`、`browse --no-browser`、`auth status`、`--help`）之外的每一個 `gh`
 子指令，以及不是 `GET` 也不是 GraphQL query 的 `gh api` 請求。沒有任何東西會設定這個開關；
 由 owner 在這台機器通過 `--check` 之後，把它加進 `~/.claude/settings.json` 的 `env` 來打開。
-它在 Codex 也生效，但腳本只寫 Claude Code 的環境，所以 Codex 需要在自己的環境裡放上這個標記。
+它在 Codex 也生效，但在這個模式下腳本只寫 Claude Code 的環境；見下面的 Codex 部分。
 
 Identity 套用之後（標記已設定），不論開關是否打開，guard 還會拒絕不會以 agent 身分執行的 GitHub
 寫入：hook 自己的環境帶有 `GH_TOKEN`、`GITHUB_TOKEN`、`GH_ENTERPRISE_TOKEN`、`GH_HOST` 或
@@ -593,6 +593,65 @@ operator 自己的 SSH key 所驗證的帳號；它用真正的 `git` 確認 HTT
 以操作者身分登入的瀏覽器裡完成的。請使用獨立的機器帳號，並在無痕視窗以它登入。另外，agent 的
 key 不要放在預設路徑（`~/.ssh/id_ed25519` 之類），也不要載入 `ssh-agent`：否則一般的 `ssh` 也會
 送出它，操作者檢查就會把 agent 自己的 login 誤認為操作者的。
+
+**Codex。** `--codex` 讓 Codex 擁有同樣的 identity：同一個帳號、自己專屬的 SSH key（這把 key
+可以單獨撤銷）、作者名稱 `Codex`。機制不一樣，因為 Codex 會從它執行的指令裡移除
+`GIT_CONFIG_COUNT`、`GIT_CONFIG_KEY_n`、`GIT_CONFIG_VALUE_n` 與 `GIT_CONFIG_PARAMETERS`，所以上面
+那組強制走 SSH 的 git 設定無法這樣帶過去。真正會到達每個指令的是 `~/.codex/config.toml`（有設
+`$CODEX_HOME` 就用它）裡的 `[shell_environment_policy] set`，而它帶著 `GIT_CONFIG_GLOBAL`：
+指向我們自己的 gitconfig `agent-identity.gitconfig`，它 include 你自己的全域設定、在其後把
+`credential.helper` 清空，並把 `https://github.com/` 改寫成 SSH。同一個 `set` 帶著與 Claude Code 環境相同的作者與 committer 名稱和 email、`GIT_SSH_COMMAND`、
+`GH_CONFIG_DIR` 與 `JARVIS_AGENT_IDENTITY`，還會把 `GH_TOKEN`、
+`GITHUB_TOKEN`、`GH_ENTERPRISE_TOKEN`、`GITHUB_ENTERPRISE_TOKEN` 與 `GH_HOST` 清成空字串，因為
+Codex 會把整個環境傳下去。真正的 `--codex` 執行在每項檢查都通過之後，寫入那份 gitconfig（mode 600）、
+在 `config.toml` 後面追加一個有分界標記的區塊（檔案其餘部分逐 byte 不變，先前的副本是
+`config.toml.agent-identity-backup`），並把兩者記在旁邊的 `agent-identity.applied.json`。不是這支
+腳本寫的 `shell_environment_policy`，不論在 `config.toml`、某個 profile，或你信任的專案的
+`.codex/config.toml` 裡，都會被報告而不被覆蓋。讀 `config.toml` 需要 `PATH` 上有帶 `tomllib` 的
+`python3`（Python 3.11+）。`--unapply --codex` 只有在區塊與紀錄逐 byte 相同時才移除它。Codex 的 guard
+看不到那份 policy（Codex 的 hook 拿到的是 Codex 自己的環境，不是它的指令的環境），所以它以紀錄檔存在
+作為「identity 已套用」，然後拒絕與上面相同的 override；它不會拿自己的環境去比對任何東西。
+`JARVIS_REQUIRE_AGENT_IDENTITY` 仍然沒有在任何地方被設定；Codex 如何收到它留給之後的變更。
+
+`--check --codex` 也會把只做到一半的狀態回報為 `MISSING`：有紀錄卻沒有 `agent-identity.gitconfig`
+（policy 的 `GIT_CONFIG_GLOBAL` 會指向不存在的檔案，git 會退回用你自己的憑證走 HTTPS），或紀錄裡的區塊
+已經不在 `config.toml` 裡。修法是直接跑 `--codex`。Codex 的 guard 同樣只在區塊在 `config.toml` 裡恰好出現
+一次、且 gitconfig 仍是紀錄的 sha256 時才信任紀錄，否則在 `--check --codex` 恢復乾淨之前拒絕 GitHub 寫入。
+同一個 `set` 還帶著 `GIT_TERMINAL_PROMPT` 設為 `0`，以及 `GIT_ASKPASS` 與 `SSH_ASKPASS` 設為
+`/usr/bin/false`，所以漏過去的 HTTPS push 會失敗，而不是跳出密碼詢問。
+
+Codex 會移除 `GIT_CONFIG_COUNT`，所以 repository 自己的 `.git/config` 或 `includeIf` 是在我們的 gitconfig
+之後才被讀入，可以加上 credential helper，或把 `pushInsteadOf` 改回 HTTPS。`--check --codex` 會在
+`config.toml` 信任、且是 Git work tree 的每個專案裡，執行 URL、最後一個 helper、remote 與
+`git credential fill` 檢查，並回報規則與它來自的檔案。其他的 clone 不會被檢查。要手動檢查其中一個，
+在它裡面執行
+`printf 'protocol=https\nhost=github.com\n\n' | env -u GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL=~/.codex/agent-identity.gitconfig GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false SSH_ASKPASS=/usr/bin/false git credential fill`：
+它必須失敗（針對特定 URL 的 `credential.<url>.helper` 只會在這裡現形，不會出現在 helper 清單裡），
+而在同樣的 `env` 下，對每個 GitHub remote 執行 `git remote get-url` 與 `git remote get-url --push`
+都必須印出 `git@github.com:…`。同樣沒有檢查的還有：專案根目錄之下巢狀的 `.codex/` 目錄，以及受管理的設定
+（`/etc/codex/managed_config.toml` 或 MDM profile），這兩者是否在這裡有影響都沒有驗證過；以及命令列的
+`codex -c` 或 `--profile`，那是你自己的 override。
+
+另有兩個只給 `--codex` 用的設定 key：`codex_ssh_key`，必填，Codex 專屬的私鑰，不可以和 `ssh_key`
+相同；`codex_author_name`，選填，預設 `Codex`。Claude Code 會忽略它們。在新機器上：
+
+```sh
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --setup --codex   # 詢問後把 key 附加到設定檔，並產生 Codex 的 key
+# 把印出的 .pub 加到 GitHub 上的 machine account
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --codex           # 寫入三個檔案
+# 然後重新啟動 Codex：執行中的 session 仍用舊的環境
+```
+
+尚未驗證：Codex 在獲得核准後於 sandbox 之外執行的指令，以及你在 Codex TUI 裡用 `!` 自己輸入的指令。
+policy 是否會到達它們還沒測過；在查清楚之前，把它們當成是以你自己的 identity 在執行。
+
+Codex 也可以改用另一個獨立的 GitHub 帳號，而不是共用這一個。請手動把 `codex_login`、`codex_email`
+與 `codex_gh_config_dir` 加進設定檔（`--setup --codex` 絕不會加它們），在它自己的目錄裡把 `gh`
+登入成該帳號，並邀請它進每個 repository。`codex_login` 與 `login` 不同時，另外兩個是必填，且
+`gh` 目錄必須和 `gh_config_dir` 不同；之後每一項 `--codex` 檢查與寫入的內容都用那個帳號。
+`codex_login` 與 `login` 相同，等於沒設。沒有 `codex_login` 卻設了 `codex_email` 或
+`codex_gh_config_dir` 是錯誤，而 `codex_email` 必須和 `email` 不同。
 
 ## Bridge 狀態與限制
 

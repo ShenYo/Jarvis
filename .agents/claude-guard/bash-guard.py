@@ -25,6 +25,7 @@ status 0. Without the argument nothing changes.
 
 Compatible with Python 3.9, the version macOS ships at /usr/bin/python3.
 """
+import hashlib
 import json
 import os
 import re
@@ -64,12 +65,11 @@ CODEX_CHECKPOINT = (
 
 def identity_missing():
     """True when this machine requires an agent identity for GitHub writes
-    (JARVIS_REQUIRE_AGENT_IDENTITY=1) and the environment carries none
-    (JARVIS_AGENT_IDENTITY, which scripts/apply-agent-identity.sh writes into
-    the agent's environment after every one of its checks passes). The switch
-    is off unless something sets it, and then nothing here changes."""
+    (JARVIS_REQUIRE_AGENT_IDENTITY=1) and none is applied (see
+    identity_applied). The switch is off unless something sets it, and then
+    nothing here changes."""
     return (os.environ.get("JARVIS_REQUIRE_AGENT_IDENTITY") == "1"
-            and not os.environ.get("JARVIS_AGENT_IDENTITY", "").strip())
+            and not identity_applied())
 
 
 NO_IDENTITY = (
@@ -82,10 +82,23 @@ NO_IDENTITY = (
 )
 
 
-def identity_active():
-    """True when the agent identity is applied here: the marker
-    JARVIS_AGENT_IDENTITY is set. Then a GitHub write must really act as that
-    identity, whether or not the switch above is on."""
+def codex_record_path():
+    home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+    return os.path.join(home, "agent-identity.applied.json")
+
+
+def identity_applied():
+    """True when the agent identity is applied here. Under Claude Code that is
+    the marker JARVIS_AGENT_IDENTITY, which scripts/apply-agent-identity.sh
+    writes into the agent's environment after every one of its checks passes.
+    A Codex hook does not see the environment Codex gives its commands
+    (shell_environment_policy.set), so under Codex it is the record that
+    `apply-agent-identity.sh --codex` leaves in CODEX_HOME. The marker still
+    counts there when it happens to be set and no record exists, as before.
+    Then a GitHub write must really act as that identity, whether or not the
+    switch above is on."""
+    if CODEX and os.path.lexists(codex_record_path()):
+        return True
     return bool(os.environ.get("JARVIS_AGENT_IDENTITY", "").strip())
 
 
@@ -149,6 +162,59 @@ def applied_env_problems():
     return []
 
 
+def codex_record_problems():
+    """Reasons the Codex record cannot be trusted: it is unreadable, or what it
+    lists is not there any more (its block is not in the config.toml it names
+    exactly once, or the gitconfig is missing or no longer has the recorded
+    sha256). A byte search and a hash only: this runs under the 3.9 macOS
+    ships, which has no TOML parser. Empty when it all matches."""
+    path = codex_record_path()
+    check = "run `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex`"
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rec = json.load(fh)
+        if not isinstance(rec.get("set"), dict):
+            raise ValueError("no set object")
+        block, config, gitconfig, sha = (rec[k] for k in ("block", "config", "gitconfig", "gitconfig_sha256"))
+        if not all(isinstance(v, str) and v for v in (block, config, gitconfig, sha)):
+            raise ValueError("a field is not a string")
+    except Exception:
+        return ["the Codex agent identity record %s is unreadable, so the identity "
+                "cannot be verified; %s" % (path, check)]
+    try:
+        with open(config, "rb") as fh:
+            data = fh.read()
+        wanted = block.encode("utf-8")
+        found = data.count(wanted)
+    except OSError:
+        return ["the Codex config %s named by the agent identity record cannot be read, so the "
+                "identity cannot be verified; %s" % (config, check)]
+    if found != 1:
+        return ["the agent identity block the record lists is in %s %d times, not once, so "
+                "Codex does not run with the identity; %s" % (config, found, check)]
+    # After the block's end marker the first line that is not blank and not a comment must open a
+    # table, else it is a key that belongs to our shell_environment_policy table.
+    for line in data[data.index(wanted) + len(wanted):].split(b"\n"):
+        text = line.strip()
+        if not text or text.startswith(b"#"):
+            continue
+        if not text.startswith(b"["):
+            return ["a key follows the agent identity block's end marker in %s, so it belongs to "
+                    "the policy table and Codex does not run with the identity as recorded; %s"
+                    % (config, check)]
+        break
+    try:
+        with open(gitconfig, "rb") as fh:
+            actual = hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return ["the gitconfig %s the record lists is missing, so Codex's git would fall back to "
+                "the operator's credentials; %s" % (gitconfig, check)]
+    if actual != sha:
+        return ["the gitconfig %s no longer has the sha256 the record lists, so it was changed; %s"
+                % (gitconfig, check)]
+    return []
+
+
 class Result:
     def __init__(self):
         self.deny = []
@@ -174,13 +240,18 @@ class Result:
             return
         if identity_missing():
             self.unset = list(self.writes)
-        elif identity_active():
-            bad = [v for v in HIJACK_ENV if os.environ.get(v)]
-            if bad:
-                self.hijack.append(
-                    "this session's environment sets %s, which would override the "
-                    "agent's identity" % ", ".join(bad))
-            self.hijack.extend(applied_env_problems())
+        elif identity_applied():
+            if CODEX and os.path.lexists(codex_record_path()):
+                # The hook's environment is Codex's own, not the one its
+                # commands get, so there is nothing in it to compare.
+                self.hijack.extend(codex_record_problems())
+            else:
+                bad = [v for v in HIJACK_ENV if os.environ.get(v)]
+                if bad:
+                    self.hijack.append(
+                        "this session's environment sets %s, which would override the "
+                        "agent's identity" % ", ".join(bad))
+                self.hijack.extend(applied_env_problems())
             if self.overrides:
                 self.hijack.append("the command overrides the agent's identity (%s)"
                                    % "; ".join(self.overrides))

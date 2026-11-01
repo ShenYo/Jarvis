@@ -12,6 +12,12 @@
 # tests/claude-guard.sh for why.
 set -uo pipefail
 
+# Hermetic: this suite may run inside an agent session whose environment carries the applied
+# identity; none of it may reach the hook. Every case sets what it needs.
+for v in $(compgen -e | grep -E '^(GIT_CONFIG_|GIT_AUTHOR_|GIT_COMMITTER_)'); do unset "$v"; done
+unset GIT_SSH_COMMAND GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GH_CONFIG_DIR GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN \
+  GITHUB_ENTERPRISE_TOKEN GH_HOST JARVIS_AGENT_IDENTITY JARVIS_REQUIRE_AGENT_IDENTITY CODEX_HOME CLAUDE_CONFIG_DIR XDG_CONFIG_HOME
+
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 apply="$repo/scripts/apply-codex-guard.sh"
 src="$repo/.agents/claude-guard/bash-guard.py"
@@ -328,6 +334,78 @@ probe none 'ls -la' "$feat"
 probe none 'git push origin feat/x' "$feat"
 probe none 'gh pr view 12 --json state' "$feat"
 probe none 'echo "git push --force is refused"' "$feat"
+
+codex_fixture() { # dir: a CODEX_HOME whose record, config.toml block and gitconfig all agree
+  local d=$1 blk sha
+  mkdir -p "$d"
+  blk=$'# >>> jarvis agent-identity: test\n[shell_environment_policy]\nset = { A = "1" }\n# <<< jarvis agent-identity\n'
+  printf 'model = "x"\n\n%s' "$blk" >"$d/config.toml"
+  printf '[credential]\n\thelper =\n' >"$d/agent-identity.gitconfig"
+  sha=$("${py:-/usr/bin/python3}" -I -c 'import sys,hashlib; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$d/agent-identity.gitconfig")
+  jq -n --arg block "$blk" --arg cfg "$d/config.toml" --arg gc "$d/agent-identity.gitconfig" --arg sha "$sha" \
+    '{version: 1, set: {GH_CONFIG_DIR: "/agent/gh", JARVIS_AGENT_IDENTITY: "some-agent", GH_TOKEN: ""}, gitconfig: $gc, gitconfig_sha256: $sha, block: $block, prefix: "\n", config: $cfg}' >"$d/agent-identity.applied.json"
+  CODEX_BLOCK=$blk
+}
+echo "== the Codex agent identity: applied when the record is in CODEX_HOME, which the hook can see (its policy env it cannot)"
+# A second CODEX_HOME holding the same hook and a record; the earlier probes ran without one.
+idhome="$root/id-home"; mkdir -p "$idhome/hooks"; # (IDENTITY_GUARD, test-only, points these cases at another copy of the guard, e.g. the old one, to show they fail)
+cp "${IDENTITY_GUARD:-$hookhome/hooks/jarvis-guard.py}" "$idhome/hooks/jarvis-guard.py"
+codex_fixture "$idhome"
+hookhome_orig=$hookhome; saved_home=$hookhome; hookhome=$idhome
+id_pat='Codex guard: *writes to GitHub*'
+probe deny 'GH_TOKEN=x gh pr create --title t' "$feat" "$id_pat"
+probe deny 'GIT_CONFIG_GLOBAL=/x git push origin feat/x' "$feat" "$id_pat"
+probe deny 'GIT_CONFIG_SYSTEM=/x git push origin feat/x' "$feat" "$id_pat"
+probe none 'git push origin feat/x' "$feat"
+probe none 'gh pr create --title t' "$feat"
+probe none 'gh pr view 12 --json state' "$feat"
+GH_TOKEN=x probe none 'gh pr create --title t' "$feat"
+export JARVIS_REQUIRE_AGENT_IDENTITY=1
+probe none 'gh pr create --title t' "$feat"
+unset JARVIS_REQUIRE_AGENT_IDENTITY
+echo '{ not json' >"$idhome/agent-identity.applied.json"
+probe deny 'gh pr create --title t' "$feat" 'Codex guard: *record*is unreadable*apply-agent-identity.sh --check --codex*'
+probe deny 'git push origin feat/x' "$feat" "$id_pat"
+probe none 'gh pr view 12 --json state' "$feat"
+rm -f "$idhome/agent-identity.applied.json"
+probe none 'GH_TOKEN=x gh pr create --title t' "$feat"
+probe none 'git push origin feat/x' "$feat"
+export JARVIS_REQUIRE_AGENT_IDENTITY=1
+probe deny 'gh pr create --title t' "$feat" 'Codex guard: *need this machine*'
+unset JARVIS_REQUIRE_AGENT_IDENTITY
+hookhome=$saved_home
+
+echo "== the record alone is not applied: what it lists must still be there"
+stale_case() { # name, mutation (run in the fixture dir)
+  local d="$root/cx-$1"
+  mkdir -p "$d/hooks"; cp "${IDENTITY_GUARD:-$saved_home/hooks/jarvis-guard.py}" "$d/hooks/jarvis-guard.py"
+  codex_fixture "$d"
+  ( cd "$d" && eval "$2" )
+  hookhome=$d
+  probe deny 'gh pr create --title t' "$feat" 'Codex guard: *--check --codex*'
+  probe deny 'git push origin feat/x' "$feat" 'Codex guard: *--check --codex*'
+  probe none 'gh pr view 12 --json state' "$feat"
+}
+saved_home=$hookhome_orig
+stale_case "block-gone" 'printf "model = \"x\"\n" >config.toml'
+stale_case "block-edited" 'sed "s/A = \"1\"/A = \"2\"/" config.toml >c.new && mv c.new config.toml'
+stale_case "block-twice" 'printf "%s" "$CODEX_BLOCK" >>config.toml'
+stale_case "key-after-marker" 'printf "extra = 1\n" >>config.toml'
+stale_case "comment-then-key-after-marker" 'printf "\n# note\nextra = 1\n" >>config.toml'
+stale_case "gitconfig-gone" 'rm agent-identity.gitconfig'
+stale_case "gitconfig-edited" 'printf "# x\n" >>agent-identity.gitconfig'
+stale_case "config-gone" 'rm config.toml'
+hookhome=$hookhome_orig
+# the same files all agreeing: applied, and nothing is refused
+mkdir -p "$root/cx-ok/hooks"; cp "${IDENTITY_GUARD:-$hookhome_orig/hooks/jarvis-guard.py}" "$root/cx-ok/hooks/jarvis-guard.py"
+codex_fixture "$root/cx-ok"; hookhome="$root/cx-ok"
+probe none 'gh pr create --title t' "$feat"
+probe deny 'GH_TOKEN=x gh pr create --title t' "$feat" 'Codex guard: *writes to GitHub*'
+# a blank line, a comment and then a table after the block is fine
+mkdir -p "$root/cx-table/hooks"; cp "${IDENTITY_GUARD:-$hookhome_orig/hooks/jarvis-guard.py}" "$root/cx-table/hooks/jarvis-guard.py"
+codex_fixture "$root/cx-table"; printf '\n# note\n[other]\nextra = 1\n' >>"$root/cx-table/config.toml"; hookhome="$root/cx-table"
+probe none 'gh pr create --title t' "$feat"
+hookhome=$hookhome_orig
 
 echo "== the guard cannot decide: deny, exit 0"
 raw "non-JSON input" deny 'Codex guard: *not JSON*' 'this is not json'

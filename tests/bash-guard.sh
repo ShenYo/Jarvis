@@ -10,6 +10,12 @@
 # Sandboxes are left in place; see tests/claude-guard.sh for why.
 set -uo pipefail
 
+# Hermetic: this suite may run inside an agent session whose environment carries the applied
+# identity; none of it may reach the hook. Every case sets what it needs.
+for v in $(compgen -e | grep -E '^(GIT_CONFIG_|GIT_AUTHOR_|GIT_COMMITTER_)'); do unset "$v"; done
+unset GIT_SSH_COMMAND GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GH_CONFIG_DIR GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN \
+  GITHUB_ENTERPRISE_TOKEN GH_HOST JARVIS_AGENT_IDENTITY JARVIS_REQUIRE_AGENT_IDENTITY CODEX_HOME CLAUDE_CONFIG_DIR XDG_CONFIG_HOME
+
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 hook="${BASH_GUARD:-$repo/.agents/claude-guard/bash-guard.py}"
 py=$(command -v /usr/bin/python3 || command -v python3)
@@ -552,6 +558,113 @@ else
   echo "FAIL a missing record is explained and points at --check: $reason"; fails=$((fails + 1))
 fi
 drop_identity
+
+codex_fixture() { # dir: a CODEX_HOME whose record, config.toml block and gitconfig all agree
+  local d=$1 blk sha
+  mkdir -p "$d"
+  blk=$'# >>> jarvis agent-identity: test\n[shell_environment_policy]\nset = { A = "1" }\n# <<< jarvis agent-identity\n'
+  printf 'model = "x"\n\n%s' "$blk" >"$d/config.toml"
+  printf '[credential]\n\thelper =\n' >"$d/agent-identity.gitconfig"
+  sha=$("$py" -I -c 'import sys,hashlib; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$d/agent-identity.gitconfig")
+  jq -n --arg block "$blk" --arg cfg "$d/config.toml" --arg gc "$d/agent-identity.gitconfig" --arg sha "$sha" \
+    '{version: 1, set: {GH_CONFIG_DIR: "/agent/gh", JARVIS_AGENT_IDENTITY: "some-agent", GH_TOKEN: ""}, gitconfig: $gc, gitconfig_sha256: $sha, block: $block, prefix: "\n", config: $cfg}' >"$d/agent-identity.applied.json"
+  CODEX_BLOCK=$blk
+}
+echo "== Codex: the identity is applied when the record is in CODEX_HOME (a Codex hook cannot see the policy's env)"
+hook_args="--codex"
+codex_home="$root/codex-home"; mkdir -p "$codex_home"
+codex_fixture "$codex_home"
+export CODEX_HOME="$codex_home"
+for sw in off on; do
+  [ "$sw" = on ] && export JARVIS_REQUIRE_AGENT_IDENTITY=1
+  probe deny 'GH_TOKEN=x gh pr create --title t'
+  probe deny 'GITHUB_TOKEN=x gh pr create --title t'
+  probe deny 'GH_HOST=h.example gh pr create --title t'
+  probe deny 'GH_CONFIG_DIR=/x gh pr create --title t'
+  probe deny 'GIT_CONFIG_GLOBAL=/x git push origin feat/x'
+  probe deny 'GIT_CONFIG_SYSTEM=/x git push origin feat/x'
+  probe deny 'GIT_SSH_COMMAND="ssh -i /x" git push origin feat/x'
+  probe deny 'env -u GH_CONFIG_DIR gh pr create --title t'
+  probe deny 'git -c credential.helper=store push origin feat/x'
+  probe allow 'git push origin feat/x'
+  probe allow 'gh pr create --title t'
+  probe allow 'gh pr view 12'
+  probe allow 'GH_TOKEN=x gh pr view 12'
+done
+unset JARVIS_REQUIRE_AGENT_IDENTITY
+echo "== Codex: the hook's own environment is not the command's, so it is not compared"
+export GH_TOKEN=x GH_CONFIG_DIR=/other GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.editor GIT_CONFIG_VALUE_0=vim
+probe allow 'gh pr create --title t'
+probe allow 'git push origin feat/x'
+probe deny 'GH_TOKEN=x gh pr create --title t'
+unset GH_TOKEN GH_CONFIG_DIR GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0
+echo "== Codex: a record that cannot be read is a refusal"
+mkdir -p "$root/codex-bad"; echo '{ not json' >"$root/codex-bad/agent-identity.applied.json"
+export CODEX_HOME="$root/codex-bad"
+probe deny 'gh pr create --title t'
+probe deny 'git push origin feat/x'
+probe allow 'gh pr view 12'
+jq -n --arg d "$feat" '{tool_name: "Bash", tool_input: {command: "gh pr create --title t"}, cwd: $d}' >"$root/in.json"
+reason=$("$py" -I "$hook" --codex <"$root/in.json" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+total=$((total + 1))
+if printf '%s' "$reason" | grep -qF 'Codex agent identity record' && printf '%s' "$reason" | grep -qF 'is unreadable' && printf '%s' "$reason" | grep -qF 'apply-agent-identity.sh --check --codex'; then
+  echo "ok   an unreadable record is explained and points at --check --codex"
+else
+  echo "FAIL an unreadable record is explained and points at --check --codex: $reason"; fails=$((fails + 1))
+fi
+echo '{"version": 1}' >"$root/codex-bad/agent-identity.applied.json"
+probe deny 'gh pr create --title t'
+rm -f "$root/codex-bad/agent-identity.applied.json"; mkdir "$root/codex-bad/agent-identity.applied.json"
+probe deny 'gh pr create --title t'
+# The record alone is not "applied": what it lists must still be there, byte for byte.
+stale_case() { # name, mutation (run in the fixture dir)
+  local d="$root/cx-$1"
+  codex_fixture "$d"
+  ( cd "$d" && eval "$2" )
+  export CODEX_HOME="$d"
+  probe deny 'gh pr create --title t'
+  probe deny 'git push origin feat/x'
+  probe allow 'gh pr view 12'
+}
+stale_case "block-gone" 'printf "model = \"x\"\n" >config.toml'
+stale_case "block-edited" 'sed "s/A = \"1\"/A = \"2\"/" config.toml >c.new && mv c.new config.toml'
+stale_case "block-twice" 'printf "%s" "$CODEX_BLOCK" >>config.toml'
+stale_case "key-after-marker" 'printf "extra = 1\n" >>config.toml'
+stale_case "comment-then-key-after-marker" 'printf "\n# note\nextra = 1\n" >>config.toml'
+stale_case "gitconfig-gone" 'rm agent-identity.gitconfig'
+stale_case "gitconfig-edited" 'printf "# x\n" >>agent-identity.gitconfig'
+stale_case "config-gone" 'rm config.toml'
+stale_case "record-lacks-config" 'jq "del(.config)" agent-identity.applied.json >r.new && mv r.new agent-identity.applied.json'
+stale_case "record-empty-block" 'jq ".block = \"\"" agent-identity.applied.json >r.new && mv r.new agent-identity.applied.json'
+jq -n --arg d "$feat" '{tool_name: "Bash", tool_input: {command: "gh pr create --title t"}, cwd: $d}' >"$root/in.json"
+for what in gitconfig-gone block-gone gitconfig-edited; do
+  export CODEX_HOME="$root/cx-$what"
+  reason=$("$py" -I "$hook" --codex <"$root/in.json" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+  total=$((total + 1))
+  if printf '%s' "$reason" | grep -qF 'apply-agent-identity.sh --check --codex'; then
+    echo "ok   $what: the reason names --check --codex"
+  else
+    echo "FAIL $what: the reason names --check --codex: $reason"; fails=$((fails + 1))
+  fi
+done
+# a blank line, a comment and then a table after the block is fine
+codex_fixture "$root/cx-table-after"; printf '\n# note\n[other]\nextra = 1\n' >>"$root/cx-table-after/config.toml"
+export CODEX_HOME="$root/cx-table-after"
+probe allow 'gh pr create --title t'
+echo "== Codex: no record means nothing changes"
+mkdir -p "$root/codex-none"; export CODEX_HOME="$root/codex-none"
+probe allow 'GH_TOKEN=x gh pr create --title t'
+probe allow 'GIT_CONFIG_GLOBAL=/x git push origin feat/x'
+probe allow 'gh pr create --title t'
+export JARVIS_REQUIRE_AGENT_IDENTITY=1
+probe deny 'gh pr create --title t'
+unset JARVIS_REQUIRE_AGENT_IDENTITY
+echo "== Claude Code: a Codex record changes nothing"
+hook_args=""
+export CODEX_HOME="$codex_home"
+probe allow 'GH_TOKEN=x gh pr create --title t'
+probe allow 'GIT_CONFIG_GLOBAL=/x git push origin feat/x'
+unset CODEX_HOME
 
 echo "== agent identity not applied and switch off: an override changes nothing"
 probe allow 'GH_TOKEN=x gh pr create --title t'
