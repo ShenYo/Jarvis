@@ -736,9 +736,11 @@ bash ~/.Jarvis/scripts/apply-agent-identity.sh --codex           # writes the th
 # then restart Codex: a running session keeps the old environment
 ```
 
-Not yet verified: commands Codex runs outside its sandbox after an approval, and
-commands you type yourself with `!` in the Codex TUI. Whether the policy reaches them
-is untested; treat them as running with your own identity until it is checked.
+Verified 2026-11-02 with codex-cli 0.166.0: approved escalated commands retained
+all four identity variables; commands entered with `!` retained the two tested
+variables and Git author `Codex`. GitHub API identity and SSH identity for `!`
+commands remain unverified. Use an external terminal for personal commits; owner
+identity was confirmed there. See [Codex identity verification](./docs/dispatch/codex.md#agent-identity-verified-2026-11-02-codex-cli-01660).
 
 Codex can use a separate GitHub account instead of sharing this one. Add `codex_login`,
 `codex_email` and `codex_gh_config_dir` to the config file by hand (`--setup --codex`

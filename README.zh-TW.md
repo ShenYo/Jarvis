@@ -643,8 +643,10 @@ bash ~/.Jarvis/scripts/apply-agent-identity.sh --codex           # 寫入三個�
 # 然後重新啟動 Codex：執行中的 session 仍用舊的環境
 ```
 
-尚未驗證：Codex 在獲得核准後於 sandbox 之外執行的指令，以及你在 Codex TUI 裡用 `!` 自己輸入的指令。
-policy 是否會到達它們還沒測過；在查清楚之前，把它們當成是以你自己的 identity 在執行。
+2026-11-02 使用 codex-cli 0.166.0 實測：獲准提升權限的指令保留全部四個 identity 變數；
+用 `!` 輸入的指令保留已測的兩個變數，Git author 為 `Codex`。`!` 指令的 GitHub API
+identity 與 SSH identity 尚未驗證。個人 commit 請使用外部 terminal；已在該處確認 owner identity。
+詳見 [Codex identity 驗證紀錄](./docs/dispatch/codex.md#agent-identity-verified-2026-11-02-codex-cli-01660)。
 
 Codex 也可以改用另一個獨立的 GitHub 帳號，而不是共用這一個。請手動把 `codex_login`、`codex_email`
 與 `codex_gh_config_dir` 加進設定檔（`--setup --codex` 絕不會加它們），在它自己的目錄裡把 `gh`
