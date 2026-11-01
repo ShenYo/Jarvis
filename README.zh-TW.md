@@ -627,8 +627,8 @@ Codex 會移除 `GIT_CONFIG_COUNT`，所以 repository 自己的 `.git/config` �
 在它裡面執行
 `printf 'protocol=https\nhost=github.com\n\n' | env -u GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL=~/.codex/agent-identity.gitconfig GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false SSH_ASKPASS=/usr/bin/false git credential fill`：
 它必須失敗（針對特定 URL 的 `credential.<url>.helper` 只會在這裡現形，不會出現在 helper 清單裡），
-而在同樣的 `env` 下，對每個 GitHub remote 執行 `git remote get-url` 與 `git remote get-url --push`
-都必須印出 `git@github.com:…`。同樣沒有檢查的還有：專案根目錄之下巢狀的 `.codex/` 目錄，以及受管理的設定
+而在同樣的 `env` 下，對每個 GitHub remote 執行 `git remote get-url --all` 與 `git remote get-url --push --all`
+，印出的每個 github.com URL 都必須是 `git@github.com:…` 或 `ssh://git@github.com/…`。同樣沒有檢查的還有：專案根目錄之下巢狀的 `.codex/` 目錄，以及受管理的設定
 （`/etc/codex/managed_config.toml` 或 MDM profile），這兩者是否在這裡有影響都沒有驗證過；以及命令列的
 `codex -c` 或 `--profile`，那是你自己的 override。
 

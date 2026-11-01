@@ -1874,7 +1874,7 @@ pid, fd = pty.fork()
 if pid == 0:
     os.execvp("bash", ["bash"] + sys.argv[1:])
 signal.signal(signal.SIGALRM, lambda *a: (os.kill(pid, signal.SIGKILL), os._exit(124)))
-signal.alarm(300)
+signal.alarm(20)  # a regression makes git prompt on this terminal: fail in seconds, not minutes
 out = b""
 while True:
     try:
@@ -1910,7 +1910,7 @@ check "trusted project whose github remote resolves to SSH, and a non-github rem
 git -C "$dir/proj" config remote.origin.pushurl 'https://ShenYo@github.com/acme/app.git'
 crun --check; rc=$?
 check "trusted project remote with an HTTPS pushurl: exit 1" test "$rc" = 1
-check "trusted project remote with an HTTPS pushurl: WRONG naming remote, fetch and push URL" has "WRONG  git: in the trusted project $dir/proj, the remote origin fetches from git@github.com:acme/app.git and pushes to https://ShenYo@github.com/acme/app.git under Codex's env, but a github.com remote must use git@github.com: for both"
+check "trusted project remote with an HTTPS pushurl: WRONG naming the remote and the failing URL" has "WRONG  git: in the trusted project $dir/proj, the remote origin has URLs that are not SSH under Codex's env: https://ShenYo@github.com/acme/app.git (push); every github.com URL of a remote, fetch and push, must be git@github.com: or ssh://git@github.com/"
 check "trusted project remote with an HTTPS pushurl: the origin of the rule is shown" bash -c "grep -q 'file:.*remote.origin.pushurl' '$dir/out'"
 csandbox
 mkrepo "$dir/proj"; git -C "$dir/proj" config 'url.https://github.com/.pushInsteadOf' 'https://github.com/'
@@ -1929,6 +1929,32 @@ mkrepo "$dir/proj"; git -C "$dir/proj" config 'url.ssh://h/a b/.pushInsteadOf' '
 trusted_toml "$dir/proj"
 crun --check; rc=$?
 check "a url rule whose base has a space in it is read whole" bash -c "test $rc = 1 && grep -qF 'and ssh://h/a b/acme/app.git (push) under Codex' '$dir/out'"
+csandbox
+mkrepo "$dir/proj"; git -C "$dir/proj" remote add origin https://github.com/acme/app.git
+git -C "$dir/proj" config --add remote.origin.pushurl 'git@github.com:acme/app.git'
+git -C "$dir/proj" config --add remote.origin.pushurl 'https://ShenYo@github.com/acme/app.git'
+trusted_toml "$dir/proj"
+crun --check; rc=$?
+check "a remote with two pushurls, one SSH and one HTTPS: exit 1" test "$rc" = 1
+check "a remote with two pushurls: WRONG naming the HTTPS one" has "WRONG  git: in the trusted project $dir/proj, the remote origin has URLs that are not SSH under Codex's env: https://ShenYo@github.com/acme/app.git (push); every github.com URL of a remote, fetch and push, must be git@github.com: or ssh://git@github.com/"
+check "a remote with two pushurls: the SSH one is not named as failing" bash -c "! grep -qF 'git@github.com:acme/app.git (push)' '$dir/out'"
+csandbox
+mkrepo "$dir/proj"; git -C "$dir/proj" remote add origin ssh://git@github.com/acme/app.git
+trusted_toml "$dir/proj"
+crun --check; rc=$?
+check "a remote written ssh://git@github.com/...: passes" test "$rc" = 0
+csandbox
+mkrepo "$dir/proj"; git -C "$dir/proj" remote add origin git@GitHub.com:acme/app.git
+trusted_toml "$dir/proj"
+crun --check; rc=$?
+check "a remote written git@GitHub.com:... (host in another case): passes" test "$rc" = 0
+csandbox
+mkrepo "$dir/proj"; git -C "$dir/proj" remote add origin http://github.com/acme/app.git
+git -C "$dir/proj" config remote.origin.pushurl 'git@github.com:acme/app.git'
+trusted_toml "$dir/proj"
+crun --check; rc=$?
+check "a remote whose fetch URL is not SSH and push URL is: exit 1" test "$rc" = 1
+check "a remote whose fetch URL is not SSH and push URL is: WRONG naming only the fetch URL" bash -c "grep -qF 'http://github.com/acme/app.git (fetch); every github.com URL' '$dir/out' && ! grep -qF 'git@github.com:acme/app.git (push)' '$dir/out'"
 
 echo "== --codex: a plain run that cannot write says so, not OK"
 csandbox

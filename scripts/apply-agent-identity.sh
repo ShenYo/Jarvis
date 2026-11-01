@@ -1669,16 +1669,24 @@ ${origins:-no url.* line is set in any git config file; check includeIf}"
 ${origins:-no credential.helper line is set}"
   fi
   # The repository's own remotes, as git resolves them (a pushurl is not rewritten by pushInsteadOf).
-  local name f u
+  # Every fetch and push URL of a remote counts, and every github.com one must be SSH with the key
+  # this identity sets: git@github.com:<path> or ssh://git@github.com/<path>, the host in any case.
+  local name line u gh='[Gg][Ii][Tt][Hh][Uu][Bb].[Cc][Oo][Mm]' urls badu
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    f=$(agent_git -C "$p" remote get-url "$name" 2>&1)
-    u=$(agent_git -C "$p" remote get-url --push "$name" 2>&1)
-    case "$f $u" in *[Gg][Ii][Tt][Hh][Uu][Bb].[Cc][Oo][Mm]*) ;; *) continue ;; esac
-    case $f in git@github.com:*) case $u in git@github.com:*) continue ;; esac ;; esac
+    urls=$({ agent_git -C "$p" remote get-url --all "$name" 2>&1 | sed 's/^/fetch /'
+             agent_git -C "$p" remote get-url --push --all "$name" 2>&1 | sed 's/^/push /'; })
+    badu=""
+    while IFS= read -r line; do
+      u=${line#* }
+      case $u in *$gh*) ;; *) continue ;; esac
+      case $u in git@$gh:*|ssh://git@$gh/*) continue ;; esac
+      badu="${badu:+$badu, }$u (${line%% *})"
+    done <<<"$urls"
+    [ -n "$badu" ] || continue
     bad=1
     origins=$(agent_git -C "$p" config --show-origin --get-regexp "^(remote\\.$name\\.(url|pushurl)|url\\..*)" 2>/dev/null | head -n 8)
-    say WRONG "git: in the trusted project $p, the remote $name fetches from $f and pushes to $u under Codex's env, but a github.com remote must use git@github.com: for both"
+    say WRONG "git: in the trusted project $p, the remote $name has URLs that are not SSH under Codex's env: $badu; every github.com URL of a remote, fetch and push, must be git@github.com: or ssh://git@github.com/"
     fix "change the remote's url or pushurl, or the rule that rewrites it, in that repository (file, then key and value):
 ${origins:-no remote or url.* line was found}"
   done < <(agent_git -C "$p" remote 2>/dev/null)
