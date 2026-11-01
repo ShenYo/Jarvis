@@ -718,8 +718,9 @@ by hand, from inside it, run
 `printf 'protocol=https\nhost=github.com\n\n' | env -u GIT_CONFIG_COUNT GIT_CONFIG_GLOBAL=~/.codex/agent-identity.gitconfig GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/usr/bin/false SSH_ASKPASS=/usr/bin/false git credential fill`:
 it must fail (a URL-specific `credential.<url>.helper` shows up only here, not in the
 helper list), and with the same `env`, `git remote get-url --all` and `git remote get-url --push --all`
-for each GitHub remote must print every github.com URL as `git@github.com:…` or
-`ssh://git@github.com/…`. Not checked
+for each remote must print every github.com URL (judged by its host, in any case) as SSH with the
+user `git`: `git@github.com:…`, `ssh://git@github.com/…` or `ssh://git@github.com:22/…`. Another
+user or port, or `https://` or `http://`, fails, and a remote whose URLs cannot be read fails too. Not checked
 either: a nested `.codex/` directory below a project root and managed configuration
 (`/etc/codex/managed_config.toml`, or an MDM profile), neither of which has been verified
 to matter here, and `codex -c` or `--profile` on the command line, which are your own

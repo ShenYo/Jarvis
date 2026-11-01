@@ -66,7 +66,12 @@ A MINOR release: the agent identity reaches Codex, and the tests no longer depen
   `--check --codex` now reads every fetch and push URL (`remote get-url --all`, and
   `--push --all`), so a second pushurl over HTTPS is no longer hidden behind the first,
   and the WRONG line names each failing URL. It also accepts `ssh://git@github.com/…`
-  and a host in any case (`git@GitHub.com:…`), which use the same key. The pseudo-terminal
+  and a host in any case (`git@GitHub.com:…`), which use the same key. A URL counts as
+  GitHub's by its parsed host, not by containing `github.com` (so
+  `https://gitlab.com/x/github.com.git` is skipped); it passes only as SSH with the user
+  `git` (`git@github.com:…`, `ssh://git@github.com/…`, `ssh://git@github.com:22/…`), so
+  another user, another port or HTTPS is WRONG; and a remote whose URLs cannot be read is
+  WRONG, not skipped. The pseudo-terminal
   `--setup --codex` test gives up after 20 s instead of 300 s. `tests/bash-guard.sh` points
   the hook's `~/.claude` and `~/.codex` fallbacks at empty directories, so on a machine
   where the Codex identity is applied its two switch-on cases no longer read the real record.
