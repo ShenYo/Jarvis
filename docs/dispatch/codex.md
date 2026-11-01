@@ -1,11 +1,9 @@
 # Codex adapter
 
-> **中文摘要**：Codex 派工時的 model 對應與協作工具用法。Commander 用
-> `gpt-6.1-sol`，Implementer 與 Worker 用 `gpt-6-luna`，2026-10-25 在
-> codex-cli 0.164.0 實測可用。子代理直接在共享 workspace 改各自指定的檔案，
-> 範圍不可重疊。
-> 2026-11-02 已實測 Codex 的 agent identity；使用者的 `!` 指令也會繼承，
-> 外部終端機仍使用 ShenYo 身分；owner 的 PR Approve 仍待確認。
+> **中文摘要**：Codex 派工與協作：Commander 用 `gpt-6.1-sol`，Worker 用 `gpt-6-luna`。
+> 2026-11-02 實測 `!` 的兩個 identity 變數與 Git author Codex；
+> `!` 的 GitHub API／SSH identity 未測。外部終端機仍使用 owner 身分；
+> owner 的 PR Approve 仍待確認。
 
 This adapter makes [`policy.md`](./policy.md) executable in Codex. The policy
 owns the roles, the brief, the report contract and escalation; this file only
@@ -89,7 +87,11 @@ fresh-verifier selection.
 Prerequisites: PR #49 was merged at `2026-11-01T16:15:32Z`. This branch
 started from the freshly fetched `origin/main` at `b65110e`. Commands ran in
 the Jarvis worktree; network checks were repeated outside the sandbox after
-the sandbox could not resolve GitHub. Outputs below are literal observations.
+the sandbox could not resolve GitHub. Outputs below preserve literal observations
+except where marked redacted: owner's home prefix is `<HOME>`, the SSH key
+basename is `<CODEX_SSH_KEY>`, and the owner's personal email is
+`<OWNER_EMAIL>`. The machine-account noreply email remains as public account
+identity evidence.
 
 | Check | Command | Observed result | Status |
 | --- | --- | --- | --- |
@@ -99,7 +101,7 @@ the sandbox could not resolve GitHub. Outputs below are literal observations.
 | 4. Git resolution | `git ls-remote --get-url https://github.com/ShenYo/Jarvis.git` and `git config --show-origin --get-all credential.helper` | SSH URL and final empty helper from the agent config (outputs below). | PASS |
 | 5. Escalation | `env \| grep -E '^(JARVIS_AGENT_IDENTITY\|GIT_CONFIG_GLOBAL\|GH_CONFIG_DIR\|GIT_SSH_COMMAND)='` inside and outside the sandbox | All four variables were identical (output below). | PASS |
 | 6. Guard | `GH_TOKEN=x gh issue create --repo ShenYo/Jarvis --title probe --body probe` | PreToolUse denied the identity override before execution (message below). | PASS |
-| 7. Owner's `!` command | `!env \| grep -E '^(JARVIS_AGENT_IDENTITY\|GIT_CONFIG_GLOBAL)='` | Owner supplied both agent variables (output below). User shell commands inherit the agent identity. | PASS; identity exception confirmed |
+| 7. Owner's `!` command | `!env \| grep -E '^(JARVIS_AGENT_IDENTITY\|GIT_CONFIG_GLOBAL)='` | Owner supplied both tested variables (output below); Git author was `Codex`. `GH_CONFIG_DIR`, `GIT_SSH_COMMAND`, GitHub API identity and SSH identity were not tested for `!` commands. | PASS for tested variables and Git author only |
 | 8. Owner's external terminal | `git -C ~/.Jarvis var GIT_AUTHOR_IDENT` | Owner supplied an external-terminal screenshot showing `ShenYo` (output below). | PASS |
 | 9. Optional source lookup | Not run. | Nested config loading and `include_only` / `set` ordering were not researched in this verification. | UNVERIFIED; optional |
 
@@ -136,15 +138,15 @@ has an empty helper value):
 ```text
 git@github.com:ShenYo/Jarvis.git
 file:/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig\tosxkeychain
-file:/Users/shenyowang/.codex/agent-identity.gitconfig\t
+file:<HOME>/.codex/agent-identity.gitconfig\t
 ```
 
 Check 5, identical inside and outside the sandbox:
 
 ```text
-GH_CONFIG_DIR=/Users/shenyowang/.config/gh-agent
-GIT_CONFIG_GLOBAL=/Users/shenyowang/.codex/agent-identity.gitconfig
-GIT_SSH_COMMAND=ssh -F /dev/null -i /Users/shenyowang/.ssh/id_ed25519_agent_codex_ShenYodeMacBook-Pro -o IdentitiesOnly=yes
+GH_CONFIG_DIR=<HOME>/.config/gh-agent
+GIT_CONFIG_GLOBAL=<HOME>/.codex/agent-identity.gitconfig
+GIT_SSH_COMMAND=ssh -F /dev/null -i <HOME>/.ssh/<CODEX_SSH_KEY> -o IdentitiesOnly=yes
 JARVIS_AGENT_IDENTITY=agent-claude-code
 ```
 
@@ -157,9 +159,13 @@ Command blocked by PreToolUse hook: Codex guard: gh issue create writes to GitHu
 Check 7, owner's user shell command (exit 0):
 
 ```text
-GIT_CONFIG_GLOBAL=/Users/shenyowang/.codex/agent-identity.gitconfig
+GIT_CONFIG_GLOBAL=<HOME>/.codex/agent-identity.gitconfig
 JARVIS_AGENT_IDENTITY=agent-claude-code
 ```
+
+The `!` check established only those two variables and Git author `Codex`; it
+did not test `GH_CONFIG_DIR`, `GIT_SSH_COMMAND`, GitHub API identity, or SSH
+identity.
 
 Check 8, initial command reported as `user_shell_command` (exit 0), which
 did not establish the identity of a terminal outside Codex:
@@ -172,7 +178,7 @@ The owner then supplied an external-terminal screenshot on 2026-11-02 and
 explicitly confirmed where it ran. The same command returned:
 
 ```text
-ShenYo <shenyo.wang@gmail.com> 1793550761 +0800
+ShenYo <<OWNER_EMAIL>> 1793550761 +0800
 ```
 
 Check 10: [PR #51](https://github.com/ShenYo/Jarvis/pull/51) was created by
