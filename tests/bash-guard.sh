@@ -22,7 +22,11 @@ py=$(command -v /usr/bin/python3 || command -v python3)
 root=$(mktemp -d "${TMPDIR:-/tmp}/bash-guard-test.XXXXXX")
 # The corpus below runs with the agent-identity switch off, whatever this
 # machine has set; the switch's own cases set it themselves.
-unset JARVIS_REQUIRE_AGENT_IDENTITY JARVIS_AGENT_IDENTITY CLAUDE_CONFIG_DIR
+unset JARVIS_REQUIRE_AGENT_IDENTITY JARVIS_AGENT_IDENTITY
+# The hook falls back to ~/.claude and ~/.codex for its records; point both at empty
+# directories, so this machine's own applied identity never reaches a case.
+no_claude="$root/no-claude"; no_codex="$root/no-codex"; mkdir -p "$no_claude" "$no_codex"
+export CLAUDE_CONFIG_DIR="$no_claude" CODEX_HOME="$no_codex"
 hook_args=""
 # An applied identity: the marker, the environment apply-agent-identity.sh writes,
 # and the record of it that the hook compares that environment with.
@@ -37,7 +41,8 @@ apply_identity() {
   export GIT_CONFIG_KEY_1=credential.helper GIT_CONFIG_VALUE_1=
 }
 drop_identity() {
-  unset JARVIS_AGENT_IDENTITY CLAUDE_CONFIG_DIR GH_CONFIG_DIR GIT_SSH_COMMAND GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 \
+  export CLAUDE_CONFIG_DIR="$no_claude"
+  unset JARVIS_AGENT_IDENTITY GH_CONFIG_DIR GIT_SSH_COMMAND GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 \
     GIT_CONFIG_VALUE_0 GIT_CONFIG_KEY_1 GIT_CONFIG_VALUE_1 GIT_CONFIG_KEY_2 GIT_CONFIG_VALUE_2
 }
 
@@ -664,7 +669,7 @@ hook_args=""
 export CODEX_HOME="$codex_home"
 probe allow 'GH_TOKEN=x gh pr create --title t'
 probe allow 'GIT_CONFIG_GLOBAL=/x git push origin feat/x'
-unset CODEX_HOME
+export CODEX_HOME="$no_codex"
 
 echo "== agent identity not applied and switch off: an override changes nothing"
 probe allow 'GH_TOKEN=x gh pr create --title t'

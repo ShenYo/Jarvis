@@ -1641,6 +1641,41 @@ codex_push_url() { # repo form
   else printf '%s' "$form"; fi
 }
 
+# Sets gh_verdict for one remote URL, by its host (github.com in any case), not by a substring:
+#   skip  not GitHub (another host, a local path, file://, a URL that merely mentions github.com)
+#   ok    GitHub over SSH as the user git, on the default port: git@github.com:<path>,
+#         ssh://git@github.com/<path>, ssh://git@github.com:22/<path>
+#   bad   GitHub any other way (https://, http://, another user, another port, git://)
+# The forms are scheme://[user@]host[:port]/path and scp-like [user@]host:path, whose first colon
+# has no slash before it; anything else is a local path.
+github_verdict() { # url
+  local u=$1 scheme rest auth user hostport host port before ghh='[Gg][Ii][Tt][Hh][Uu][Bb].[Cc][Oo][Mm]'
+  gh_verdict=skip
+  scheme=${u%%://*}
+  if [ "$scheme" != "$u" ]; then
+    case $scheme in ''|*[!A-Za-z0-9+.-]*|[!A-Za-z]*) return 0 ;; esac
+    rest=${u#*://}; auth=${rest%%/*}
+    case $auth in *@*) user=${auth%@*}; hostport=${auth##*@} ;; *) user=""; hostport=$auth ;; esac
+    case $hostport in \[*) return 0 ;; esac
+    host=${hostport%%:*}; port=""
+    case $hostport in *:*) port=${hostport#*:} ;; esac
+    case $host in $ghh) ;; *) return 0 ;; esac
+    gh_verdict=bad
+    case $scheme in
+      [Ss][Ss][Hh]) if [ "$user" = git ] && { [ -z "$port" ] || [ "$port" = 22 ]; }; then gh_verdict=ok; fi ;;
+    esac
+    return 0
+  fi
+  before=${u%%:*}
+  [ "$before" != "$u" ] || return 0
+  case $before in */*) return 0 ;; esac
+  case $before in *@*) user=${before%@*}; host=${before##*@} ;; *) user=""; host=$before ;; esac
+  case $host in $ghh) ;; *) return 0 ;; esac
+  gh_verdict=bad
+  [ "$user" = git ] && gh_verdict=ok
+  return 0
+}
+
 # The same resolution and last-helper checks, inside one trusted project's repository.
 chk_codex_project_git() { # path
   local p=$1 r list form fetch push want_url origins helper n bad=0
@@ -1669,16 +1704,34 @@ ${origins:-no url.* line is set in any git config file; check includeIf}"
 ${origins:-no credential.helper line is set}"
   fi
   # The repository's own remotes, as git resolves them (a pushurl is not rewritten by pushInsteadOf).
-  local name f u
+  # Every fetch and push URL of a remote counts. A URL is GitHub's by its host, not by a substring,
+  # and a GitHub URL must be SSH as the user git (the key this identity sets): see github_verdict.
+  local name line u urls badu fo frc po prc err
   while IFS= read -r name; do
     [ -n "$name" ] || continue
-    f=$(agent_git -C "$p" remote get-url "$name" 2>&1)
-    u=$(agent_git -C "$p" remote get-url --push "$name" 2>&1)
-    case "$f $u" in *[Gg][Ii][Tt][Hh][Uu][Bb].[Cc][Oo][Mm]*) ;; *) continue ;; esac
-    case $f in git@github.com:*) case $u in git@github.com:*) continue ;; esac ;; esac
+    fo=$(agent_git -C "$p" remote get-url --all "$name" 2>&1); frc=$?
+    po=$(agent_git -C "$p" remote get-url --push --all "$name" 2>&1); prc=$?
+    if [ "$frc" != 0 ] || [ "$prc" != 0 ]; then
+      err=""
+      [ "$frc" = 0 ] || err="git remote get-url --all $name failed ($(printf '%s' "$fo" | tr '\n' ' '))"
+      [ "$prc" = 0 ] || err="${err:+$err; }git remote get-url --push --all $name failed ($(printf '%s' "$po" | tr '\n' ' '))"
+      bad=1
+      say WRONG "git: in the trusted project $p, the URLs of the remote $name could not be read under Codex's env, so they were not checked: $err"
+      fix "make git able to read that remote in the repository: run git -C $(q "$p") remote get-url --all $name under the policy env and fix what it reports"
+      continue
+    fi
+    urls=$(printf '%s\n' "$fo" | sed 's/^/fetch /'; printf '%s\n' "$po" | sed 's/^/push /')
+    badu=""
+    while IFS= read -r line; do
+      u=${line#* }
+      github_verdict "$u"
+      [ "$gh_verdict" = bad ] || continue
+      badu="${badu:+$badu, }$u (${line%% *})"
+    done <<<"$urls"
+    [ -n "$badu" ] || continue
     bad=1
     origins=$(agent_git -C "$p" config --show-origin --get-regexp "^(remote\\.$name\\.(url|pushurl)|url\\..*)" 2>/dev/null | head -n 8)
-    say WRONG "git: in the trusted project $p, the remote $name fetches from $f and pushes to $u under Codex's env, but a github.com remote must use git@github.com: for both"
+    say WRONG "git: in the trusted project $p, the remote $name has github.com URLs that are not SSH as the user git under Codex's env: $badu; every github.com URL of a remote, fetch and push, must be git@github.com:<path>, ssh://git@github.com/<path> or ssh://git@github.com:22/<path>"
     fix "change the remote's url or pushurl, or the rule that rewrites it, in that repository (file, then key and value):
 ${origins:-no remote or url.* line was found}"
   done < <(agent_git -C "$p" remote 2>/dev/null)
