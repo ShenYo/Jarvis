@@ -5,7 +5,7 @@
 > codex-cli 0.164.0 實測可用。子代理直接在共享 workspace 改各自指定的檔案，
 > 範圍不可重疊。
 > 2026-11-02 已實測 Codex 的 agent identity；使用者的 `!` 指令也會繼承，
-> 外部終端機身分與 owner 的 PR Approve 仍待確認。
+> 外部終端機仍使用 ShenYo 身分；owner 的 PR Approve 仍待確認。
 
 This adapter makes [`policy.md`](./policy.md) executable in Codex. The policy
 owns the roles, the brief, the report contract and escalation; this file only
@@ -100,7 +100,7 @@ the sandbox could not resolve GitHub. Outputs below are literal observations.
 | 5. Escalation | `env \| grep -E '^(JARVIS_AGENT_IDENTITY\|GIT_CONFIG_GLOBAL\|GH_CONFIG_DIR\|GIT_SSH_COMMAND)='` inside and outside the sandbox | All four variables were identical (output below). | PASS |
 | 6. Guard | `GH_TOKEN=x gh issue create --repo ShenYo/Jarvis --title probe --body probe` | PreToolUse denied the identity override before execution (message below). | PASS |
 | 7. Owner's `!` command | `!env \| grep -E '^(JARVIS_AGENT_IDENTITY\|GIT_CONFIG_GLOBAL)='` | Owner supplied both agent variables (output below). User shell commands inherit the agent identity. | PASS; identity exception confirmed |
-| 8. Owner's external terminal | `git -C ~/.Jarvis var GIT_AUTHOR_IDENT` | Owner ran this through Codex's user shell; an external-terminal result is still required (output below). | UNVERIFIED |
+| 8. Owner's external terminal | `git -C ~/.Jarvis var GIT_AUTHOR_IDENT` | Owner supplied an external-terminal screenshot showing `ShenYo` (output below). | PASS |
 | 9. Optional source lookup | Not run. | Nested config loading and `include_only` / `set` ordering were not researched in this verification. | UNVERIFIED; optional |
 
 ### Captured output
@@ -161,14 +161,24 @@ GIT_CONFIG_GLOBAL=/Users/shenyowang/.codex/agent-identity.gitconfig
 JARVIS_AGENT_IDENTITY=agent-claude-code
 ```
 
-Check 8, owner's command reported as `user_shell_command` (exit 0), which
-does not establish the identity of a terminal outside Codex:
+Check 8, initial command reported as `user_shell_command` (exit 0), which
+did not establish the identity of a terminal outside Codex:
 
 ```text
 Codex <349695790+agent-claude-code@users.noreply.github.com> 1793550623 +0800
 ```
 
-The PR carrying this record is check 10: verify its author is
-`agent-claude-code` and its commit author is `Codex` through the GitHub API,
-and record those results on issue #15. The owner must Approve the PR before
+The owner then supplied an external-terminal screenshot on 2026-11-02 and
+explicitly confirmed where it ran. The same command returned:
+
+```text
+ShenYo <shenyo.wang@gmail.com> 1793550761 +0800
+```
+
+Check 10: [PR #51](https://github.com/ShenYo/Jarvis/pull/51) was created by
+`agent-claude-code`. `gh pr view 51 --repo ShenYo/Jarvis --json author,commits,reviews`
+confirmed that author and commit `bffd4c29aebf93ce454e6e2e8fb4ef0c72fd9c98`
+with author `Codex` and the machine-account email. A direct commit API lookup
+also confirmed committer `Codex`. These identity checks passed and were
+recorded on issue #15. The owner must Approve the PR before
 merging; until that happens, the approval acceptance item remains unverified.
