@@ -124,27 +124,42 @@ fi
 # Codex starts, from CODEX_HOME or the default, the same as this script does.
 # The timeout is 10 s: the guard's own budget is 6 s (see DEADLINE in
 # bash-guard.py), and a hook that overruns lets the command run. The switch is
-# the last argument, as the flag says, or as the installed entry has it.
+# --require-identity after --codex, as the flag says, or as the installed entry has
+# it (a whole word anywhere after --codex, as the guard reads its arguments).
 cmd='py=/usr/bin/python3; [ -x "$py" ] || py=python3; exec "$py" -I "${CODEX_HOME:-$HOME/.codex}/hooks/jarvis-guard.py" --codex'
 installed_on=$(jq -r '
   def own_h: (.command? // "") | contains("/hooks/jarvis-guard.py");
-  [(.hooks.PreToolUse // [])[] | .hooks[]? | select(own_h)] | first | (.command // "") | endswith(" --require-identity")' \
+  [(.hooks.PreToolUse // [])[] | .hooks[]? | select(own_h)] | first | (.command // "")
+  | [splits("[ \t]+")] as $w | ($w | index("--codex")) as $i
+  | $i != null and (($w[$i + 1:]) | index("--require-identity") != null)' \
   <<<"$current" 2>/dev/null) || installed_on=false
 case "$req" in on) sw=1 ;; off) sw=0 ;; *) if [ "$installed_on" = true ]; then sw=1; else sw=0; fi ;; esac
 [ "$sw" = 0 ] || cmd="$cmd --require-identity"
 group=$(jq -n --arg c "$cmd" '{matcher: "^Bash$", hooks: [{type: "command", command: $c, timeout: 10,
   statusMessage: "Codex guard: checking the command"}]}')
-# A fresh install starts with the switch off. If Claude Code's switch is on (apply-agent-identity.sh
-# --require left its record), say that Codex is now the uncovered side.
+# A fresh install starts with the switch off. If Claude Code's switch is on, say that Codex is now the
+# uncovered side. Claude's switch is on when the process environment says so, when the env of its
+# settings.json does, or when a require record (apply-agent-identity.sh --require) says so or cannot be
+# read, which the guard counts as on.
 have_own=$(jq -r '
   def own_h: (.command? // "") | contains("/hooks/jarvis-guard.py");
   any((.hooks.PreToolUse // [])[]? | .hooks[]?; own_h)' <<<"$current" 2>/dev/null) || have_own=false
-claude_req="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/agent-identity.require.json"
-warn_off=0
-if [ "$have_own" != true ] && [ "$sw" = 0 ] &&
-   jq -e '.env.JARVIS_REQUIRE_AGENT_IDENTITY == "1"' "$claude_req" >/dev/null 2>&1; then
-  warn_off=1
+claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+claude_req="$claude_dir/agent-identity.require.json"
+claude_via=""
+if [ "$have_own" != true ] && [ "$sw" = 0 ]; then
+  if [ "${JARVIS_REQUIRE_AGENT_IDENTITY:-}" = 1 ]; then claude_via="the process environment"
+  elif jq -e '.env.JARVIS_REQUIRE_AGENT_IDENTITY == "1"' "$claude_dir/settings.json" >/dev/null 2>&1; then claude_via="$claude_dir/settings.json"
+  else
+    for rec in "$claude_req" "$HOME/.claude/agent-identity.require.json"; do
+      [ -e "$rec" ] || continue
+      jq -e '(.env // {}).JARVIS_REQUIRE_AGENT_IDENTITY == "1"' "$rec" >/dev/null 2>&1 && rc=0 || rc=$?
+      if [ "$rc" != 1 ]; then claude_via="$rec"; break; fi
+    done
+  fi
 fi
+warn_off=0
+[ -z "$claude_via" ] || warn_off=1
 
 merged=$(jq --argjson g "$group" '
   def own_h: (.command? // "") | contains("/hooks/jarvis-guard.py");
@@ -302,7 +317,7 @@ trust_print() {
 
 warn_codex_off() {
   [ "$warn_off" = 1 ] || return 0
-  echo "apply-codex-guard: WARN: Claude Code's agent-identity switch is on ($claude_req), but this install starts Codex's off, so Codex GitHub writes are not covered; turn it on with bash $here/scripts/apply-codex-guard.sh --require-identity (and trust the guard in /hooks), or bash $here/scripts/apply-agent-identity.sh --require"
+  echo "apply-codex-guard: WARN: Claude Code's agent-identity switch is on (via $claude_via), but this install starts Codex's off, so Codex GitHub writes are not covered; turn it on with bash $here/scripts/apply-codex-guard.sh --require-identity (and trust the guard in /hooks), or bash $here/scripts/apply-agent-identity.sh --require"
 }
 
 if [ "$trust_only" = 1 ]; then

@@ -1895,19 +1895,27 @@ $tmp_cfg"
 # skips the hook until the person trusts it again in /hooks.
 SWITCH_KEY=JARVIS_REQUIRE_AGENT_IDENTITY
 
-claude_switch_state() { # on | on (record) | off | unknown, read quietly. The guard obeys the require record
-  # as well as the env, so a record that says "1" counts as on even where settings.json does not.
-  local st=off
+claude_switch_state() { # on | on (record) | on (environment) | off | unknown, read quietly. The guard obeys all
+  # three: the env of settings.json, the require record (in CLAUDE_CONFIG_DIR and in ~/.claude, so a project cannot
+  # redirect the lookup) and the environment it runs in. A record it cannot read counts as on, so does this.
+  local st=off rec rc
   if [ -e "$settings" ]; then
     st=$(jq -r --arg k "$SWITCH_KEY" '
       if type != "object" then "unknown"
       elif ((.env // {}) | type) != "object" then "unknown"
       elif (.env // {})[$k] == "1" then "on" else "off" end' "$settings" 2>/dev/null) || st=unknown
   fi
-  if [ "$st" != on ] && jq -e --arg k "$SWITCH_KEY" '.env[$k] == "1"' "$sw_record" >/dev/null 2>&1; then st="on (record)"; fi
+  if [ "$st" != on ]; then
+    for rec in "$sw_record" "$HOME/.claude/agent-identity.require.json"; do
+      [ -e "$rec" ] || [ -L "$rec" ] || continue
+      jq -e --arg k "$SWITCH_KEY" '(.env // {})[$k] == "1"' "$rec" >/dev/null 2>&1; rc=$?
+      if [ "$rc" != 1 ]; then st="on (record)"; break; fi
+    done
+  fi
+  if [ "$st" != on ] && [ "$st" != "on (record)" ] && [ "${JARVIS_REQUIRE_AGENT_IDENTITY:-}" = 1 ]; then st="on (environment)"; fi
   echo "$st"
 }
-switch_is_on() { case $1 in on|"on (record)") return 0 ;; esac; return 1; }
+switch_is_on() { case $1 in on|"on (record)"|"on (environment)") return 0 ;; esac; return 1; }
 
 codex_switch_state() { # on | off | none (no Jarvis hook installed) | unknown
   local hj="$codex_home/hooks.json"
@@ -1915,7 +1923,10 @@ codex_switch_state() { # on | off | none (no Jarvis hook installed) | unknown
   jq -r '
     def own_h: (.command? // "") | contains("/hooks/jarvis-guard.py");
     [(.hooks.PreToolUse // [])[] | .hooks[]? | select(own_h)] | first
-    | if . == null then "none" elif ((.command // "") | endswith(" --require-identity")) then "on" else "off" end' "$hj" 2>/dev/null || echo unknown
+    | if . == null then "none"
+      elif ((.command // "") | [splits("[ \t]+")] as $w | ($w | index("--codex")) as $i
+            | $i != null and (($w[$i + 1:]) | index("--require-identity") != null)) then "on"
+      else "off" end' "$hj" 2>/dev/null || echo unknown
 }
 
 # Does Codex trust the installed Jarvis hook? Asks apply-codex-guard.sh --trust and sets cg_state (OK, UNTRUSTED,
@@ -1970,12 +1981,31 @@ indent_out() { sed 's/^/  | /'; }
 
 sw_snapshot() { # settings and the switch's own record
   snapshot_settings
-  sw_rec_state=absent; sw_rec_json='{}'
+  sw_rec_state=absent; sw_rec_json='{}'; sw_rec_text=""; sw_rec_sum=absent
   if [ -e "$sw_record" ]; then
-    sw_rec_json=$(cat "$sw_record" 2>/dev/null)
+    sw_rec_sum=$(cksum <"$sw_record" 2>/dev/null)
+    sw_rec_text=$(cat "$sw_record" 2>/dev/null)
+    sw_rec_json=$sw_rec_text
     if jq -e 'type == "object" and ((.env // {}) | type == "object")' >/dev/null 2>&1 <<<"$sw_rec_json"; then sw_rec_state=ok
     else sw_rec_state=bad; sw_rec_json='{}'; fi
   fi
+}
+
+record_changed_since_read() { # the record is not what sw_snapshot read
+  local now
+  if [ -e "$sw_record" ]; then now=$(cksum <"$sw_record" 2>/dev/null); else now=absent; fi
+  [ "$now" != "$sw_rec_sum" ]
+}
+
+sw_write_json() { # like write_json, but a failure is returned, with the reason, not fatal
+  local f=$1 content=$2 tmp
+  mkdir -p "$(dirname "$f")" 2>/dev/null
+  tmp=$(mktemp "$f.XXXXXX" 2>/dev/null) || { echo "apply-agent-identity: cannot create a temporary file beside $f"; return 1; }
+  tmpfiles="$tmpfiles
+$tmp"
+  if [ -e "$f" ]; then cp -p "$f" "$tmp" 2>/dev/null || { rm -f "$tmp"; echo "apply-agent-identity: cannot copy $f"; return 1; }; fi
+  jq . <<<"$content" >"$tmp" 2>/dev/null || { rm -f "$tmp"; echo "apply-agent-identity: cannot write $tmp"; return 1; }
+  WROTE_TMP=$tmp
 }
 
 sw_precheck() { # 0 when settings and record can be worked with; otherwise says why and returns 1
@@ -1998,39 +2028,67 @@ claude_switch_set() {
   sw_changed=0
   sw_snapshot
   sw_precheck || return 1
-  local cur created merged_s new_rec rec_tmp="" set_tmp=""
+  local cur created new_rec merged_s rec_tmp="" set_tmp="" rec_ok=0
   cur=$(jq -c --arg k "$SWITCH_KEY" '.env[$k] // empty' <<<"$settings_text")
   if [ -n "$cur" ] && [ "$cur" != '"1"' ]; then
     echo "apply-agent-identity: CONFLICT: env.$SWITCH_KEY in $settings is $cur, which this script did not write; it would write \"1\""
     echo "apply-agent-identity: fix: set it to \"1\" or delete it from the env block of $(q "$settings") by hand, then re-run; nothing was changed"
     return 1
   fi
+  if [ "$sw_rec_state" = ok ] && [ -e "$sw_record" ]; then rec_ok=1; fi
   if [ "$cur" = '"1"' ]; then
-    if [ "$sw_rec_state" = ok ] && [ -e "$sw_record" ]; then
+    if [ "$rec_ok" = 1 ]; then
       echo "apply-agent-identity: Claude Code: the switch is already on in $settings"
-    else
-      echo "apply-agent-identity: Claude Code: the switch is already on in $settings (not set by this script, so --unrequire will leave it)"
+      return 0
     fi
+    # Someone set it by hand. Record it, marked as not ours, so the guard keeps the switch on even if a
+    # project's env blanks the variable; --unrequire removes the record and leaves the value.
+    new_rec=$(jq -n --arg k "$SWITCH_KEY" '{version: 1, env: {($k): "1"}, env_created: false, owned: false}')
+    sw_write_json "$sw_record" "$new_rec" || return 1; rec_tmp=$WROTE_TMP
+    if changed_since_read || record_changed_since_read; then
+      rm -f "$rec_tmp"
+      echo "apply-agent-identity: $settings or $sw_record changed while this ran; nothing was written, run it again"
+      return 1
+    fi
+    if ! mv "$rec_tmp" "$sw_record" 2>/dev/null; then
+      rm -f "$rec_tmp"
+      echo "apply-agent-identity: cannot write $sw_record; nothing was changed"
+      return 1
+    fi
+    sw_changed=1
+    echo "apply-agent-identity: Claude Code: the switch is already on in $settings (not written by this script); wrote $sw_record with owned false, so the guard keeps it on even if a project blanks the variable. --unrequire removes the record and leaves the value"
     return 0
   fi
-  if [ "$sw_rec_state" = ok ] && [ -e "$sw_record" ]; then
+  if [ "$rec_ok" = 1 ]; then
     created=$(jq '.env_created // false' <<<"$sw_rec_json")
   else
     created=$(jq 'has("env") | not' <<<"$settings_text")
   fi
   merged_s=$(jq --arg k "$SWITCH_KEY" '.env = ((.env // {}) + {($k): "1"})' <<<"$settings_text")
-  new_rec=$(jq -n --arg k "$SWITCH_KEY" --argjson created "$created" '{version: 1, env: {($k): "1"}, env_created: $created}')
-  write_json "$sw_record" "$new_rec"; rec_tmp=$WROTE_TMP
-  write_json "$settings" "$merged_s"; set_tmp=$WROTE_TMP
-  if changed_since_read; then
+  new_rec=$(jq -n --arg k "$SWITCH_KEY" --argjson created "$created" '{version: 1, env: {($k): "1"}, env_created: $created, owned: true}')
+  sw_write_json "$sw_record" "$new_rec" || return 1; rec_tmp=$WROTE_TMP
+  sw_write_json "$settings" "$merged_s" || { rm -f "$rec_tmp"; return 1; }; set_tmp=$WROTE_TMP
+  if changed_since_read || record_changed_since_read; then
     rm -f "$rec_tmp" "$set_tmp"
-    echo "apply-agent-identity: $settings changed while this ran; nothing was written, run it again"
+    echo "apply-agent-identity: $settings or $sw_record changed while this ran; nothing was written, run it again"
     return 1
   fi
-  mv "$rec_tmp" "$sw_record"
-  if [ -e "$settings" ]; then cp -p "$settings" "$settings.agent-identity-backup"; fi
-  mv "$set_tmp" "$settings"
+  if ! mv "$rec_tmp" "$sw_record" 2>/dev/null; then
+    rm -f "$rec_tmp" "$set_tmp"
+    echo "apply-agent-identity: cannot write $sw_record; nothing was changed"
+    return 1
+  fi
   sw_changed=1
+  if [ -e "$settings" ] && ! cp -p "$settings" "$settings.agent-identity-backup" 2>/dev/null; then
+    rm -f "$set_tmp"
+    echo "apply-agent-identity: cannot write $settings.agent-identity-backup, so $settings was not replaced"
+    return 1
+  fi
+  if ! mv "$set_tmp" "$settings" 2>/dev/null; then
+    rm -f "$set_tmp"
+    echo "apply-agent-identity: cannot replace $settings"
+    return 1
+  fi
   echo "apply-agent-identity: Claude Code: wrote env.$SWITCH_KEY=\"1\" to $settings (previous copy: $settings.agent-identity-backup) and $sw_record"
   return 0
 }
@@ -2049,30 +2107,58 @@ claude_switch_clear() {
     return 0
   fi
   sw_precheck || return 1
-  local cur out set_tmp
+  local cur out set_tmp rec_has owned
   cur=$(jq -c --arg k "$SWITCH_KEY" '.env[$k] // empty' <<<"$settings_text")
-  if [ -n "$cur" ] && [ "$cur" != '"1"' ]; then
+  rec_has=$(jq -r --arg k "$SWITCH_KEY" '(.env[$k] // "") == "1"' <<<"$sw_rec_json")
+  owned=$(jq -r 'if has("owned") then .owned else true end' <<<"$sw_rec_json")
+  if [ "$cur" = '"1"' ] && [ "$rec_has" != true ]; then
+    echo "apply-agent-identity: CONFLICT: env.$SWITCH_KEY is \"1\" in $settings, but $sw_record does not say this script wrote it, so it was not removed"
+    echo "apply-agent-identity: fix: delete \"$SWITCH_KEY\" from the env block of $(q "$settings") by hand and remove $(q "$sw_record") (or run bash $self --require to record the value), then re-run; nothing was changed"
+    return 1
+  fi
+  if [ -n "$cur" ] && [ "$cur" != '"1"' ] && [ "$owned" = true ] && [ "$rec_has" = true ]; then
     echo "apply-agent-identity: CONFLICT: env.$SWITCH_KEY in $settings is $cur, but this script wrote \"1\" and someone changed it since"
     echo "apply-agent-identity: fix: restore the value or delete \"$SWITCH_KEY\" from the env block of $(q "$settings") by hand, then re-run; nothing was changed"
     return 1
   fi
-  if [ -n "$cur" ]; then
+  if record_changed_since_read; then
+    echo "apply-agent-identity: $sw_record changed while this ran; nothing was written, run it again"
+    return 1
+  fi
+  if [ "$cur" = '"1"' ] && [ "$owned" = true ]; then
     out=$(jq --arg k "$SWITCH_KEY" --argjson created "$(jq '.env_created // false' <<<"$sw_rec_json")" '
       del(.env[$k]) | if $created and ((.env // null) == {}) then del(.env) else . end' <<<"$settings_text")
-    write_json "$settings" "$out"; set_tmp=$WROTE_TMP
-    if changed_since_read; then
+    sw_write_json "$settings" "$out" || return 1; set_tmp=$WROTE_TMP
+    if changed_since_read || record_changed_since_read; then
       rm -f "$set_tmp"
-      echo "apply-agent-identity: $settings changed while this ran; nothing was written, run it again"
+      echo "apply-agent-identity: $settings or $sw_record changed while this ran; nothing was written, run it again"
       return 1
     fi
-    if [ -e "$settings" ]; then cp -p "$settings" "$settings.agent-identity-backup"; fi
-    mv "$set_tmp" "$settings"
+    if [ -e "$settings" ] && ! cp -p "$settings" "$settings.agent-identity-backup" 2>/dev/null; then
+      rm -f "$set_tmp"
+      echo "apply-agent-identity: cannot write $settings.agent-identity-backup, so $settings was not replaced; $sw_record stays"
+      return 1
+    fi
+    if ! mv "$set_tmp" "$settings" 2>/dev/null; then
+      rm -f "$set_tmp"
+      echo "apply-agent-identity: cannot replace $settings, so the switch is still on there; $sw_record stays and nothing else was changed"
+      return 1
+    fi
     sw_changed=1
     echo "apply-agent-identity: Claude Code: removed env.$SWITCH_KEY from $settings (previous copy: $settings.agent-identity-backup)"
+  elif [ "$cur" = '"1"' ]; then
+    echo "apply-agent-identity: Claude Code: env.$SWITCH_KEY is \"1\" in $settings but this script did not write it (the record says owned false), so the value was left; remove it from the env block by hand if you want it off"
+    sw_unclaimed=1
+  elif [ -n "$cur" ]; then
+    echo "apply-agent-identity: Claude Code: env.$SWITCH_KEY in $settings is $cur, which this script did not write, so it was left"
   else
     echo "apply-agent-identity: Claude Code: env.$SWITCH_KEY is not in $settings"
   fi
-  rm -f "$sw_record"
+  if ! rm -f "$sw_record" 2>/dev/null || [ -e "$sw_record" ]; then
+    echo "apply-agent-identity: cannot remove $sw_record"
+    return 1
+  fi
+  sw_changed=1
   echo "apply-agent-identity: Claude Code: removed $sw_record"
   return 0
 }
@@ -2098,35 +2184,87 @@ codex_unreadable() { # says why the Codex side of the switch cannot be read
   echo "$codex_home/hooks.json cannot be parsed, so the Codex side of the switch cannot be read"
 }
 
-# An interrupt puts back whatever this run changed, decided from the state of the files and not from
-# a flag set after the write: a signal can land between a write and the line that records it. So a
-# Ctrl-C or a kill never leaves the switch on for one runtime only.
+# What to put back after a failure or an interrupt is decided from the files, against the state captured
+# before the run changed anything, and not from flags set after the writes: a signal can land between a write
+# and the line that records it, and a record-only switch (a valid record, no settings value) is a state too.
 sw_op="" sw_claude_done=0 sw_codex_before="" sw_rec_before=0 sw_set_before=off
+sw_before_val="" sw_before_envexists=false sw_before_rec_text=""
 sw_capture_before() { # the state a --require / --unrequire starts from
   sw_codex_before=$(codex_switch_state)
-  if [ -e "$sw_record" ]; then sw_rec_before=1; else sw_rec_before=0; fi
   sw_set_before=$(claude_switch_state)
+  sw_snapshot
+  if [ -e "$sw_record" ]; then sw_rec_before=1; else sw_rec_before=0; fi
+  sw_before_rec_text=$sw_rec_text
+  sw_before_val=""; sw_before_envexists=false
+  if [ "$settings_state" = ok ]; then
+    sw_before_val=$(jq -c --arg k "$SWITCH_KEY" '.env[$k] // empty' <<<"$settings_text" 2>/dev/null)
+    sw_before_envexists=$(jq 'has("env")' <<<"$settings_text" 2>/dev/null || echo false)
+  fi
 }
+
+# put the record back as it was at the start: removed when there was none, rewritten when it differs
+sw_restore_record() {
+  local tmp
+  if [ "$sw_rec_before" = 0 ]; then
+    [ ! -e "$sw_record" ] || rm -f "$sw_record" 2>/dev/null
+    [ ! -e "$sw_record" ]
+    return
+  fi
+  if [ -e "$sw_record" ] && [ "$(cat "$sw_record" 2>/dev/null)" = "$sw_before_rec_text" ]; then return 0; fi
+  mkdir -p "$(dirname "$sw_record")" 2>/dev/null
+  tmp=$(mktemp "$sw_record.XXXXXX" 2>/dev/null) || return 1
+  tmpfiles="$tmpfiles
+$tmp"
+  printf '%s\n' "$sw_before_rec_text" >"$tmp" 2>/dev/null && mv "$tmp" "$sw_record" 2>/dev/null
+}
+
+# put the switch in settings.json back to its value at the start (only the one key; the rest of the file is not touched)
+sw_restore_setting() {
+  local cur out tmp want
+  [ "$settings_state" = ok ] || return 0
+  cur=$(jq -c --arg k "$SWITCH_KEY" '.env[$k] // empty' <<<"$settings_text" 2>/dev/null)
+  if [ -z "$sw_before_val" ] && [ "$cur" = '"1"' ]; then
+    out=$(jq --arg k "$SWITCH_KEY" --argjson keep "$sw_before_envexists" '
+      del(.env[$k]) | if ($keep | not) and ((.env // null) == {}) then del(.env) else . end' <<<"$settings_text")
+  elif [ "$sw_before_val" = '"1"' ] && [ -z "$cur" ]; then
+    out=$(jq --arg k "$SWITCH_KEY" '.env = ((.env // {}) + {($k): "1"})' <<<"$settings_text")
+  else
+    return 0
+  fi
+  sw_write_json "$settings" "$out" >/dev/null || return 1; tmp=$WROTE_TMP
+  if changed_since_read; then rm -f "$tmp"; return 1; fi
+  mv "$tmp" "$settings" 2>/dev/null || { rm -f "$tmp"; return 1; }
+}
+
+sw_restore_before() { # 0 when Claude Code's switch is as it was at the start
+  local rc=0 cur
+  sw_snapshot
+  cur=$(jq -c --arg k "$SWITCH_KEY" '.env[$k] // empty' <<<"$settings_text" 2>/dev/null)
+  if [ "$sw_before_val" = '"1"' ] && [ -z "$cur" ]; then
+    # it is coming back: the record first, so the switch is never in neither place
+    sw_restore_record || rc=1
+    sw_restore_setting || rc=1
+  else
+    # it is going away: the setting first, so an interruption leaves the record, which keeps the guard on
+    sw_restore_setting || rc=1
+    sw_restore_record || rc=1
+  fi
+  return $rc
+}
+
 abort_switch() { # signal name
   trap '' INT TERM
   echo
   echo "apply-agent-identity: interrupted ($1); putting back what this run changed"
-  local rec_now=0 codex_now
-  [ ! -e "$sw_record" ] || rec_now=1
+  local codex_now
   codex_now=$(codex_switch_state)
   if [ "$sw_op" = require ]; then
-    # the record or the setting appeared since the start: take them away again
-    if { [ "$rec_now" = 1 ] && [ "$sw_rec_before" = 0 ]; } || { [ "$(claude_switch_state)" = on ] && [ "$sw_set_before" != on ] && [ "$sw_rec_before" = 0 ]; }; then
-      claude_switch_clear || echo "apply-agent-identity: the Claude Code side was not put back; run bash $self --unrequire"
-    fi
+    sw_restore_before || echo "apply-agent-identity: the Claude Code side was not put back; run bash $self --unrequire"
     if [ "$sw_codex_before" != on ] && [ "$codex_now" = on ]; then
       run_codex_guard --no-require-identity || echo "apply-agent-identity: the Codex side was not put back; run bash $self --unrequire"
     fi
   else
-    # the record or the setting that were there at the start are gone: put them back
-    if [ "$sw_rec_before" = 1 ] && { [ "$rec_now" = 0 ] || [ "$(claude_switch_state)" != on ]; }; then
-      claude_switch_set || echo "apply-agent-identity: the Claude Code side was not put back; run bash $self --require"
-    fi
+    sw_restore_before || echo "apply-agent-identity: the Claude Code side was not put back; run bash $self --require"
     if [ "$sw_codex_before" = on ] && [ "$codex_now" != on ]; then
       run_codex_guard --require-identity || echo "apply-agent-identity: the Codex side was not put back; run bash $self --require"
     fi
@@ -2178,20 +2316,25 @@ do_require() {
   sw_op=require sw_claude_done=0
   sw_capture_before
   trap 'abort_switch INT' INT; trap 'abort_switch TERM' TERM
-  claude_switch_set || { trap - INT TERM; echo "apply-agent-identity: --require stopped at Claude Code, nothing was changed"; return 1; }
-  sw_claude_done=$sw_changed
+  if ! claude_switch_set; then
+    trap '' INT TERM
+    sw_restore_before || echo "apply-agent-identity: putting Claude Code back did not finish; run bash $self --unrequire"
+    trap - INT TERM
+    echo "apply-agent-identity: --require stopped at Claude Code; Codex was not touched"
+    return 1
+  fi
   if ! run_codex_guard --require-identity; then
     trap '' INT TERM
     echo "apply-agent-identity: apply-codex-guard.sh --require-identity failed, so the switch is not on for Codex"
-    if [ "$sw_claude_done" = 1 ]; then
-      echo "apply-agent-identity: rolling back the Claude Code side"
-      if claude_switch_clear; then
-        echo "apply-agent-identity: --require rolled back; the switch is off for both"
+    echo "apply-agent-identity: rolling back the Claude Code side"
+    if sw_restore_before; then
+      if switch_is_on "$sw_set_before"; then
+        echo "apply-agent-identity: --require rolled back; Claude Code is as it was before (on)"
       else
-        echo "apply-agent-identity: the rollback of the Claude Code side did not finish; run bash $self --unrequire"
+        echo "apply-agent-identity: --require rolled back; the switch is off for both"
       fi
     else
-      echo "apply-agent-identity: nothing else was changed"
+      echo "apply-agent-identity: the rollback of the Claude Code side did not finish; run bash $self --unrequire"
     fi
     trap - INT TERM
     return 1
@@ -2217,20 +2360,27 @@ do_unrequire() {
   sw_op=unrequire sw_claude_done=0
   sw_capture_before
   trap 'abort_switch INT' INT; trap 'abort_switch TERM' TERM
-  claude_switch_clear || { trap - INT TERM; echo "apply-agent-identity: --unrequire stopped at Claude Code, nothing was changed"; return 1; }
-  sw_claude_done=$sw_changed
+  if ! claude_switch_clear; then
+    trap '' INT TERM
+    sw_restore_before || echo "apply-agent-identity: putting Claude Code back did not finish; run bash $self --require"
+    trap - INT TERM
+    echo "apply-agent-identity: --unrequire stopped at Claude Code; Codex was not touched"
+    return 1
+  fi
   case $cs in
     on)
       if ! run_codex_guard --no-require-identity; then
         trap '' INT TERM
         echo "apply-agent-identity: apply-codex-guard.sh --no-require-identity failed, so the switch is still on for Codex"
-        if [ "$sw_claude_done" = 1 ]; then
-          echo "apply-agent-identity: putting the Claude Code side back"
-          if claude_switch_set; then
+        echo "apply-agent-identity: putting the Claude Code side back"
+        if sw_restore_before; then
+          if switch_is_on "$sw_set_before"; then
             echo "apply-agent-identity: --unrequire rolled back; the switch is on for both"
           else
-            echo "apply-agent-identity: putting it back did not finish; run bash $self --require"
+            echo "apply-agent-identity: --unrequire rolled back; Claude Code is as it was before"
           fi
+        else
+          echo "apply-agent-identity: putting it back did not finish; run bash $self --require"
         fi
         trap - INT TERM
         return 1
@@ -2256,7 +2406,7 @@ do_unrequire() {
 note_switch_stays() {
   local st where who
   if [ "$target" = codex ]; then st=$(codex_switch_state); where="--require-identity in the hook command"; who=Codex
-  else st=$(claude_switch_state); where="env.$SWITCH_KEY in $settings"; who="Claude Code"; fi
+  else st=$(claude_switch_state); where="$st: env.$SWITCH_KEY in $settings, the record $sw_record, or the environment"; who="Claude Code"; fi
   switch_is_on "$st" || return 0
   echo "apply-agent-identity: the agent-identity switch stays ON ($where), so $who now refuses GitHub writes until an identity is applied again (bash $self$([ "$target" = codex ] && echo " --codex")); the machine fails closed. To turn the switch off, for both: bash $self --unrequire"
 }

@@ -66,8 +66,10 @@ A MINOR release (v1.2.0): the agent identity reaches Codex, the guard's agent-id
   cause, the fix (`apply-agent-identity.sh --check` or `--check --codex`, and `--setup`
   on a new machine) and the rollback (`--unrequire`). With the switch off and no marker,
   Claude-mode answers are byte-identical to before. In Claude mode the switch also counts as
-  on while `~/.claude/agent-identity.require.json` records it, so a project's own
-  `settings.json` env cannot blank it.
+  on while a `agent-identity.require.json` record says so, looked up in both
+  `$CLAUDE_CONFIG_DIR` and `~/.claude` (a project cannot redirect the lookup), so a project's
+  own `settings.json` env cannot blank it. A record that exists but cannot be read, or is not a
+  record, counts as on too (the guard fails closed), and the refusal names the record's path.
 - **`apply-agent-identity.sh --require` / `--unrequire`.** `--require` runs every Claude Code
   check, every Codex check and the trust check of the installed Codex hook, and requires the
   identity to be applied on both sides: a switch on with no identity would lock out every
@@ -79,12 +81,21 @@ A MINOR release (v1.2.0): the agent identity reaches Codex, the guard's agent-id
   `~/.claude/agent-identity.require.json`, the identity's conflict and concurrent-change
   rules) and runs `apply-codex-guard.sh --require-identity`; if that fails, the settings change
   is rolled back. An interrupt (INT, TERM) rolls back whatever this run changed, decided from
-  the state of the files. `--unrequire` is the reverse and needs no checks. Both refuse, with
-  a fix, when `hooks.json` cannot be parsed. `--unapply` leaves the switch and says so, so the
-  machine fails closed. `--check` states the switch for each side, counts a stale require
-  record as on (the guard obeys it, and its refusal names the record's path) with a warning and
-  the fix, warns when one side is on and the other off, and under `--codex` checks that Codex
-  trusts the installed hook. A running Claude Code session may pick up a changed
+  the state of the files, against what they were before the run, so a record-only switch (a
+  valid record and no value in `settings.json`) is put back too. A value `"1"` already in
+  `settings.json` by hand is not touched, but `--require` records it with `"owned": false`, so
+  the guard keeps the switch on if a project blanks the variable; `--unrequire` removes that
+  record and leaves the value, and says so. `--unrequire` removes the value only when the
+  record lists it and is owned; a record that does not list a value present in `settings.json`
+  is a CONFLICT. Every write and rename is checked: if `settings.json` cannot be replaced the
+  record stays, Codex is not touched and the exit is non-zero; a record changed by someone else
+  since it was read is a conflict, as for `settings.json`. `--unrequire` is the reverse and
+  needs no checks. Both refuse, with a fix, when `hooks.json` cannot be parsed. `--unapply`
+  leaves the switch and says so, so the machine fails closed. `--check` states the switch for
+  each side, counts a stale or unreadable require record, and the process environment
+  (`JARVIS_REQUIRE_AGENT_IDENTITY=1`), as on, with a warning and the fix for a stale record,
+  warns when one side is on and the other off, and under `--codex` checks that Codex trusts
+  the installed hook. A running Claude Code session may pick up a changed
   `settings.json` env at once, and the messages say so.
 - **`apply-codex-guard.sh`.** New `--require-identity` and `--no-require-identity`; with
   neither, the installed hook's switch state is kept, so re-running after a Jarvis update
@@ -99,7 +110,10 @@ A MINOR release (v1.2.0): the agent identity reaches Codex, the guard's agent-id
   does not know; the key is `$CODEX_HOME/hooks.json` made canonical (links, trailing slash),
   or `$HOME/.codex/hooks.json` as written when `CODEX_HOME` is unset; `[features] hooks =
   false` (or the legacy `codex_hooks = false`) is reported as `DISABLED`. A first install
-  while Claude Code's switch is on warns that Codex's starts off.
+  while Claude Code's switch is on (through its `settings.json`, the process environment or
+  a require record) warns that Codex's starts off. The switch is `--require-identity` as a
+  whole argument after `--codex`, wherever it stands, for the status, `--unrequire`, a
+  re-run and the guard alike.
 - **Optional separate Codex account.** `codex_login`, `codex_email` and
   `codex_gh_config_dir` (typed by hand; `--setup` never adds them) make Codex a second
   GitHub account, with its own `gh` login directory and repository invitations; messages

@@ -791,7 +791,10 @@ same messages. `--unapply` leaves the switch where it is and says so: with it on
 a runtime without an identity refuses GitHub writes, which is the safe way round. The
 Claude Code guard treats the switch as on while `~/.claude/agent-identity.require.json`
 says so, even if a project's own `settings.json` blanks the variable; only `--unrequire`
-removes that record.
+removes that record. The record is looked up in `$CLAUDE_CONFIG_DIR` and in `~/.claude`, so a
+project cannot redirect the lookup, and a record that exists but cannot be read counts as on.
+A value `"1"` that you set in `settings.json` by hand is recorded too, marked `"owned": false`;
+`--unrequire` removes that record and leaves your value.
 
 **Codex must be told to trust the guard again.** A Codex hook does not see the
 environment, so the switch is the hook's own argument, and Codex mode reads nothing

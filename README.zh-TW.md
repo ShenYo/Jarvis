@@ -686,7 +686,9 @@ identity，會拒絕所有寫入 GitHub 的操作，包括正在執行的 sessio
 若失敗，第一步會被回滾。`--unrequire` 是相反的操作，不需要任何檢查，印出相同的訊息。`--unapply`
 讓開關維持原狀並說明這件事：開關打開時，沒有 identity 的 runtime 會拒絕寫入 GitHub，這是比較安全的方向。只要
 `~/.claude/agent-identity.require.json` 這樣記錄，Claude Code 的 guard 就視開關為打開，即使專案自己的
-`settings.json` 把那個變數清空；只有 `--unrequire` 會移除那份紀錄。
+`settings.json` 把那個變數清空；只有 `--unrequire` 會移除那份紀錄。紀錄會同時在 `$CLAUDE_CONFIG_DIR`
+與 `~/.claude` 裡找，所以專案無法把查找導向別處；存在卻讀不了的紀錄也算打開。你自己在 `settings.json`
+裡設成 `"1"` 的值也會被記錄，標成 `"owned": false`；`--unrequire` 會移除那份紀錄，並保留你的值。
 
 **Codex 必須被告知再信任一次 guard。** Codex 的 hook 看不到環境，所以開關是 hook 自己的參數，
 而 Codex mode 只讀它：不讀環境變數，也不讀 `JARVIS_AGENT_IDENTITY` 標記。改了參數，hook 的

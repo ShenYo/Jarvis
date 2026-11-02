@@ -76,34 +76,54 @@ CODEX_CHECKPOINT = (
 
 def switch_on():
     """True when this machine requires an agent identity for GitHub writes.
-    Codex mode reads only the hook's --require-identity argument and ignores the
-    environment; Claude mode reads JARVIS_REQUIRE_AGENT_IDENTITY=1, or the record --require
-    left in the Claude config directory. The switch is
-    off unless something sets it, and then nothing here changes."""
+    Codex mode reads only the hook's --require-identity argument (a whole argument,
+    wherever it stands) and ignores the environment. Claude mode reads
+    JARVIS_REQUIRE_AGENT_IDENTITY=1 or the record --require leaves (see
+    require_record). The switch is off unless something sets it, and then nothing
+    here changes."""
     if CODEX:
         return REQUIRE_ARG
-    return env_switch_on() or require_record_on()
+    return env_switch_on() or require_record()[0] is not None
 
 
 def env_switch_on():
     return os.environ.get("JARVIS_REQUIRE_AGENT_IDENTITY") == "1"
 
 
-def require_record_path():
-    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
-    return os.path.join(home, "agent-identity.require.json")
+def require_record_paths():
+    """Where scripts/apply-agent-identity.sh --require leaves its record: the
+    Claude config directory the environment names and the default ~/.claude. Both
+    are read, so a project that redirects CLAUDE_CONFIG_DIR cannot hide the record."""
+    paths = []
+    for home in (os.environ.get("CLAUDE_CONFIG_DIR"), os.path.expanduser("~/.claude")):
+        if home:
+            path = os.path.join(home, "agent-identity.require.json")
+            if path not in paths:
+                paths.append(path)
+    return paths
 
 
-def require_record_on():
-    """True when scripts/apply-agent-identity.sh --require left its record in the
-    Claude config directory and the record says the switch is on. A project's own
-    .claude/settings.json env can blank or change the variable, which must not
-    turn the switch off; only --unrequire removes the record."""
-    try:
-        with open(require_record_path(), encoding="utf-8") as fh:
-            return json.load(fh)["env"]["JARVIS_REQUIRE_AGENT_IDENTITY"] == "1"
-    except Exception:
-        return False
+def require_record():
+    """(state, path) for the first require record that turns the switch on:
+    "on" when it says so, "unreadable" when it exists but is not JSON, not an
+    object, or has an env that is not an object, which fails closed. A readable
+    record that does not say "1" is off. A project's own .claude/settings.json env
+    can blank the variable, which must not turn the switch off; only --unrequire
+    removes the record. (None, None) when no record turns it on."""
+    for path in require_record_paths():
+        if not os.path.lexists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            env = data.get("env", {}) if isinstance(data, dict) else None
+            if not isinstance(env, dict):
+                raise ValueError("no env object")
+        except Exception:
+            return "unreadable", path
+        if env.get("JARVIS_REQUIRE_AGENT_IDENTITY") == "1":
+            return "on", path
+    return None, None
 
 
 def identity_missing():
@@ -128,12 +148,15 @@ def switch_note():
 
 def switch_cause():
     """What turned the switch on, for the refusal: the hook's argument, the
-    variable, or (the variable being off or blanked) the --require record."""
+    variable, or (the variable being off or blanked) a --require record."""
     if CODEX:
         return "--require-identity in the Codex hook's command"
     if env_switch_on():
         return "JARVIS_REQUIRE_AGENT_IDENTITY=1"
-    return "%s records it as on" % require_record_path()
+    state, path = require_record()
+    if state == "unreadable":
+        return "%s exists but cannot be read as a require record, which counts as on" % path
+    return "%s records it as on" % path
 
 
 def no_identity():

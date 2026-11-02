@@ -26,6 +26,8 @@ unset JARVIS_REQUIRE_AGENT_IDENTITY JARVIS_AGENT_IDENTITY
 # The hook falls back to ~/.claude and ~/.codex for its records; point both at empty
 # directories, so this machine's own applied identity never reaches a case.
 no_claude="$root/no-claude"; no_codex="$root/no-codex"; mkdir -p "$no_claude" "$no_codex"
+# The guard also reads the default ~/.claude for the require record, so HOME is an empty directory too.
+mkdir -p "$root/home"; export HOME="$root/home"
 export CLAUDE_CONFIG_DIR="$no_claude" CODEX_HOME="$no_codex"
 hook_args=""
 # An applied identity: the marker, the environment apply-agent-identity.sh writes,
@@ -726,12 +728,45 @@ apply_identity; export CLAUDE_CONFIG_DIR="$rec_home"
 probe allow 'gh pr create --title t'
 probe deny 'GH_TOKEN=x gh pr create --title t'
 drop_identity
-# a record that does not say "1", or cannot be read, leaves the switch off
+# a readable record that does not say "1" leaves the switch off
 export CLAUDE_CONFIG_DIR="$rec_home"
 echo '{"env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "0"}}' >"$rec_home/agent-identity.require.json"
 probe allow 'gh pr create --title t'
-echo '{ not json' >"$rec_home/agent-identity.require.json"
+echo '{"version": 1}' >"$rec_home/agent-identity.require.json"
 probe allow 'gh pr create --title t'
+# a record that exists but cannot be read, or is not a record, counts as ON (the guard fails closed)
+for bad in '{ not json' '[]' '"x"' '{"env": 5}' ''; do
+  printf '%s' "$bad" >"$rec_home/agent-identity.require.json"
+  probe deny 'gh pr create --title t'
+  probe allow 'gh pr view 12'
+done
+rm -f "$rec_home/agent-identity.require.json"; mkdir "$rec_home/agent-identity.require.json"
+probe deny 'gh pr create --title t'
+rmdir "$rec_home/agent-identity.require.json"
+printf '{ not json' >"$rec_home/agent-identity.require.json"
+reason=$("$py" -I "$hook" <"$root/in.json" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+total=$((total + 1))
+if printf '%s' "$reason" | grep -qF "$rec_home/agent-identity.require.json exists but cannot be read as a require record, which counts as on"; then
+  echo "ok   an unreadable record is named in the refusal, with its path"
+else
+  echo "FAIL an unreadable record is named in the refusal, with its path: $reason"; fails=$((fails + 1))
+fi
+# the record is looked up in the default ~/.claude too: a project that points CLAUDE_CONFIG_DIR elsewhere cannot hide it
+mkdir -p "$HOME/.claude"
+echo '{"version": 1, "env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "1"}}' >"$HOME/.claude/agent-identity.require.json"
+export CLAUDE_CONFIG_DIR="$no_claude" JARVIS_REQUIRE_AGENT_IDENTITY=
+probe deny 'gh pr create --title t'
+probe deny 'git push origin feat/y' "$onmain"
+probe allow 'gh pr view 12'
+export CLAUDE_CONFIG_DIR="$root/does-not-exist"
+probe deny 'gh pr create --title t'
+unset CLAUDE_CONFIG_DIR JARVIS_REQUIRE_AGENT_IDENTITY
+probe deny 'gh pr create --title t'
+echo '{"env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "0"}}' >"$HOME/.claude/agent-identity.require.json"
+export CLAUDE_CONFIG_DIR="$no_claude"
+probe allow 'gh pr create --title t'
+rm -f "$HOME/.claude/agent-identity.require.json"
+export CLAUDE_CONFIG_DIR="$rec_home"
 echo '{"env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "1"}}' >"$rec_home/agent-identity.require.json"
 # the refusal names the record, not the variable, as the cause when the record alone turned the switch on
 jq -n --arg d "$feat" '{tool_name: "Bash", tool_input: {command: "gh pr create --title t"}, cwd: $d}' >"$root/in.json"

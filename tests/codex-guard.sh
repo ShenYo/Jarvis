@@ -25,6 +25,8 @@ root=$(mktemp -d "${TMPDIR:-/tmp}/codex-guard-test.XXXXXX")
 echo "sandboxes: $root"
 # the require record of Claude Code, which apply-codex-guard.sh reads, comes from an empty directory unless a case says otherwise
 mkdir -p "$root/no-claude"; export CLAUDE_CONFIG_DIR="$root/no-claude"
+# ... and so is HOME, whose ~/.claude it also reads
+mkdir -p "$root/home"; export HOME="$root/home"
 
 fails=0
 n=0
@@ -552,6 +554,46 @@ crd="$dir/claude"; mkdir -p "$crd"
 echo '{"version": 1, "env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "1"}}' >"$crd/agent-identity.require.json"
 CLAUDE_CONFIG_DIR="$crd" run --check
 check "switch warning: --check on a fresh home says it too" grep -q 'WARN: Claude Code.s agent-identity switch is on' "$dir/out"
+
+# 9j. Claude Code's switch is on through its settings.json or its environment, with no record: a fresh install warns too.
+sandbox
+crd="$dir/claude"; mkdir -p "$crd"
+echo '{"env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "1"}}' >"$crd/settings.json"
+CLAUDE_CONFIG_DIR="$crd" run
+check "switch warning: Claude Code's switch on in settings.json (no record) warns" bash -c "grep -q 'WARN: Claude Code.s agent-identity switch is on (via $crd/settings.json)' '$dir/out'"
+sandbox
+JARVIS_REQUIRE_AGENT_IDENTITY=1 run
+check "switch warning: Claude Code's switch on in the process environment warns" bash -c "grep -q 'WARN: Claude Code.s agent-identity switch is on (via the process environment)' '$dir/out'"
+sandbox
+crd="$dir/claude"; mkdir -p "$crd"
+echo '{"env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "0"}}' >"$crd/settings.json"
+CLAUDE_CONFIG_DIR="$crd" JARVIS_REQUIRE_AGENT_IDENTITY=0 run
+check "switch warning: none when settings.json and the environment say 0" bash -c "! grep -q 'WARN' '$dir/out'"
+sandbox
+crd="$dir/claude"; mkdir -p "$crd"
+printf '{ not json' >"$crd/agent-identity.require.json"
+CLAUDE_CONFIG_DIR="$crd" run
+check "switch warning: a record that cannot be read counts as on (the guard fails closed)" bash -c "grep -q 'WARN: Claude Code.s agent-identity switch is on' '$dir/out'"
+
+# 9k. --require-identity as a whole word anywhere after --codex is the switch, as the guard reads its arguments.
+sandbox
+cat >"$h" <<'EOF2'
+{"hooks": {"PreToolUse": [{"matcher": "^Bash$", "hooks": [{"type": "command", "command": "python3 ~/.codex/hooks/jarvis-guard.py --codex --require-identity --extra", "timeout": 3}]}]}}
+EOF2
+run; rc=$?
+check "switch word before another argument: a plain re-run keeps the switch on" bash -c "test $rc = 0 && jq -e '$sw_on' '$h' >/dev/null && grep -q 'agent-identity switch is on' '$dir/out'"
+sandbox
+cat >"$h" <<'EOF2'
+{"hooks": {"PreToolUse": [{"matcher": "^Bash$", "hooks": [{"type": "command", "command": "python3 ~/.codex/hooks/jarvis-guard.py --codex --not--require-identity", "timeout": 3}]}]}}
+EOF2
+run
+check "a word that only contains --require-identity is not the switch" bash -c "grep -q 'agent-identity switch is off' '$dir/out'"
+sandbox
+cat >"$h" <<'EOF2'
+{"hooks": {"PreToolUse": [{"matcher": "^Bash$", "hooks": [{"type": "command", "command": "python3 ~/.codex/hooks/jarvis-guard.py --require-identity", "timeout": 3}]}]}}
+EOF2
+run
+check "--require-identity before --codex is not the switch for the hook" bash -c "grep -q 'agent-identity switch is off' '$dir/out'"
 
 # --- the installed hook, as Codex runs it --------------------------------------
 
