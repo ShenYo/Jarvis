@@ -41,6 +41,8 @@ jobs:
         run: bash tests/githooks.sh
       - name: The two READMEs agree
         run: python3 scripts/check-readme-parity.py README.md README.zh-TW.md scripts/readme-stale-terms.txt
+      - name: The two setup guides agree
+        run: python3 scripts/check-readme-parity.py docs/setup-new-machine.md docs/setup-new-machine.zh-TW.md scripts/readme-stale-terms.txt
 
   skills:
     runs-on: ubuntu-latest

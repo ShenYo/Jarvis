@@ -52,7 +52,7 @@ merge, and a block is a veto no source can lift, so it breaks nothing outright.
 But it sets no `onFailure`, so it fails *open*, and it blocks `git push`
 unconditionally, which contradicts the rule that pushing a non-default branch
 is the agent's own call. On this machine the
-[Claude Code guard](./README.md#claude-code-guard) already covers what it
+[Claude Code guard](./docs/guard.md#claude-code-guard) already covers what it
 offers. Run it only where a project wants its own copy of that guard.
 
 ## The Git hooks are this repository's own
@@ -75,9 +75,9 @@ already loads. These five are this repository's own:
 1. **Scratch files go under `docs/temp/<purpose>/`**, which `.gitignore`
    ignores. Never stage one, and never reach for a blanket `git add -A` across
    a mixed tree to find out what is there.
-2. Both READMEs are checked for parity by
-   [`scripts/check-readme-parity.py`](./scripts/check-readme-parity.py). An
-   edit to one needs the matching edit to the other.
+2. Both READMEs, and both versions of `docs/setup-new-machine`, are checked
+   for parity by [`scripts/check-readme-parity.py`](./scripts/check-readme-parity.py).
+   An edit to one needs the matching edit to the other.
 3. Never write to `~/.Jarvis` from inside a consumer project's workflow. This
    repository is optional for every project; a project that writes here has
    made it mandatory.
@@ -91,7 +91,7 @@ already loads. These five are this repository's own:
    note is reviewed with the change; the entry is the tag's message and the
    GitHub Release's notes. Cut a tag or a GitHub Release only with the user's
    go-ahead, naming the tag and the commit
-   ([Releases](./README.md#releases)).
+   ([Releases](./docs/releases.md)).
 
 ### Git
 
