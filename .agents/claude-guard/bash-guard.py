@@ -28,6 +28,11 @@ whose identity is not applied, is the environment variable
 JARVIS_REQUIRE_AGENT_IDENTITY=1 under Claude Code and the argument
 `--require-identity` in Codex mode, where the environment is ignored.
 
+`gh pr merge <n> --auto` is the one merge the guard lets through, and only where
+GitHub itself requires the code owner's approval: at hook time it asks GitHub,
+with the agent's own login, for the rules that apply to the pull request's base
+branch, and fails closed on anything else (see auto_merge_problem).
+
 Compatible with Python 3.9, the version macOS ships at /usr/bin/python3.
 """
 import hashlib
@@ -41,6 +46,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 
 MAX_DEPTH = 6
 MAX_ALIAS_DEPTH = 8
@@ -315,6 +321,8 @@ class Result:
         self.unset = []       # writes refused: the machine has no agent identity
         self.hijack = []      # writes refused: the agent identity is overridden
         self.setup_broken = False  # ...because the applied identity's record or env is not sound
+        self.auto_merges = []  # each `gh pr merge --auto` still to be verified
+        self.command = ""      # the whole command text, which an auto-merge must be all of
 
     def github_write(self, what):
         if what not in self.writes:
@@ -1456,13 +1464,25 @@ def analyze_gh(args, ctx, res, stdin=()):
     if group == "pr":
         delete_branch = "d" in o.short or has_long(o, "--delete-branch", 5)
         if action == "merge":
-            res.check("gh pr merge merges a pull request")
+            rest = args[2:]
+            if args[:2] != ["pr", "merge"] or not any(a in ("--auto", "--disable-auto") for a in rest):
+                res.check("gh pr merge merges a pull request")
+            else:
+                form, why = auto_merge_form(rest)
+                why = why or not_simple(res.command)
+                if why:
+                    res.check(auto_merge_refusal(why))
+                elif form["mode"] == "auto":
+                    res.auto_merges.append(form)   # verified once the identity is judged
+                # --disable-auto reduces what merges, so it is the agent's call
             if delete_branch:
                 res.no("gh pr merge --delete-branch deletes a branch")
         elif action in ("close", "reopen"):
             res.check("gh pr %s changes a shared review" % action)
             if delete_branch:
                 res.no("gh pr close --delete-branch deletes a branch")
+        elif action == "edit" and pr_edit_changes_base(args[2:]):
+            res.check(BASE_CHANGE % "gh pr edit --base")
         elif action == "review" and ("a" in o.short or has_long(o, "--approve", 4)):
             res.check("gh pr review --approve approves a pull request; an agent never approves its own work")
         elif action == "comment":
@@ -1544,6 +1564,8 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
             res.check("the GraphQL mutation merges, closes, or changes repository settings")
         if GRAPHQL_APPROVE.search(body):
             res.check("the GraphQL mutation approves a pull request")
+        if re.search(r"\bupdatePullRequest\b", body) and re.search(r"\bbaseRefName\b", body):
+            res.check(BASE_CHANGE % "the GraphQL updatePullRequest mutation with baseRefName")
         return
     if method == "GET":
         return
@@ -1553,6 +1575,8 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
         res.check("the API call approves a pull request")
     if re.search(r"(pulls|issues)/\d+$", endpoint) and re.search(r"state=(closed|open)", body):
         res.check("the API call closes or reopens a pull request")
+    if re.search(r"pulls/\d+$", endpoint) and (re.search(r"(^|\n)base=", body) or re.search(r'"base"\s*:', body)):
+        res.check(BASE_CHANGE % "the API call to a pull request with a base field")
     if re.search(r"git/refs/", endpoint) and re.search(r"force=true", body):
         res.no("the API call force-updates a ref")
     if re.search(r"git/refs/heads/(main|master)$", endpoint):
@@ -1561,6 +1585,252 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
         res.check("the API call publishes a release or a tag, and either is a checkpoint")
     if REPO_SETTINGS.match(endpoint):
         res.check("the API call changes repository settings or protection")
+
+
+# --- gh pr merge --auto -------------------------------------------------------
+
+AUTO_MERGE_DOC = "~/.Jarvis/docs/git.md (Arming auto-merge)"
+NAME = r"[A-Za-z0-9_.-]+"
+PR_NUMBER = re.compile(r"^[1-9][0-9]{0,8}$")
+PR_URL = re.compile(r"^https://github\.com/(%s)/(%s)/pull/([1-9][0-9]{0,8})$" % (NAME, NAME))
+REPO_SLUG = re.compile(r"^(%s)/(%s)$" % (NAME, NAME))
+# What the owner's approval needs to be, to be the thing that decides the merge.
+AUTO_MERGE_RULES = (
+    ("required_approving_review_count", lambda v: type(v) is int and v >= 1, ">= 1"),
+    ("require_code_owner_review", lambda v: v is True, "true"),
+    ("dismiss_stale_reviews_on_push", lambda v: v is True, "true"),
+    ("require_last_push_approval", lambda v: v is True, "true"),
+)
+CODEOWNERS_PATHS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
+
+# The only text an auto-merge may be: `gh pr merge` and words of plain characters, nothing else. Any
+# quote, `$`, `;`, `&`, `|`, parenthesis, redirection, newline or glob character would let the shell
+# run, change or add something the checks below did not see.
+SIMPLE_MERGE = re.compile(r"gh[ \t]+pr[ \t]+merge(?:[ \t]+[A-Za-z0-9_./:=-]+)*")
+
+BASE_CHANGE = ("%s changes a pull request's base branch, which can move an armed auto-merge to a branch whose "
+               "rules do not require the owner's approval (GitHub keeps auto-merge enabled for a writer who "
+               "does it), so it is a merge checkpoint")
+
+
+def pr_edit_changes_base(rest):
+    """True when `gh pr edit` is given --base or -B (cobra takes no abbreviation of a long option)."""
+    return any(a == "--base" or a.startswith("--base=") or re.match(r"^-[A-Za-z]*B", a) for a in rest)
+
+
+def not_simple(text):
+    """None when the whole command is one plain `gh pr merge ...` run by the name gh, else what
+    disqualifies it. Anything around the command (another command, an assignment, a wrapper, a
+    path to gh, a function or alias, a substitution) could change which repository gh acts on or
+    add a flag the checks never saw."""
+    text = text.strip()
+    if SIMPLE_MERGE.fullmatch(text):
+        return None
+    found = re.search(r"[;&|\n]", text)
+    if found:
+        return "it is not the only command in the line (found %s)" % ("a newline" if found.group() == "\n" else "`%s`" % found.group())
+    found = re.search(r"[$`()<>]", text)
+    if found:
+        return "it uses a substitution, subshell, variable or redirection (`%s`)" % found.group()
+    found = re.search(r"""['"\\*?\[\]{}~#!]""", text)
+    if found:
+        return "it uses quoting or a character the shell expands (`%s`)" % found.group()
+    first = text.split()[0] if text.split() else ""
+    if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", first):
+        return "it starts with an assignment (%s)" % first
+    if first != "gh":
+        return "it is run through `%s`, not as plain `gh` (a wrapper or a path to gh)" % first
+    return "it is not exactly `gh pr merge` and plain arguments"
+
+
+def auto_merge_form(rest):
+    """(form, None) when `gh pr merge <rest>` is exactly one of the forms the agent may use, else
+    (None, what disqualifies it): `<n> --auto [--squash|--merge|--rebase] -R owner/repo` or
+    `<n> --disable-auto [-R owner/repo]`, where <n> is a pull request number or a github.com pull
+    request URL. --auto names its repository, by -R or by the URL: nothing is read from the
+    working directory, the environment or gh's own defaults."""
+    mode = strategy = repo = target = None
+    k = 0
+    while k < len(rest):
+        a = rest[k]
+        if a in ("--auto", "--disable-auto"):
+            if mode:
+                return None, "--auto and --disable-auto are both given, or one of them twice"
+            mode = "auto" if a == "--auto" else "disable"
+        elif a in ("--squash", "--merge", "--rebase"):
+            if strategy:
+                return None, "%s is given with %s" % (a, strategy)
+            strategy = a
+        elif a in ("-R", "--repo") or a.startswith("--repo=") or (a.startswith("-R") and len(a) > 2):
+            if repo is not None:
+                return None, "-R/--repo is given twice"
+            if a in ("-R", "--repo"):
+                k += 1
+                if k >= len(rest):
+                    return None, "%s has no value" % a
+                repo = rest[k]
+            else:
+                repo = a[7:] if a.startswith("--repo=") else a[2:]
+            if not REPO_SLUG.match(repo) or ".." in repo.split("/"):
+                return None, "the repository %s is not owner/repo" % repo
+        elif a.startswith("-"):
+            return None, "the flag %s is not one of --squash, --merge, --rebase and -R/--repo" % a
+        else:
+            if target is not None:
+                return None, "a second argument (%s) after the pull request" % a
+            target = a
+        k += 1
+    if target is None:
+        return None, "there is no pull request number or URL"
+    if strategy and mode != "auto":
+        return None, "%s is given with --disable-auto" % strategy
+    url = PR_URL.match(target)
+    if url:
+        slug = "%s/%s" % (url.group(1), url.group(2))
+        if repo is not None and repo.lower() != slug.lower():
+            return None, "-R %s names another repository than the URL" % repo
+        repo, number = slug, url.group(3)
+    elif PR_NUMBER.match(target):
+        number = target
+    else:
+        return None, "%s is not a pull request number or a github.com pull request URL" % target
+    if mode == "auto" and repo is None:
+        return None, "--auto needs an explicit -R owner/repo or a pull request URL"
+    return {"mode": mode, "number": number, "repo": repo}, None
+
+
+def auto_merge_refusal(why):
+    return ("gh pr merge --auto/--disable-auto is refused: %s. Merging is the owner's call; the agent may arm "
+            "auto-merge only as the single command `gh pr merge <n> --auto -R owner/repo` where GitHub "
+            "requires the owner's approval, and the rules for that are in %s" % (why, AUTO_MERGE_DOC))
+
+
+def gh_env():
+    """The environment `gh` is asked in: the agent's own login, nobody's token.
+    Claude mode takes GH_CONFIG_DIR from the Claude record, then from this process;
+    Codex mode from the Codex record, which lists it (a Codex hook does not see
+    the policy env), then from this process."""
+    env = {k: v for k, v in os.environ.items() if k not in HIJACK_ENV}
+    config = None
+    try:
+        if CODEX:
+            with open(codex_record_path(), encoding="utf-8") as fh:
+                config = json.load(fh).get("set", {}).get("GH_CONFIG_DIR")
+        else:
+            with open(applied_record_path(), encoding="utf-8") as fh:
+                config = json.load(fh).get("env", {}).get("GH_CONFIG_DIR")
+    except Exception:
+        pass
+    if isinstance(config, str) and config:
+        env["GH_CONFIG_DIR"] = os.path.expanduser(config)
+    env.update(GH_PROMPT_DISABLED="1", GH_NO_UPDATE_NOTIFIER="1", NO_COLOR="1")
+    return env
+
+
+def gh_answer(env, *args):
+    """gh's JSON answer, or None on any failure: not installed, a non-zero exit,
+    no answer inside the guard's budget (the process group is killed), or text
+    that is not JSON."""
+    left = DEADLINE - time.monotonic()
+    if left <= 0:
+        return None
+    try:
+        proc = subprocess.Popen(["gh"] + list(args), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL, env=env, text=True, start_new_session=True)
+    except Exception:
+        return None
+    try:
+        out, _ = proc.communicate(timeout=min(2.5, left))
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except Exception:
+            pass
+        try:
+            proc.communicate(timeout=0.5)
+        except Exception:
+            pass
+        return None
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        return json.loads(out)
+    except Exception:
+        return None
+
+
+def auto_merge_problem(form):
+    """None when everything below holds for the pull request's base branch, else the first thing
+    that does not. Everything unknown is a problem: an answer that does not come, a rule or a file
+    that is not there.
+      - a pull_request rule asks for an approval, the code owner's, dropped when stale, and for the
+        last push to be approved;
+      - the ruleset it belongs to cannot be bypassed by the agent's login (current_user_can_bypass
+        is "never"), or the rule would not bind the agent;
+      - the branch has a CODEOWNERS file without errors, or the code-owner review asks nobody."""
+    try:
+        if os.environ.get("GH_REPO") or os.environ.get("GH_HOST"):
+            return ("GH_REPO or GH_HOST is set in this environment, so gh may act on a repository other "
+                    "than the one checked; unset it")
+        repo, number, env = form["repo"], form["number"], gh_env()
+        pull = gh_answer(env, "api", "repos/%s/pulls/%s" % (repo, number))
+        base = (pull.get("base") or {}).get("ref") if isinstance(pull, dict) and isinstance(pull.get("base"), dict) else None
+        if not isinstance(base, str) or not base:
+            return ("the base branch of %s#%s could not be read (gh failed, timed out or answered "
+                    "something unreadable)" % (repo, number))
+        ref = urllib.parse.quote(base, safe="")
+        rules = gh_answer(env, "api", "repos/%s/rules/branches/%s" % (repo, ref))
+        if not isinstance(rules, list):
+            return ("the rules for branch %s of %s could not be read (gh failed, timed out or answered "
+                    "something unreadable)" % (base, repo))
+        best, good = None, []
+        for rule in rules:
+            params = rule.get("parameters") if isinstance(rule, dict) and rule.get("type") == "pull_request" else None
+            if not isinstance(params, dict):
+                continue
+            missing = [(name, want) for name, ok, want in AUTO_MERGE_RULES if not ok(params.get(name))]
+            if not missing:
+                good.append(rule)
+            elif best is None or len(missing) < len(best):
+                best = missing
+        if not good:
+            if best is None:
+                return "branch %s of %s has no pull_request rule, so nothing requires an approval" % (base, repo)
+            return ("the pull_request rule on branch %s of %s does not set %s"
+                    % (base, repo, ", ".join("%s = %s" % m for m in best)))
+        seen = []
+        for rule in good:
+            rid = rule.get("ruleset_id")
+            if rule.get("ruleset_source_type") != "Repository" or type(rid) is not int:
+                seen.append("a rule from outside this repository's own rulesets, which is not checked")
+                continue
+            ruleset = gh_answer(env, "api", "repos/%s/rulesets/%s" % (repo, rid))
+            can = ruleset.get("current_user_can_bypass") if isinstance(ruleset, dict) else None
+            if can == "never":
+                seen = []
+                break
+            seen.append("ruleset %s says current_user_can_bypass = %s for the agent's login"
+                        % (rid, "nothing" if can is None else repr(can)))
+        if seen:
+            return ("the rule that requires the approval can be bypassed or not checked: %s; the agent's "
+                    "login must be bound by it" % "; ".join(seen))
+        found = False
+        for path in CODEOWNERS_PATHS:
+            entry = gh_answer(env, "api", "repos/%s/contents/%s?ref=%s" % (repo, path, ref))
+            if isinstance(entry, dict) and entry.get("type") == "file":
+                found = True
+                break
+        if not found:
+            return ("branch %s of %s has no CODEOWNERS file (%s), so require_code_owner_review asks nobody"
+                    % (base, repo, ", ".join(CODEOWNERS_PATHS)))
+        errors = gh_answer(env, "api", "repos/%s/codeowners/errors?ref=%s" % (repo, ref))
+        if not (isinstance(errors, dict) and isinstance(errors.get("errors"), list) and not errors["errors"]):
+            return "the CODEOWNERS file on branch %s of %s has errors, or its errors could not be read" % (base, repo)
+        return None
+    except Exception as exc:
+        return "the check failed (%s: %s)" % (type(exc).__name__, exc)
 
 
 def read_small(path, cwd=None):
@@ -1608,12 +1878,18 @@ SUSPECT = re.compile(r"\b(git|gh|rm|find|eval|xargs|bash|sh|zsh|python[0-9.]*|no
 
 def decide(command, cwd):
     res = Result()
+    res.command = command
     try:
         analyze_text(command, Ctx(cwd), res)
     except Exception as exc:  # unparseable: fail closed only where it matters
         if SUSPECT.search(command):
             res.no("the guard could not parse the command (%s: %s)" % (type(exc).__name__, exc))
     res.judge_identity()
+    if res.auto_merges and not (res.deny or res.unset or res.hijack):
+        for form in res.auto_merges:
+            problem = auto_merge_problem(form)
+            if problem:
+                res.check(auto_merge_refusal(problem))
     return res
 
 

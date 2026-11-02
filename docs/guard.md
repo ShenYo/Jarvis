@@ -50,6 +50,17 @@ a repository in a scratch directory on this machine skips the checkpoint.
 When the hook cannot tell where a push goes, because the directory, the
 branch or the configuration is unknown, it asks.
 
+One merge is not a checkpoint: `gh pr merge <n> --auto -R owner/repo` (or a pull request URL),
+alone or with `--squash`, `--merge` or `--rebase`, and `gh pr merge <n> --disable-auto`, each as the
+whole command with nothing around it. The hook leaves `--disable-auto` alone. For `--auto` it
+first asks GitHub, with the agent's own login, whether the base branch's rules require the code
+owner's approval (at least one approval, code-owner review, stale approvals dismissed on push,
+last-push approval), whether the agent's login can bypass that rule, and whether the branch has a
+CODEOWNERS file without errors. If not, if the answer does not come, or if the command is anything
+but that single command, it asks as for any merge. Retargeting a pull request with `gh pr edit
+--base` or the API asks too, because an armed auto-merge would follow it. The owner's settings
+for this are in [`docs/git.md`](./git.md).
+
 What this does not do. The hook reads the command it is given, not a script
 that command runs, and not a command a program builds at run time; in auto
 mode the classifier is the layer for those, and it is not deterministic. It

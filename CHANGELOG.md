@@ -21,6 +21,55 @@ How an entry is written:
 - Nothing here is a dependency of any project, so no entry has an upgrade path
   for a consumer.
 
+## Unreleased
+
+A MINOR release: the guard now lets an agent arm auto-merge where GitHub requires the owner's approval (#56, step 1).
+
+- **`gh pr merge <n> --auto` where the owner's approval is enforced.** The guard no longer
+  treats `gh pr merge <n> --auto -R owner/repo` (or a pull request URL; with at most one of
+  `--squash`, `--merge`, `--rebase`) or `gh pr merge <n> --disable-auto` as a merge checkpoint, in
+  Claude Code and in Codex, but only as the whole command: any other segment, an assignment, a
+  wrapper (`env`, `xargs`, `command`, `find -exec`), a path to `gh`, a function or alias,
+  quoting, or any other flag is the usual checkpoint (ask in Claude Code, deny in Codex), and the
+  refusal names which one. `--auto` always names its repository (`-R` or the URL); nothing is read
+  from the working directory, `GH_REPO`, `GIT_DIR` or `gh repo set-default`, and it is refused while
+  `GH_REPO` or `GH_HOST` is set. At hook time the guard asks GitHub, with the agent's own login
+  (`GH_CONFIG_DIR` from the Claude record or the Codex record; `GH_TOKEN`, `GITHUB_TOKEN` and
+  `GH_HOST` stripped), for the pull request's base branch and then for `rules/branches/{base}`, and
+  allows it only if (1) a `pull_request` rule there has `required_approving_review_count` of at
+  least one, `require_code_owner_review`, `dismiss_stale_reviews_on_push` and
+  `require_last_push_approval`; (2) that rule's ruleset says `current_user_can_bypass` is `never`
+  for the agent's login; and (3) the base branch has a CODEOWNERS file (`.github/CODEOWNERS`,
+  `CODEOWNERS` or `docs/CODEOWNERS`) that `codeowners/errors` reports no errors for. Any error,
+  timeout (inside the guard's existing 6 s budget), unreadable answer or missing piece is a
+  refusal that names the failing condition and points at `docs/git.md`. Until the pull request
+  that adds `.github/CODEOWNERS` has merged, `--auto` is refused on Jarvis, which is the intended
+  order. A direct merge, `--admin`, `--delete-branch` and the GraphQL merge mutations are refused as
+  before. Why: auto-merge merges as soon as the checks pass unless an approval is a requirement,
+  which is the case today on Jarvis (zero required approvals) and on a repository with no ruleset.
+  The agent-identity switch still applies first.
+- **Retargeting a pull request is a merge checkpoint.** `gh pr edit --base`/`-B`, a `gh api`
+  write to `pulls/{n}` with a `base` field, and the GraphQL `updatePullRequest` with
+  `baseRefName` now ask (deny in Codex): GitHub keeps auto-merge enabled for a writer, so an armed
+  auto-merge would follow the pull request to a branch whose rules were never checked. Every other
+  answer is byte-identical to before.
+- **`.github/CODEOWNERS`** with `* @ShenYo`, so that the code-owner review the rule requires is
+  the owner's, not that of an App that approves.
+- **`docs/git.md`** splits the merge row: merging, closing and reopening stay a person's;
+  arming auto-merge is the agent's where the rules require the owner's approval. A new section
+  lists the settings the owner applies.
+- **`guard.json`** drops the `Bash(gh pr merge*)` permission ask, and the auto-mode
+  checkpoint text makes an exception for a `gh pr merge <n> --auto` or `--disable-auto` with an
+  explicit `-R owner/repo` or pull request URL, run as a single command, which the Bash guard
+  also verifies. Otherwise every armed auto-merge would still stop for a prompt. A direct merge
+  is still asked by the guard, whose hook is `"onFailure": "block"`, so a guard failure blocks
+  rather than lets it through. The `gh api` merge and GraphQL auto-merge asks are kept.
+
+On this machine: run `bash ~/.Jarvis/scripts/apply-claude-guard.sh` and
+`bash ~/.Jarvis/scripts/apply-codex-guard.sh` to copy the new hook. Codex needs no new trust: the hook's
+definition in `hooks.json` is unchanged, and trust follows the definition, not the script it runs. Nothing is required on GitHub for this release to be safe: until the owner applies the
+ruleset settings in `docs/git.md`, the guard simply keeps refusing `--auto`.
+
 ## v1.2.2 (2026-11-03)
 
 A PATCH release: documentation only.

@@ -857,6 +857,351 @@ else
   echo "FAIL the override reason names what is overridden: $reason"; fails=$((fails + 1))
 fi
 
+echo "== gh pr merge --auto: allowed only where GitHub requires the owner's approval, verified at hook time"
+# A stub gh on PATH answers the endpoints the check reads from fixture files, logs what it was asked
+# and with which login, and can fail or hang. Nothing here reaches GitHub.
+hook_args=""; drop_identity
+unset JARVIS_REQUIRE_AGENT_IDENTITY GH_REPO GH_HOST
+export CODEX_HOME="$no_codex" CLAUDE_CONFIG_DIR="$no_claude"
+stub="$root/ghstub"; mkdir -p "$stub/bin" "$stub/contents"
+cat >"$stub/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\tGH_CONFIG_DIR=%s\tGH_TOKEN=%s\tGITHUB_TOKEN=%s\tGH_HOST=%s\n' "$*" "${GH_CONFIG_DIR-unset}" \
+  "${GH_TOKEN-unset}" "${GITHUB_TOKEN-unset}" "${GH_HOST-unset}" >>"$STUB_DIR/log"
+[ -n "${STUB_SLEEP:-}" ] && sleep "$STUB_SLEEP"
+[ -n "${STUB_FAIL:-}" ] && exit 1
+[ "$1" = api ] || exit 1
+case "$2" in
+  repos/*/pulls/*) f=pull.json ;;
+  repos/*/rules/branches/*) f=rules.json ;;
+  repos/*/rulesets/*) f=ruleset-${2##*/}.json ;;
+  repos/*/contents/*) k=${2#*/contents/}; k=${k%%\?*}; k=${k//\//_}; f=contents/${k#.}.json ;;
+  repos/*/codeowners/errors*) f=errors.json ;;
+  *) exit 1 ;;
+esac
+[ -f "$STUB_DIR/$f" ] || exit 1
+cat "$STUB_DIR/$f"
+EOF
+chmod +x "$stub/bin/gh"
+# The shape GitHub answers rules/branches/{branch} with (read from the real API), the pull_request
+# rule's parameters passed through a jq filter, and the ruleset id it came from.
+rules_json() { # jq filter, [ruleset id]
+  jq -n --argjson id "${2:-1}" "[{type:\"deletion\",ruleset_source_type:\"Repository\",ruleset_source:\"example/shared\",ruleset_id:\$id},
+    {type:\"pull_request\",parameters:({required_approving_review_count:1,dismiss_stale_reviews_on_push:true,required_reviewers:[],
+      require_code_owner_review:true,require_last_push_approval:true,required_review_thread_resolution:true,
+      require_extra_approval_for_unattributed_changes:true,allowed_merge_methods:[\"merge\",\"squash\",\"rebase\"]} | $1),
+      ruleset_source_type:\"Repository\",ruleset_source:\"example/shared\",ruleset_id:\$id},
+    {type:\"required_status_checks\",parameters:{strict_required_status_checks_policy:false,
+      required_status_checks:[{context:\"tests\",integration_id:15368}]},ruleset_source_type:\"Repository\",ruleset_source:\"example/shared\",ruleset_id:\$id}]"
+}
+set_rules() { rules_json "$1" "${2:-1}" >"$stub/rules.json"; }
+set_pull() { printf '{"number":12,"state":"open","base":{"ref":"%s"}}' "$1" >"$stub/pull.json"; }
+set_bypass() { printf '{"id":%s,"name":"main","current_user_can_bypass":"%s"}' "$1" "$2" >"$stub/ruleset-$1.json"; }
+set_codeowners() { rm -f "$stub"/contents/*; for p in "$@"; do p=${p//\//_}; echo '{"type":"file","name":"CODEOWNERS"}' >"$stub/contents/${p#.}.json"; done; }
+reset_stub() {
+  : >"$stub/log"; set_pull main; set_rules .; set_bypass 1 never; set_codeowners .github/CODEOWNERS
+  echo '{"errors":[]}' >"$stub/errors.json"; rm -f "$stub/ruleset-2.json"
+}
+gh_stub() { STUB_DIR="$stub" PATH="$stub/bin:$PATH" "$@"; }
+assert() { local name=$1; shift; total=$((total + 1)); if "$@"; then echo "ok   $name"; else echo "FAIL $name"; fails=$((fails + 1)); fi; }
+asked() { grep -qF -- "$1" "$stub/log"; }
+none_asked() { [ ! -s "$stub/log" ]; }
+reason_of() { # command: the reason the hook gives
+  jq -n --arg c "$1" --arg d "$feat" '{tool_name: "Bash", tool_input: {command: $c}, cwd: $d}' >"$root/in.json"
+  STUB_DIR="$stub" PATH="$stub/bin:$PATH" "$py" -I "$hook" $hook_args <"$root/in.json" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty'
+}
+reason_is() { # name, glob, command
+  local r; r=$(reason_of "$3"); total=$((total + 1))
+  if [[ "$r" == $2 ]]; then echo "ok   $1"; else echo "FAIL $1: $r"; fails=$((fails + 1)); fi
+}
+R=example/shared
+
+reset_stub
+echo "-- allowed: a single command naming its repository, where the rules bind the agent to the owner's approval"
+gh_stub probe allow "gh pr merge 12 --auto --squash -R $R"
+assert "it read the pull request, the rules, the ruleset, CODEOWNERS and its errors, for the base branch" bash -c "
+  grep -qF 'api repos/$R/pulls/12' '$stub/log' && grep -qF 'api repos/$R/rules/branches/main' '$stub/log' &&
+  grep -qF 'api repos/$R/rulesets/1' '$stub/log' && grep -qF 'api repos/$R/contents/.github/CODEOWNERS?ref=main' '$stub/log' &&
+  grep -qF 'api repos/$R/codeowners/errors?ref=main' '$stub/log'"
+gh_stub probe allow "gh pr merge 12 --auto -R $R"
+gh_stub probe allow "gh pr merge 12 --auto --merge -R $R"
+gh_stub probe allow "gh pr merge -R $R --rebase --auto 12"
+gh_stub probe allow "gh pr merge 12 --auto --repo $R"
+gh_stub probe allow "gh pr merge 12 --auto --repo=$R"
+gh_stub probe allow "gh pr merge 12 --auto -R$R"
+: >"$stub/log"
+gh_stub probe allow "gh pr merge https://github.com/url/repo/pull/12 --auto --squash"
+assert "a pull request URL names the repository" asked 'api repos/url/repo/pulls/12'
+gh_stub probe allow "gh pr merge https://github.com/$R/pull/12 --auto -R $R"
+: >"$stub/log"; set_pull release/v2
+gh_stub probe allow "gh pr merge 12 --auto -R $R"
+assert "a base branch with a slash is URL-encoded in the rules and the CODEOWNERS ref" bash -c "grep -qF 'rules/branches/release%2Fv2' '$stub/log' && grep -qF 'codeowners/errors?ref=release%2Fv2' '$stub/log'"
+reset_stub
+# several pull_request rules apply: one satisfying all four is enough, in either order
+jq -s '.[0] + .[1]' <(rules_json .) <(rules_json 'del(.require_code_owner_review)' 2) >"$stub/rules.json"
+gh_stub probe allow "gh pr merge 12 --auto -R $R"
+jq -s '.[0] + .[1]' <(rules_json 'del(.require_code_owner_review)' 2) <(rules_json .) >"$stub/rules.json"
+gh_stub probe allow "gh pr merge 12 --auto -R $R"
+jq -s '.[0] + .[1]' <(rules_json 'del(.require_code_owner_review)') <(rules_json 'del(.require_last_push_approval)' 2) >"$stub/rules.json"
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reset_stub
+# the satisfying ruleset binds the agent, even if another ruleset does not
+jq -s '.[0] + .[1]' <(rules_json . 2) <(rules_json . 1) >"$stub/rules.json"; set_bypass 2 exempt
+gh_stub probe allow "gh pr merge 12 --auto -R $R"
+set_bypass 1 exempt
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reset_stub
+for where in CODEOWNERS docs/CODEOWNERS; do
+  set_codeowners "$where"
+  gh_stub probe allow "gh pr merge 12 --auto -R $R"
+done
+reset_stub
+echo "-- allowed: --disable-auto reduces what merges, so it needs no check"
+: >"$stub/log"
+STUB_FAIL=1 gh_stub probe allow 'gh pr merge 12 --disable-auto'
+STUB_FAIL=1 gh_stub probe allow "gh pr merge 12 --disable-auto -R other/repo"
+STUB_FAIL=1 gh_stub probe allow 'gh pr merge https://github.com/url/repo/pull/12 --disable-auto'
+assert "--disable-auto asks GitHub nothing" none_asked
+
+echo "-- refused: a rule field is missing or not enough, one at a time"
+for f in "required_approving_review_count = 0|required_approving_review_count" "require_code_owner_review = false|require_code_owner_review" \
+         "dismiss_stale_reviews_on_push = false|dismiss_stale_reviews_on_push" "require_last_push_approval = false|require_last_push_approval"; do
+  name=${f#*|}
+  set_rules ".${f%|*}"
+  gh_stub probe ask "gh pr merge 12 --auto -R $R"
+  reason_is "$name false: the reason names it and docs/git.md" "*$name*docs/git.md*" "gh pr merge 12 --auto -R $R"
+  set_rules "del(.$name)"
+  gh_stub probe ask "gh pr merge 12 --auto -R $R"
+  reason_is "$name missing: the reason names it and docs/git.md" "*$name*docs/git.md*" "gh pr merge 12 --auto -R $R"
+done
+reset_stub; set_rules '.required_approving_review_count = "1"'; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+set_rules '.required_approving_review_count = true'; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+set_rules '.require_code_owner_review = "true"'; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+echo "-- refused: rules that are missing or cannot be read"
+reset_stub; echo '[]' >"$stub/rules.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reason_is "no rules: the reason says nothing requires an approval" '*no pull_request rule*' "gh pr merge 12 --auto -R $R"
+echo '[{"type":"deletion"},{"type":"non_fast_forward"}]' >"$stub/rules.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+echo '{"message":"Not Found"}' >"$stub/rules.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+echo 'not json' >"$stub/rules.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+rm -f "$stub/rules.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reset_stub; echo '{"base":{}}' >"$stub/pull.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+echo '{"number":12}' >"$stub/pull.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+rm -f "$stub/pull.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+echo "-- refused: the agent's login can bypass the rule, or it is not known not to"
+reset_stub
+for v in exempt always pull_requests_only bogus; do
+  set_bypass 1 "$v"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+done
+set_bypass 1 exempt
+reason_is "a bypassable ruleset: the reason names current_user_can_bypass and docs/git.md" "*current_user_can_bypass*exempt*docs/git.md*" "gh pr merge 12 --auto -R $R"
+echo '{"id":1,"name":"main"}' >"$stub/ruleset-1.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+echo '{"id":1,"current_user_can_bypass":null}' >"$stub/ruleset-1.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+echo '[]' >"$stub/ruleset-1.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+rm -f "$stub/ruleset-1.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reset_stub; set_rules . '"x"'; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reset_stub; jq '[.[] | del(.ruleset_id)]' "$stub/rules.json" >"$stub/r.json"; mv "$stub/r.json" "$stub/rules.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reset_stub; jq '[.[] | .ruleset_source_type = "Organization"]' "$stub/rules.json" >"$stub/r.json"; mv "$stub/r.json" "$stub/rules.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+echo "-- refused: no CODEOWNERS file on the base branch, or one with errors"
+reset_stub; set_codeowners; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reason_is "no CODEOWNERS: the reason names it and docs/git.md" "*no CODEOWNERS file*docs/git.md*" "gh pr merge 12 --auto -R $R"
+echo '[{"type":"dir"}]' >"$stub/contents/CODEOWNERS.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reset_stub; echo '{"errors":[{"line":1,"kind":"Invalid owner"}]}' >"$stub/errors.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reason_is "CODEOWNERS errors: the reason names them" "*CODEOWNERS*errors*docs/git.md*" "gh pr merge 12 --auto -R $R"
+echo '{"message":"Not Found"}' >"$stub/errors.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+echo 'not json' >"$stub/errors.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+rm -f "$stub/errors.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reset_stub
+echo "-- refused: gh fails, hangs or is not there"
+STUB_FAIL=1 gh_stub probe ask "gh pr merge 12 --auto -R $R"
+STUB_SLEEP=31 gh_stub probe ask "gh pr merge 12 --auto -R $R"
+assert "a hung gh is killed and leaves no process behind" bash -c '! pgrep -f "sleep 31" >/dev/null'
+empty_path="$root/no-gh-bin"; mkdir -p "$empty_path"
+total=$((total + 1))
+if [ "$(jq -n --arg d "$feat" --arg c "gh pr merge 12 --auto -R $R" '{tool_name: "Bash", tool_input: {command: $c}, cwd: $d}' | PATH="$empty_path" "$py" -I "$hook" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = ask ]; then
+  echo "ok   no gh on PATH: refused"
+else
+  echo "FAIL no gh on PATH: refused"; fails=$((fails + 1))
+fi
+echo "-- the deadline: no gh is started once the guard's budget is spent"
+# Loaded as a module with DEADLINE already past: gh_answer must not start gh. With the budget still open it does.
+deadline_probe() { # seconds from now the deadline falls
+  : >"$stub/log"
+  STUB_DIR="$stub" PATH="$stub/bin:$PATH" "$py" -I - "$hook" "$1" <<'PY'
+import importlib.util, sys, time
+spec = importlib.util.spec_from_file_location("guard", sys.argv[1])
+guard = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(guard)
+guard.DEADLINE = time.monotonic() + float(sys.argv[2])
+print(guard.gh_answer(dict(__import__("os").environ), "api", "repos/x/y/pulls/1"))
+PY
+}
+assert "budget open: gh is asked" bash -c "$(declare -f deadline_probe); stub='$stub' py='$py' hook='$hook'; deadline_probe 5 >/dev/null; [ -s '$stub/log' ]"
+assert "budget spent: gh is not started" bash -c "$(declare -f deadline_probe); stub='$stub' py='$py' hook='$hook'; r=\$(deadline_probe -1); [ \"\$r\" = None ] && [ ! -s '$stub/log' ]"
+echo "-- refused: the repository is not named, or is named two ways, or the environment redirects gh"
+gh_stub probe ask 'gh pr merge 12 --auto'
+reason_is "no -R: the reason asks for an explicit repository" "*--auto needs an explicit -R owner/repo*docs/git.md*" 'gh pr merge 12 --auto'
+gh_stub probe ask "gh pr merge 12 --auto --squash"
+gh_stub probe ask "gh pr merge https://github.com/url/repo/pull/12 --auto -R other/repo"
+GH_REPO=other/repo gh_stub probe ask "gh pr merge 12 --auto -R $R"
+GH_HOST=ghe.example gh_stub probe ask "gh pr merge 12 --auto -R $R"
+echo "-- refused: anything around the command, or any other form, without asking GitHub"
+: >"$stub/log"
+more() { # the command, and the glob its reason must match
+  gh_stub probe ask "$1"
+  reason_is "the reason names what disqualified: $1" "$2" "$1"
+}
+more "GIT_DIR=/other/.git gh pr merge 12 --auto -R $R" '*starts with an assignment (GIT_DIR=*docs/git.md*'
+more "export GIT_DIR=/other/.git; gh pr merge 12 --auto -R $R" '*not the only command*`;`*docs/git.md*'
+more ". ./env.sh; gh pr merge 12 --auto -R $R" '*not the only command*`;`*'
+more "gh repo set-default other/x && gh pr merge 12 --auto -R $R" '*not the only command*`&`*'
+more "gh pr merge 12 --auto -R $R || true" '*not the only command*'
+more "gh pr merge 12 --auto -R $R | cat" '*not the only command*`|`*'
+more "echo -R other/x | xargs gh pr merge 12 --auto" '*needs an explicit -R*'
+more "echo --delete-branch | xargs gh pr merge 12 --auto -R $R" '*not the only command*'
+more "gh() { :; }; gh pr merge 12 --auto -R $R" '*not the only command*'
+more "alias gh=true; gh pr merge 12 --auto -R $R" '*not the only command*'
+more "cd /tmp && gh pr merge 12 --auto -R $R" '*not the only command*'
+more "gh pr merge 12 --auto -R $R &" '*not the only command*'
+more "$(printf 'echo x\ngh pr merge 12 --auto -R %s' $R)" '*not the only command*newline*'
+more "(gh pr merge 12 --auto -R $R)" '*substitution, subshell*'
+more 'echo $(gh pr merge 12 --auto -R example/shared)' '*substitution, subshell*'
+more "echo \`gh pr merge 12 --auto -R $R\`" '*substitution, subshell*'
+more "gh pr merge 12 --auto -R $R >/dev/null" '*redirection*'
+more "gh pr merge 12 --auto -R \"$R\"" '*quoting*'
+more "gh pr merge 12 --auto -R $R #" '*quoting or a character the shell expands*'
+more "env GH_REPO=other/x gh pr merge 12 --auto -R $R" '*run through `env`*'
+more "command gh pr merge 12 --auto -R $R" '*run through `command`*'
+more "builtin gh pr merge 12 --auto -R $R" '*run through `builtin`*'
+more "xargs gh pr merge 12 --auto -R $R" '*run through `xargs`*'
+more "timeout 5 gh pr merge 12 --auto -R $R" '*run through `timeout`*'
+more "/opt/homebrew/bin/gh pr merge 12 --auto -R $R" '*run through `/opt/homebrew/bin/gh`*'
+more "find . -exec gh pr merge 12 --auto -R $R \\;" '*not the only command*'
+more "bash -c 'gh pr merge 12 --auto -R $R'" '*quoting*'
+more "GIT_DIR=/other/.git gh pr merge 12 --disable-auto" '*starts with an assignment*'
+more "cd /tmp && gh pr merge 12 --disable-auto" '*not the only command*'
+more "gh pr merge 12 --auto --admin -R $R" '*the flag --admin*'
+more "gh pr merge 12 --auto --match-head-commit abc -R $R" '*the flag --match-head-commit*'
+more "gh pr merge 12 --auto --body x -R $R" '*the flag --body*'
+more "gh pr merge 12 --auto --some-new-flag -R $R" '*the flag --some-new-flag*'
+more "gh pr merge 12 --auto -s -R $R" '*the flag -s*'
+more "gh pr merge --auto -R $R" '*no pull request number or URL*'
+more "gh pr merge 12 --auto --squash --rebase -R $R" '*--rebase is given with --squash*'
+more "gh pr merge 12 --auto --disable-auto -R $R" '*both given*'
+more "gh pr merge 12 --disable-auto --squash" '*--squash is given with --disable-auto*'
+more "gh pr merge 12 13 --auto -R $R" '*a second argument (13)*'
+more "gh pr merge 12 --auto -R a/b -R c/d" '*given twice*'
+more "gh pr merge feat/x --auto -R $R" '*not a pull request number*'
+more "gh pr merge 12 --auto -R github.com/o/r" '*not owner/repo*'
+more "gh pr merge 12 --auto -R o/.." '*not owner/repo*'
+more "gh pr merge http://github.com/o/r/pull/12 --auto" '*not a pull request number*'
+more "gh pr merge https://github.com/o/r/issues/12 --auto" '*not a pull request number*'
+more "gh pr merge -- 12 --auto -R $R" '*the flag --*'
+gh_stub probe deny "gh pr merge 12 --auto --delete-branch -R $R"
+gh_stub probe deny "gh pr merge 12 --auto --squash --delete-branch -R $R"
+gh_stub probe deny "gh pr merge 12 --auto -d -R $R"
+gh_stub probe deny "gh pr merge 12 --disable-auto --delete-branch"
+gh_stub probe ask "gh pr merge 12 -R $R"
+gh_stub probe ask "gh pr merge 12 --squash -R $R"
+gh_stub probe ask "gh pr merge 12 --admin -R $R"
+gh_stub probe ask 'gh pr merge 12'
+gh_stub probe ask 'gh api -X PUT repos/example/shared/pulls/12/merge'
+gh_stub probe ask 'gh api graphql -f query="mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"x\"}) { clientMutationId } }"'
+gh_stub probe ask 'gh api graphql -f query="mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }"'
+assert "no refused form asked GitHub anything" none_asked
+
+echo "-- retargeting a pull request is a merge checkpoint: an armed auto-merge would follow it to another base"
+base_pat='*base branch*armed auto-merge*owner*approval*'
+for c in 'gh pr edit 12 --base release' 'gh pr edit 12 -B release' 'gh pr edit 12 --base=release' 'gh pr edit 12 -Brelease' \
+         'gh api -X PATCH repos/o/r/pulls/12 -f base=release' 'gh api repos/o/r/pulls/12 -f base=release' \
+         'gh api repos/o/r/pulls/12 --method PATCH -F base=release' \
+         'gh api graphql -f query="mutation { updatePullRequest(input: {pullRequestId: \"x\", baseRefName: \"release\"}) { clientMutationId } }"' \
+         'gh api graphql -f query="mutation { updatePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }" -f baseRefName=release'; do
+  gh_stub probe ask "$c"
+  reason_is "the reason names the risk: $c" "$base_pat" "$c"
+done
+printf '{"base": "release"}' >"$root/sandbox/b.json"
+gh_stub probe ask 'gh api -X PATCH repos/o/r/pulls/12 --input b.json' "$root/sandbox"
+gh_stub probe allow 'gh pr edit 12 --title x'
+gh_stub probe allow 'gh pr edit 12 --body "the base is fine"'
+gh_stub probe allow 'gh pr edit 12 --add-label bug'
+gh_stub probe allow 'gh api -X PATCH repos/o/r/pulls/12 -f title=x'
+gh_stub probe allow 'gh api repos/o/r/pulls/12'
+gh_stub probe allow 'gh api graphql -f query="mutation { updatePullRequest(input: {pullRequestId: \"x\", title: \"t\"}) { clientMutationId } }"'
+echo "-- every armed pull request in a compound is refused with it"
+reset_stub
+gh_stub probe ask "gh pr merge 12 --auto -R $R && gh pr merge 13 --auto -R $R"
+reset_stub
+
+echo "-- the login gh runs with: the agent's own, and nobody's token"
+export GH_TOKEN=secret GITHUB_TOKEN=secret2 GH_CONFIG_DIR=/proc/gh
+: >"$stub/log"
+gh_stub probe allow "gh pr merge 12 --auto -R $R"
+assert "no record: the process GH_CONFIG_DIR, and no GH_TOKEN or GITHUB_TOKEN" asked "GH_CONFIG_DIR=/proc/gh"$'\t'"GH_TOKEN=unset"$'\t'"GITHUB_TOKEN=unset"
+unset GH_TOKEN GITHUB_TOKEN
+export CLAUDE_CONFIG_DIR="$applied_home"
+: >"$stub/log"
+gh_stub probe allow "gh pr merge 12 --auto -R $R"
+assert "the Claude record's GH_CONFIG_DIR wins over the process's" asked "GH_CONFIG_DIR=/agent/gh"$'\t'
+assert "...for every call, the bypass check included" bash -c "[ \"\$(grep -c 'GH_CONFIG_DIR=/agent/gh' '$stub/log')\" = \"\$(wc -l <'$stub/log' | tr -d ' ')\" ]"
+unset GH_CONFIG_DIR; export CLAUDE_CONFIG_DIR="$no_claude"
+apply_identity
+: >"$stub/log"
+gh_stub probe allow "gh pr merge 12 --auto -R $R"
+assert "identity applied: gh runs with the applied GH_CONFIG_DIR and no token or host" asked "GH_CONFIG_DIR=/agent/gh"$'\t'"GH_TOKEN=unset"$'\t'"GITHUB_TOKEN=unset"$'\t'"GH_HOST=unset"
+gh_stub probe allow 'gh pr merge 12 --disable-auto'
+set_rules 'del(.require_last_push_approval)'
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+set_rules .
+gh_stub probe ask 'gh pr edit 12 --base release'
+: >"$stub/log"
+GH_TOKEN=x gh_stub probe deny "gh pr merge 12 --auto -R $R"
+GH_TOKEN=x gh_stub probe deny 'gh pr merge 12 --disable-auto'
+gh_stub probe deny "GH_CONFIG_DIR=/x gh pr merge 12 --auto -R $R"
+assert "an overridden identity is refused before GitHub is asked" none_asked
+drop_identity
+export JARVIS_REQUIRE_AGENT_IDENTITY=1
+gh_stub probe deny "gh pr merge 12 --auto -R $R"
+gh_stub probe deny 'gh pr merge 12 --disable-auto'
+assert "switch on, no identity: refused before GitHub is asked" none_asked
+unset JARVIS_REQUIRE_AGENT_IDENTITY
+
+echo "-- Codex mode: the record's GH_CONFIG_DIR, and an ask is a deny"
+hook_args="--codex"
+codex_gh="$root/codex-gh"; codex_fixture "$codex_gh"
+jq '.set.GH_CONFIG_DIR = "/codex/gh"' "$codex_gh/agent-identity.applied.json" >"$codex_gh/r.json" && mv "$codex_gh/r.json" "$codex_gh/agent-identity.applied.json"
+export CODEX_HOME="$codex_gh" GH_CONFIG_DIR=/proc/gh
+: >"$stub/log"
+gh_stub probe allow "gh pr merge 12 --auto --squash -R $R"
+assert "Codex: gh runs with the Codex record's GH_CONFIG_DIR, not the hook's" asked "GH_CONFIG_DIR=/codex/gh"$'\t'"GH_TOKEN=unset"
+gh_stub probe allow 'gh pr merge https://github.com/url/repo/pull/12 --auto'
+gh_stub probe allow 'gh pr merge 12 --disable-auto'
+gh_stub probe deny 'gh pr merge 12'
+gh_stub probe deny "gh pr merge 12 --auto --admin -R $R"
+gh_stub probe deny "gh pr merge 12 --auto --delete-branch -R $R"
+gh_stub probe deny 'gh pr merge 12 --auto'
+gh_stub probe deny "GIT_DIR=/x gh pr merge 12 --auto -R $R"
+gh_stub probe deny "cd /tmp && gh pr merge 12 --auto -R $R"
+gh_stub probe deny "echo --delete-branch | xargs gh pr merge 12 --auto -R $R"
+gh_stub probe deny 'gh pr edit 12 --base release'
+gh_stub probe deny 'gh api -X PATCH repos/o/r/pulls/12 -f base=release'
+gh_stub probe deny 'gh api graphql -f query="mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"x\"}) { clientMutationId } }"'
+set_bypass 1 exempt
+gh_stub probe deny "gh pr merge 12 --auto -R $R"
+set_bypass 1 never; set_codeowners
+gh_stub probe deny "gh pr merge 12 --auto -R $R"
+set_codeowners .github/CODEOWNERS
+set_rules 'del(.require_code_owner_review)'
+gh_stub probe deny "gh pr merge 12 --auto -R $R"
+set_rules .
+STUB_FAIL=1 gh_stub probe deny "gh pr merge 12 --auto -R $R"
+STUB_SLEEP=31 gh_stub probe deny "gh pr merge 12 --auto -R $R"
+hook_args="--codex --require-identity"
+gh_stub probe allow "gh pr merge 12 --auto -R $R"
+hook_args=""
+unset GH_CONFIG_DIR
+export CODEX_HOME="$no_codex"
+reset_stub
+
 echo
 if [ "$fails" -gt 0 ]; then echo "$fails of $total failed (sandboxes: $root)"; exit 1; fi
 echo "all $total passed"
