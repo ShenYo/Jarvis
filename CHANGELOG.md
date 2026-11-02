@@ -21,7 +21,7 @@ How an entry is written:
 - Nothing here is a dependency of any project, so no entry has an upgrade path
   for a consumer.
 
-## Unreleased
+## v1.2.1 (2026-11-02)
 
 A PATCH release: documentation only ([#59](https://github.com/ShenYo/Jarvis/issues/59)). Nothing to do on this machine.
 
