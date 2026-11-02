@@ -21,7 +21,7 @@ How an entry is written:
 - Nothing here is a dependency of any project, so no entry has an upgrade path
   for a consumer.
 
-## Unreleased
+## v1.2.0 (2026-11-02)
 
 A MINOR release (v1.2.0): the agent identity reaches Codex, the guard's agent-identity switch can be turned on for both runtimes and back off, and the tests no longer depend on the session they run in.
 
