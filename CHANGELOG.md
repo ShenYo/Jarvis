@@ -6,7 +6,7 @@
 > 在這台機器上必須做什麼。v1.0.0 是第一個 release。
 
 Jarvis tags releases as `vMAJOR.MINOR.PATCH`. How a version is chosen, and how a
-release is cut, is in the README's [Releases](./README.md#releases) section.
+release is cut, is in [Releases](./docs/releases.md).
 
 How an entry is written:
 
@@ -20,6 +20,31 @@ How an entry is written:
   Codex hook again in `/hooks`. A release that needs nothing says so.
 - Nothing here is a dependency of any project, so no entry has an upgrade path
   for a consumer.
+
+## Unreleased
+
+A PATCH release: documentation only ([#59](https://github.com/ShenYo/Jarvis/issues/59)). Nothing to do on this machine.
+
+- **The README is split into documents.** `README.md` and `README.zh-TW.md` keep
+  the introduction, scope, status, a quick start and a table of documents. The
+  rest moved to [`docs/`](./docs/): the step-by-step
+  [setup guide](./docs/setup-new-machine.md) (also in
+  [Traditional Chinese](./docs/setup-new-machine.zh-TW.md)), and, in English
+  only, [architecture](./docs/architecture.md), [guard](./docs/guard.md),
+  [agent identity](./docs/agent-identity.md), [maintenance](./docs/maintenance.md),
+  [local Git hooks](./docs/git-hooks.md) and [releases](./docs/releases.md).
+  The setup guide is new in one respect: it takes a machine that has never had
+  Jarvis through the prerequisites, the clone, the bridge, both guards and the
+  agent identity for Claude Code and Codex, with a check after each step. A
+  link to an old README section, such as `README.md#agent-identity`, now lands
+  on the README with no such heading; the entries below that predate this
+  change are left as they were.
+- **The parity check covers the setup guide.** `scripts/check-readme-parity.py`
+  also compares `docs/setup-new-machine.md` with its Traditional Chinese
+  version, and CI runs it for both pairs.
+- **Two messages name the new place.** The fix line `apply-agent-identity.sh`
+  prints for a foreign `shell_environment_policy`, and the test that pins it,
+  now point at `docs/agent-identity.md` instead of the README.
 
 ## v1.2.0 (2026-11-02)
 

@@ -3,7 +3,7 @@
 The rules for Git work in this repository, and the defaults for a repository
 that has no Git guideline of its own. The three hooks in
 [`.githooks/`](../.githooks) enforce the mechanical part and point here when
-they refuse something. The [Claude Code guard](../README.md#claude-code-guard)
+they refuse something. The [Claude Code guard](./guard.md#claude-code-guard)
 enforces the operation boundaries for Claude Code sessions on this machine.
 
 A repository with its own Git guideline follows that guideline, not this

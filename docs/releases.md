@@ -1,0 +1,32 @@
+# Releases
+
+> **中文摘要**：這份文件說明 Jarvis 的版本規則（PATCH／MINOR／MAJOR 各代表什麼）、release 的
+> 說明如何隨 pull request 進入 `CHANGELOG.md`，以及打 tag 與發佈 GitHub Release 的步驟；推送 tag 與
+> 發佈 release 都是關卡，要使用者點名 tag 與 commit。
+
+Jarvis tags releases as `vMAJOR.MINOR.PATCH`, starting at v1.0.0:
+
+- **PATCH** for a documentation-only change.
+- **MINOR** for a change to what runs: the guard, the bridge script, the apply
+  scripts, the Git hooks, or how the Skills are bridged.
+- **MAJOR** for a large structural change.
+
+Nothing consumes a release: no project depends on Jarvis, so a release is a
+labelled point on this machine, not something to propagate. Every release
+carries a note in [`CHANGELOG.md`](../CHANGELOG.md), above all a MINOR or MAJOR
+one, which says what changed, why, and what to do on this machine afterwards.
+
+To cut a release, the pull request that makes it adds the entry to
+`CHANGELOG.md` under `## Unreleased` and renames that heading to the version, so
+the note is reviewed. After the merge, the entry becomes the tag's message and
+the GitHub Release's notes:
+
+```sh
+git tag -a vX.Y.Z <commit> -F <file holding the entry>
+git push origin vX.Y.Z
+gh release create vX.Y.Z --notes-from-tag
+```
+
+Pushing the tag and publishing the release are both checkpoints: the user
+authorizes each by naming the tag and the commit. Deleting a tag or a release is
+never the agent's ([`docs/git.md`](./git.md)).

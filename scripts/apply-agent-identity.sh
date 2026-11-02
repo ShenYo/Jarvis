@@ -1465,7 +1465,7 @@ chk_codex_config() {
       fix "remove that block from $(q "$codex_cfg") by hand (from the '# >>> jarvis agent-identity' line to the '# <<<' line), then re-run"
     elif [ "$i_policy" != absent ]; then
       say WRONG "CONFLICT: $codex_cfg already sets shell_environment_policy ($i_desc), which this script did not write; it is never overwritten"
-      fix "merge by hand or remove it, then re-run: this script needs shell_environment_policy.set to carry the agent identity's variables (the README's Agent identity section lists them)"
+      fix "merge by hand or remove it, then re-run: this script needs shell_environment_policy.set to carry the agent identity's variables (docs/agent-identity.md, in its Codex part, lists them)"
     else
       say OK "$codex_cfg has no shell_environment_policy: the block can be appended"
     fi

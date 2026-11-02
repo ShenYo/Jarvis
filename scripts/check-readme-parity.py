@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Check that two language versions of a document stayed in step.
 
+CI runs it once per pair: README.md with README.zh-TW.md, and
+docs/setup-new-machine.md with docs/setup-new-machine.zh-TW.md. A link from one
+file to a document's own other-language version (docs/setup-new-machine.md in
+the English README, docs/setup-new-machine.zh-TW.md in the Chinese one) counts
+as the same link.
+
 Bilingual docs double the surface a mistake can live on, and the mistakes are
 quiet: a section added to one file, a count corrected in one file, a link that
 rots in one file. This repository and Friday have both shipped exactly that.
@@ -47,6 +53,11 @@ def rel_links(text):
     return sorted(set(re.findall(r"\]\((\./[^)#\s]+|[^):#\s/][^)#\s]*\.(?:md|sh|json|txt))\)", text)))
 
 
+def same_doc(link):
+    # A zh-TW version of a document and the document itself are the same target.
+    return link.replace(".zh-TW.md", ".md")
+
+
 def main():
     if len(sys.argv) < 3:
         print("usage: check-readme-parity.py <file-a> <file-b> [stale-terms-file]", file=sys.stderr)
@@ -85,8 +96,8 @@ def main():
     # is correct that each names the other. Compare the rest.
     counterpart = {f"./{b_path.name}", b_path.name, f"./{a_path.name}", a_path.name}
     la_all, lb_all = rel_links(a), rel_links(b)
-    la = [x for x in la_all if x not in counterpart]
-    lb = [x for x in lb_all if x not in counterpart]
+    la = sorted({same_doc(x) for x in la_all if x not in counterpart})
+    lb = sorted({same_doc(x) for x in lb_all if x not in counterpart})
     if la != lb:
         only_a = [x for x in la if x not in lb]
         only_b = [x for x in lb if x not in la]
@@ -112,12 +123,12 @@ def main():
                     problems.append(f"{path.name}: stale term present: {term!r}")
 
     if problems:
-        print(f"README parity failed ({a_path.name} vs {b_path.name}):")
+        print(f"Parity failed ({a_path.name} vs {b_path.name}):")
         for p in problems:
             print(f"  {p}")
         return 1
 
-    print(f"README parity ok: {a_path.name} and {b_path.name} agree on "
+    print(f"Parity ok: {a_path.name} and {b_path.name} agree on "
           f"{sections(a, 2)} sections, {len(na)} numbers, {len(la)} links")
     return 0
 

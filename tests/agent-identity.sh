@@ -1269,7 +1269,7 @@ crun; rc=$?
 snapshot >"$dir/snap.after"
 check "foreign policy: exit 1" test "$rc" = 1
 check "foreign policy: CONFLICT naming what is there" has "WRONG  CONFLICT: $toml already sets shell_environment_policy ({\"inherit\": \"core\"}), which this script did not write; it is never overwritten"
-check "foreign policy: exact fix" has "  fix: merge by hand or remove it, then re-run: this script needs shell_environment_policy.set to carry the agent identity's variables (the README's Agent identity section lists them)"
+check "foreign policy: exact fix" has "  fix: merge by hand or remove it, then re-run: this script needs shell_environment_policy.set to carry the agent identity's variables (docs/agent-identity.md, in its Codex part, lists them)"
 check "foreign policy: never overwritten, nothing written" cmp -s "$dir/snap.before" "$dir/snap.after"
 check "foreign policy: Next names step 6" bash -c "grep -q '^Next: step 6 of 6 — apply the identity to the Codex config — merge by hand' '$dir/out'"
 csandbox
