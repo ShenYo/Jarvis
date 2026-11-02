@@ -23,6 +23,11 @@ fails or overruns, so in that mode every "ask" is emitted as "deny", the
 reason says why, and any error anywhere becomes a "deny" naming it, with exit
 status 0. Without the argument nothing changes.
 
+The agent-identity switch, which refuses every GitHub write from a runtime
+whose identity is not applied, is the environment variable
+JARVIS_REQUIRE_AGENT_IDENTITY=1 under Claude Code and the argument
+`--require-identity` in Codex mode, where the environment is ignored.
+
 Compatible with Python 3.9, the version macOS ships at /usr/bin/python3.
 """
 import hashlib
@@ -41,6 +46,12 @@ MAX_DEPTH = 6
 MAX_ALIAS_DEPTH = 8
 
 CODEX = "--codex" in sys.argv[1:]
+# Under Codex the switch is an argument of the hook's own command line
+# (scripts/apply-codex-guard.sh --require-identity writes it): a Codex hook does
+# not see the shell_environment_policy the identity is set through, so an
+# environment variable inherited from somewhere else would say nothing about
+# this hook's configuration. Under Claude Code the switch is the environment.
+REQUIRE_ARG = "--require-identity" in sys.argv[1:]
 GUARD = "Codex guard" if CODEX else "Claude guard"
 
 # Every git lookup shares one budget, well inside the hook's 10 s timeout (the
@@ -63,23 +74,102 @@ CODEX_CHECKPOINT = (
 )
 
 
+def switch_on():
+    """True when this machine requires an agent identity for GitHub writes.
+    Codex mode reads only the hook's --require-identity argument (a whole argument,
+    wherever it stands) and ignores the environment. Claude mode reads
+    JARVIS_REQUIRE_AGENT_IDENTITY=1 or the record --require leaves (see
+    require_record). The switch is off unless something sets it, and then nothing
+    here changes."""
+    if CODEX:
+        return REQUIRE_ARG
+    return env_switch_on() or require_record()[0] is not None
+
+
+def env_switch_on():
+    return os.environ.get("JARVIS_REQUIRE_AGENT_IDENTITY") == "1"
+
+
+def require_record_paths():
+    """Where scripts/apply-agent-identity.sh --require leaves its record: the
+    Claude config directory the environment names and the default ~/.claude. Both
+    are read, so a project that redirects CLAUDE_CONFIG_DIR cannot hide the record."""
+    paths = []
+    for home in (os.environ.get("CLAUDE_CONFIG_DIR"), os.path.expanduser("~/.claude")):
+        if home:
+            path = os.path.join(home, "agent-identity.require.json")
+            if path not in paths:
+                paths.append(path)
+    return paths
+
+
+def require_record():
+    """(state, path) for the first require record that turns the switch on:
+    "on" when it says so, "unreadable" when it exists but is not JSON, not an
+    object, or has an env that is not an object, which fails closed. A readable
+    record that does not say "1" is off. A project's own .claude/settings.json env
+    can blank the variable, which must not turn the switch off; only --unrequire
+    removes the record. (None, None) when no record turns it on."""
+    for path in require_record_paths():
+        if not os.path.lexists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            env = data.get("env", {}) if isinstance(data, dict) else None
+            if not isinstance(env, dict):
+                raise ValueError("no env object")
+        except Exception:
+            return "unreadable", path
+        if env.get("JARVIS_REQUIRE_AGENT_IDENTITY") == "1":
+            return "on", path
+    return None, None
+
+
 def identity_missing():
-    """True when this machine requires an agent identity for GitHub writes
-    (JARVIS_REQUIRE_AGENT_IDENTITY=1) and none is applied (see
-    identity_applied). The switch is off unless something sets it, and then
-    nothing here changes."""
-    return (os.environ.get("JARVIS_REQUIRE_AGENT_IDENTITY") == "1"
-            and not identity_applied())
+    """True when the switch is on and no identity is applied (see
+    identity_applied)."""
+    return switch_on() and not identity_applied()
 
 
-NO_IDENTITY = (
-    "GitHub writes need this machine's agent identity, and it has none "
-    "(JARVIS_REQUIRE_AGENT_IDENTITY=1 but JARVIS_AGENT_IDENTITY is empty), so "
-    "the command would act as whoever is logged in. Run `bash "
-    "~/.Jarvis/scripts/apply-agent-identity.sh --check` and do what it lists; "
-    "the config file is ~/.Jarvis/config-local/agent-identity. Do not retry "
-    "this command or work around it: tell the user."
-)
+SCRIPT = "bash ~/.Jarvis/scripts/apply-agent-identity.sh"
+
+
+def switch_note():
+    """What to say when the agent-identity switch is what refused a write: the
+    switch, the fix and the way back."""
+    target = " --codex" if CODEX else ""
+    cause = switch_cause()
+    return ("The agent-identity switch (%s) caused this refusal. Fix: run `%s --check%s` and "
+            "do what it lists (on a new machine start with `%s --setup%s`; the config file is "
+            "~/.Jarvis/config-local/agent-identity). Roll back: `%s --unrequire` turns the "
+            "switch off for Claude Code and Codex." % (cause, SCRIPT, target, SCRIPT, target, SCRIPT))
+
+
+def switch_cause():
+    """What turned the switch on, for the refusal: the hook's argument, the
+    variable, or (the variable being off or blanked) a --require record."""
+    if CODEX:
+        return "--require-identity in the Codex hook's command"
+    if env_switch_on():
+        return "JARVIS_REQUIRE_AGENT_IDENTITY=1"
+    state, path = require_record()
+    if state == "unreadable":
+        return "%s exists but cannot be read as a require record, which counts as on" % path
+    return "%s records it as on" % path
+
+
+def no_identity():
+    """Why a write is refused when the switch is on and nothing is applied."""
+    if CODEX:
+        what = ("the hook runs with --require-identity but %s does not exist"
+                % codex_record_path())
+    else:
+        what = "%s but JARVIS_AGENT_IDENTITY is empty" % (
+            "JARVIS_REQUIRE_AGENT_IDENTITY=1" if env_switch_on() else switch_cause())
+    return ("GitHub writes need this machine's agent identity, and it has none (%s), "
+            "so the command would act as whoever is logged in. %s Do not retry this "
+            "command or work around it: tell the user." % (what, switch_note()))
 
 
 def codex_record_path():
@@ -93,12 +183,13 @@ def identity_applied():
     writes into the agent's environment after every one of its checks passes.
     A Codex hook does not see the environment Codex gives its commands
     (shell_environment_policy.set), so under Codex it is the record that
-    `apply-agent-identity.sh --codex` leaves in CODEX_HOME. The marker still
-    counts there when it happens to be set and no record exists, as before.
-    Then a GitHub write must really act as that identity, whether or not the
-    switch above is on."""
-    if CODEX and os.path.lexists(codex_record_path()):
-        return True
+    `apply-agent-identity.sh --codex` leaves in CODEX_HOME, and nothing else: a
+    marker inherited from a Claude Code session says nothing about Codex, whose
+    git has no GIT_CONFIG_COUNT. judge_identity then checks the record with
+    codex_record_problems. A GitHub write must really act as that identity,
+    whether or not the switch above is on."""
+    if CODEX:
+        return os.path.lexists(codex_record_path())
     return bool(os.environ.get("JARVIS_AGENT_IDENTITY", "").strip())
 
 
@@ -223,6 +314,7 @@ class Result:
         self.overrides = []   # ways the command changes who it acts as
         self.unset = []       # writes refused: the machine has no agent identity
         self.hijack = []      # writes refused: the agent identity is overridden
+        self.setup_broken = False  # ...because the applied identity's record or env is not sound
 
     def github_write(self, what):
         if what not in self.writes:
@@ -244,14 +336,18 @@ class Result:
             if CODEX and os.path.lexists(codex_record_path()):
                 # The hook's environment is Codex's own, not the one its
                 # commands get, so there is nothing in it to compare.
-                self.hijack.extend(codex_record_problems())
+                problems = codex_record_problems()
+                self.hijack.extend(problems)
+                self.setup_broken = bool(problems)
             else:
                 bad = [v for v in HIJACK_ENV if os.environ.get(v)]
                 if bad:
                     self.hijack.append(
                         "this session's environment sets %s, which would override the "
                         "agent's identity" % ", ".join(bad))
-                self.hijack.extend(applied_env_problems())
+                problems = applied_env_problems()
+                self.hijack.extend(problems)
+                self.setup_broken = self.setup_broken or bool(problems)
             if self.overrides:
                 self.hijack.append("the command overrides the agent's identity (%s)"
                                    % "; ".join(self.overrides))
@@ -1559,9 +1655,11 @@ def run():
         reasons = list(res.deny)
         reasons.append("%s writes to GitHub" % ", ".join(res.writes))
         reasons += res.hijack
-        advice = (PROHIBITED + " " if res.deny else "") + (NO_IDENTITY + " " if res.unset else "")
-        emit("deny", (GUARD + ": " + "; ".join(reasons) + ". " + advice
-                      + (HIJACK_SUFFIX if res.hijack else "")).rstrip())
+        advice = (PROHIBITED + " " if res.deny else "") + (no_identity() + " " if res.unset else "")
+        suffix = HIJACK_SUFFIX if res.hijack else ""
+        if res.hijack and res.setup_broken and switch_on():
+            suffix += " " + switch_note()
+        emit("deny", (GUARD + ": " + "; ".join(reasons) + ". " + advice + suffix).rstrip())
     elif res.deny:
         emit("deny", GUARD + ": " + "; ".join(res.deny) + ". " + PROHIBITED)
     elif res.ask and CODEX:

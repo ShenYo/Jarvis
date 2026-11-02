@@ -2026,6 +2026,599 @@ crun; rm "$cg"
 csetup_run "$dir/input"
 check "setup --codex: a missing gitconfig is MISSING in its full check" has "MISSING  $cg is missing although the record exists"
 
+# =================================================================================
+echo "== --require / --unrequire: the guard's agent-identity switch, for both runtimes"
+cg_apply="$repo/scripts/apply-codex-guard.sh"
+real_jq=$(command -v jq)
+untrust_codex() { # drop the state entry /hooks stored, keep the rest of config.toml (the identity block among it)
+  awk 'skip { skip = 0; next } /^\[hooks\.state\./ { skip = 1; next } { print }' "$toml" >"$toml.new" && mv "$toml.new" "$toml"
+}
+trust_codex() { # Codex's trust of the installed guard entry, as /hooks stores it, under the canonical path Codex names
+  local g h hash
+  read -r g h < <(jq -r 'first(.hooks.PreToolUse | to_entries[] | .key as $g | .value.hooks | to_entries[]
+    | select(.value.command | contains("/hooks/jarvis-guard.py")) | "\($g) \(.key)")' "$hooks")
+  hash=$(jq -cS --argjson g "$g" --argjson h "$h" '.hooks.PreToolUse[$g] as $grp | $grp.hooks[$h] as $x
+    | {event_name: "pre_tool_use", matcher: $grp.matcher,
+       hooks: [{type: $x.type, command: $x.command, timeout: ($x.timeout // 600), async: ($x.async // false), statusMessage: $x.statusMessage}]}' \
+    "$hooks" | tr -d '\n' | { shasum -a 256 2>/dev/null || sha256sum; } | cut -d' ' -f1)
+  untrust_codex
+  printf '\n[hooks.state."%s/hooks.json:pre_tool_use:%s:%s"]\ntrusted_hash = "sha256:%s"\n' "$(cd "$codex" && pwd -P)" "$g" "$h" "$hash" >>"$toml"
+}
+rsandbox() { # a machine where every check passes, the identity is applied on both sides, and the Codex guard hook is installed and trusted
+  csandbox
+  hooks="$codex/hooks.json"; swrec="$home/.claude/agent-identity.require.json"
+  CODEX_HOME="$codex" HOME="$home" bash "$cg_apply" >/dev/null 2>&1
+  run; crun
+  trust_codex
+  cp "$settings" "$dir/settings.orig"; cp "$hooks" "$dir/hooks.orig"; cp "$toml" "$dir/toml.orig2"
+}
+script_pid() { # the apply-agent-identity.sh process above the held process: the highest ancestor that is the script
+  local p pp found=""
+  p=$(cat "$1" 2>/dev/null) || return 0
+  while pp=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ') && [ -n "$pp" ] && [ "$pp" != 1 ]; do
+    case $(ps -o command= -p "$pp" 2>/dev/null) in *scripts/apply-agent-identity.sh*) found=$pp ;; esac
+    p=$pp
+  done
+  echo "$found"
+}
+jqset() { local t; t=$(jq "$1" "$settings") && printf '%s\n' "$t" >"$settings"; }
+sw_claude='.env.JARVIS_REQUIRE_AGENT_IDENTITY == "1"'
+hook_on() { jq -e '.hooks.PreToolUse[0].hooks[0].command | endswith(" --codex --require-identity")' "$hooks" >/dev/null; }
+hook_off() { jq -e '.hooks.PreToolUse[0].hooks[0].command | endswith(" --codex")' "$hooks" >/dev/null; }
+settings_orig() { jq -S . "$settings" | cmp -s - <(jq -S . "$dir/settings.orig"); }
+
+# --- --require, a success
+rsandbox
+snapshot >"$dir/snap.before"
+run --require; rc=$?
+check "require: exit 0" test "$rc" = 0
+check "require: the switch is in the env of settings.json" sx "$sw_claude"
+check "require: the person's own env key and the rest of settings survive" bash -c "jq -e '.env.FOO == \"bar\" and .model == \"opus\"' '$settings' >/dev/null"
+check "require: the identity applied before stays applied" sx '.env.JARVIS_AGENT_IDENTITY == "bot-agent" and (.env | has("GIT_SSH_COMMAND"))'
+check "require: record of its own, apart from the identity's" bash -c "jq -e '.version == 1 and .env == {\"JARVIS_REQUIRE_AGENT_IDENTITY\": \"1\"} and .env_created == false' '$swrec' >/dev/null && jq -e '.env | has(\"JARVIS_REQUIRE_AGENT_IDENTITY\") | not' '$record' >/dev/null"
+check "require: backup is the previous settings" cmp -s "$settings.agent-identity-backup" "$dir/settings.orig"
+check "require: the Codex hook command carries --require-identity" hook_on
+check "require: the settings mode is kept, the record is private" bash -c "test \"\$(stat -c %a '$settings' 2>/dev/null || stat -f %Lp '$settings')\" = 600 && test \"\$(stat -c %a '$swrec' 2>/dev/null || stat -f %Lp '$swrec')\" = 600"
+check "require: says to trust the guard in /hooks, because Codex skips it until then" bash -c "grep -q 'open /hooks in Codex and trust the Jarvis guard' '$dir/out' && grep -q 'skips the guard until you do' '$dir/out' && grep -q 'UNTRUSTED' '$dir/out'"
+check "require: says how to roll back" has "--unrequire"
+check "require: says the switch is on for both" has "switch is ON for Claude Code"
+check "require: says a running Claude Code session may pick it up at once, not that it keeps the old environment" bash -c "grep -q 'a running Claude Code session may pick the switch up immediately' '$dir/out' && ! grep -q 'keeps the old' '$dir/out'"
+check "require: no temporary file left" bash -c "test \$(ls '$home/.claude' | grep -c '\\.[A-Za-z0-9]\\{6\\}\$') = 0"
+crun --check; rc=$?
+check "require: Codex now reports the hook UNTRUSTED (the command changed)" bash -c "test $rc = 1 && grep -q 'WRONG  Codex does not run the guard hook (UNTRUSTED)' '$dir/out'"
+check "require: and gives the /hooks fix" has "  fix: open /hooks in Codex and trust the Jarvis guard (until then Codex skips it)"
+trust_codex
+crun --check; rc=$?
+check "require: after the re-trust --check --codex passes" test "$rc" = 0
+check "require: --check --codex states the switch on for both" has "OK  agent-identity switch: Claude Code on, Codex on"
+run --check; rc=$?
+check "require: --check states the switch on for both" bash -c "test $rc = 0 && grep -q 'OK  agent-identity switch: Claude Code on, Codex on' '$dir/out'"
+run --require; rc=$?
+check "require twice: exit 0, settings and hook unchanged" bash -c "test $rc = 0 && jq -e '$sw_claude' '$settings' >/dev/null"
+
+# --- --require wants the identity applied on both sides: with the switch on and none applied, every GitHub write is refused
+csandbox
+hooks="$codex/hooks.json"; swrec="$home/.claude/agent-identity.require.json"
+CODEX_HOME="$codex" HOME="$home" bash "$cg_apply" >/dev/null 2>&1
+crun; trust_codex
+cp "$settings" "$dir/settings.orig"; cp "$hooks" "$dir/hooks.orig"
+snapshot >"$dir/snap.before"
+run --require; rc=$?
+snapshot >"$dir/snap.after"
+check "require, Claude Code's identity not applied (checks pass, 'ready to apply'): exit 1" test "$rc" = 1
+check "require, Claude Code's identity not applied: says so and names the plain run" bash -c "grep -q 'the Claude Code identity is not applied yet' '$dir/out' && grep -q 'Fix: bash $apply\$' '$dir/out'"
+check "require, Claude Code's identity not applied: nothing written" bash -c "cmp -s '$dir/snap.before' '$dir/snap.after' && cmp -s '$hooks' '$dir/hooks.orig' && test ! -e '$swrec'"
+csandbox
+hooks="$codex/hooks.json"; swrec="$home/.claude/agent-identity.require.json"
+CODEX_HOME="$codex" HOME="$home" bash "$cg_apply" >/dev/null 2>&1
+run; trust_codex
+cp "$hooks" "$dir/hooks.orig"; snapshot >"$dir/snap.before"
+run --require; rc=$?
+snapshot >"$dir/snap.after"
+check "require, Codex's identity not applied: exit 1, names --codex" bash -c "test $rc = 1 && grep -q 'the Codex identity is not applied yet' '$dir/out' && grep -q 'Fix: bash $apply --codex' '$dir/out'"
+check "require, Codex's identity not applied: nothing written" bash -c "cmp -s '$dir/snap.before' '$dir/snap.after' && cmp -s '$hooks' '$dir/hooks.orig' && test ! -e '$swrec'"
+rsandbox
+cfg_append 'author_name=Someone Else'
+snapshot >"$dir/snap.before"
+run --require; rc=$?
+snapshot >"$dir/snap.after"
+check "require, settings.json differs from what a run would write: exit 1, not applied" bash -c "test $rc = 1 && grep -q 'the Claude Code identity is not applied yet' '$dir/out' && cmp -s '$dir/snap.before' '$dir/snap.after' && test ! -e '$swrec'"
+
+# --- --require refuses, and writes nothing
+rsandbox
+rm "$key"
+snapshot >"$dir/snap.before"
+run --require; rc=$?
+snapshot >"$dir/snap.after"
+check "require, a Claude check fails: exit 1" test "$rc" = 1
+check "require, a Claude check fails: names the Claude Code checks" has "the Claude Code checks (bash $apply --check) failed"
+check "require, a Claude check fails: shows the failing line" has "MISSING  "
+check "require, a Claude check fails: nothing written, on either side" bash -c "cmp -s '$dir/snap.before' '$dir/snap.after' && cmp -s '$hooks' '$dir/hooks.orig' && test ! -e '$swrec'"
+check "require, a Claude check fails: says nothing was written" has "refused, nothing was written"
+
+rsandbox
+rm "$ckey"
+snapshot >"$dir/snap.before"
+run --require; rc=$?
+snapshot >"$dir/snap.after"
+check "require, a Codex check fails: exit 1" test "$rc" = 1
+check "require, a Codex check fails: names the Codex checks" has "the Codex checks (bash $apply --check --codex) failed"
+check "require, a Codex check fails: nothing written" bash -c "cmp -s '$dir/snap.before' '$dir/snap.after' && cmp -s '$hooks' '$dir/hooks.orig' && test ! -e '$swrec' && ! grep -q JARVIS_REQUIRE_AGENT_IDENTITY '$settings'"
+
+rsandbox
+untrust_codex
+snapshot >"$dir/snap.before"
+run --require; rc=$?
+snapshot >"$dir/snap.after"
+check "require, the hook is not trusted: exit 1" test "$rc" = 1
+check "require, the hook is not trusted: says UNTRUSTED and that Codex would run with no guard" bash -c "grep -q 'Codex does not trust the installed guard hook (UNTRUSTED)' '$dir/out' && grep -q 'with no guard at all' '$dir/out'"
+check "require, the hook is not trusted: gives the /hooks fix" has "open /hooks in Codex and trust the Jarvis guard"
+check "require, the hook is not trusted: nothing written" bash -c "cmp -s '$dir/snap.before' '$dir/snap.after' && cmp -s '$hooks' '$dir/hooks.orig' && test ! -e '$swrec'"
+
+rsandbox
+rm "$hooks"
+snapshot >"$dir/snap.before"
+run --require; rc=$?
+snapshot >"$dir/snap.after"
+check "require, no Codex hook installed: exit 1, nothing written" bash -c "test $rc = 1 && cmp -s '$dir/snap.before' '$dir/snap.after' && grep -q 'NOT-INSTALLED' '$dir/out'"
+
+rsandbox
+sed -i.bak 's/--codex/--codex --edited/' "$hooks" && rm -f "$hooks.bak"
+run --require; rc=$?
+check "require, the installed command changed since it was trusted: exit 1 UNTRUSTED" bash -c "test $rc = 1 && grep -q '(UNTRUSTED)' '$dir/out' && test ! -e '$swrec'"
+
+# A1: with no python3 that has tomllib the trust cannot be read, and --require refuses
+rsandbox
+nopy="$dir/nopy-bin"; mkdir -p "$nopy"
+for t in jq git bash env sed awk grep cat cp mv rm mkdir mktemp chmod stat date tr cut sort head tail cksum cmp diff dirname basename readlink find ls hostname id uname wc xargs touch ln tee perl shasum sha256sum sleep tty; do
+  tp=$(command -v "$t") && ln -s "$tp" "$nopy/$t"
+done
+printf '#!/bin/sh\nexit 1\n' >"$nopy/python3"; chmod +x "$nopy/python3"
+snapshot >"$dir/snap.before"
+TEST_PATH="$nopy:$root/bin" run --require; rc=$?
+snapshot >"$dir/snap.after"
+check "require, no python3 with tomllib: exit 1" test "$rc" = 1
+check "require, no python3 with tomllib: says the trust could not be verified" bash -c "grep -q 'UNVERIFIABLE - could not verify' '$dir/out' && grep -q 'Python 3.11' '$dir/out'"
+check "require, no python3 with tomllib: nothing written" bash -c "cmp -s '$dir/snap.before' '$dir/snap.after' && cmp -s '$hooks' '$dir/hooks.orig' && test ! -e '$swrec'"
+
+# hooks.json that cannot be parsed: the Codex side of the switch cannot be read
+rsandbox
+printf '{ not json' >"$hooks"
+snapshot >"$dir/snap.before"
+run --require; rc=$?
+snapshot >"$dir/snap.after"
+check "require, hooks.json unparseable: exit 1, nothing written" bash -c "test $rc = 1 && cmp -s '$dir/snap.before' '$dir/snap.after' && grep -q 'cannot be parsed' '$dir/out'"
+
+# a foreign value of the switch is a CONFLICT, never overwritten
+rsandbox
+jqset '.env.JARVIS_REQUIRE_AGENT_IDENTITY = "0"'
+cp "$settings" "$dir/settings.orig"; snapshot >"$dir/snap.before"
+run --require; rc=$?
+snapshot >"$dir/snap.after"
+check "require, a foreign value: exit 1, CONFLICT with both values" bash -c "test $rc = 1 && grep -q 'CONFLICT: env.JARVIS_REQUIRE_AGENT_IDENTITY in $settings is \"0\", which this script did not write; it would write \"1\"' '$dir/out'"
+check "require, a foreign value: nothing written" bash -c "cmp -s '$dir/snap.before' '$dir/snap.after' && cmp -s '$hooks' '$dir/hooks.orig' && test ! -e '$swrec'"
+
+# settings without an env: the switch creates it and takes it away again (the functions, driven directly)
+sandbox
+put "$settings" '{"model":"opus"}'; chmod 600 "$settings"
+cp "$settings" "$dir/settings.orig"
+(cd "$dir" && base_env bash -c 'source "$1"; trap cleanup EXIT; init; claude_switch_set; echo "rc=$?"' _ "$apply") >"$dir/out" 2>&1
+check "switch set, no env yet: written, and the record says it created env" bash -c "grep -q '^rc=0' '$dir/out' && jq -e '$sw_claude' '$settings' >/dev/null && jq -e '.env_created == true' '$home/.claude/agent-identity.require.json' >/dev/null"
+(cd "$dir" && base_env bash -c 'source "$1"; trap cleanup EXIT; init; claude_switch_clear; echo "rc=$?"' _ "$apply") >"$dir/out" 2>&1
+check "switch clear, env created by the switch: settings are as they were" bash -c "grep -q '^rc=0' '$dir/out' && jq -S . '$settings' | cmp -s - <(jq -S . '$dir/settings.orig')"
+
+# A4 and A5b: settings.json saved while the switch is written or removed is never overwritten
+rsandbox
+cp "$settings" "$dir/settings.orig"
+(cd "$dir" && base_env bash -c 'source "$1"; trap cleanup EXIT; init
+  eval "orig_$(declare -f sw_write_json)"
+  sw_write_json() { orig_sw_write_json "$@"; printf " " >>"$settings"; }
+  claude_switch_set; echo "rc=$?"' _ "$apply") >"$dir/out" 2>&1
+check "concurrent change while the switch is written: detected, exit 1" bash -c "grep -q '^rc=1' '$dir/out' && grep -q 'changed while this ran; nothing was written' '$dir/out'"
+check "concurrent change while the switch is written: the switch and its record are not written" bash -c "! grep -q JARVIS_REQUIRE_AGENT_IDENTITY '$settings' && test ! -e '$swrec'"
+(cd "$dir" && base_env bash -c 'source "$1"; trap cleanup EXIT; init; claude_switch_set; echo "rc=$?"' _ "$apply") >"$dir/out" 2>&1
+cp "$settings" "$dir/settings.on"
+(cd "$dir" && base_env bash -c 'source "$1"; trap cleanup EXIT; init
+  eval "orig_$(declare -f sw_write_json)"
+  sw_write_json() { orig_sw_write_json "$@"; printf " " >>"$settings"; }
+  claude_switch_clear; echo "rc=$?"' _ "$apply") >"$dir/out" 2>&1
+check "concurrent change while the switch is removed: detected, exit 1" bash -c "grep -q '^rc=1' '$dir/out' && grep -q 'changed while this ran; nothing was written' '$dir/out'"
+check "concurrent change while the switch is removed: the switch and its record stay" bash -c "jq -e '$sw_claude' '$settings' >/dev/null && test -e '$swrec'"
+
+# --- a failure of apply-codex-guard.sh rolls the settings back (the directory of hooks.json cannot be written)
+if [ "$(id -u)" != 0 ]; then
+  rsandbox
+  snapshot >"$dir/snap.before"
+  chmod 555 "$codex"
+  run --require; rc=$?
+  chmod 755 "$codex"
+  snapshot >"$dir/snap.after"
+  check "require, apply-codex-guard.sh fails: exit 1" test "$rc" = 1
+  check "require, apply-codex-guard.sh fails: says so and that it rolled back" bash -c "grep -q 'apply-codex-guard.sh --require-identity failed' '$dir/out' && grep -q 'rolled back; the switch is off for both' '$dir/out'"
+  check "require, apply-codex-guard.sh fails: settings.json is as it was" bash -c "jq -S . '$settings' | cmp -s - <(jq -S . '$dir/settings.orig') && test ! -e '$swrec'"
+  check "require, apply-codex-guard.sh fails: the Codex hook is unchanged" cmp -s "$hooks" "$dir/hooks.orig"
+fi
+
+# --- an interrupt after one side was written puts that side back (a jq shim holds apply-codex-guard.sh at its merge)
+mkdir -p "$root/shim"
+cat >"$root/shim/jq" <<'EOF'
+#!/bin/sh
+case " $* " in *" --argjson h "*)
+  # after-codex: hold the first trust lookup once hooks.json carries the switch, i.e. after apply-codex-guard.sh wrote it
+  if [ -f "$HOLD_FILE" ] && [ "$(cat "$HOLD_FILE")" = after-codex ] && grep -q -- '--require-identity' "$HOOKS_FILE"; then
+    echo $$ >"$HOLD_FILE.held"; exec sleep 60
+  fi ;;
+esac
+case " $* " in *" --argjson g "*)
+  case " $* " in *" --argjson h "*) ;; *)
+    if [ -f "$HOLD_FILE" ] && { [ "$(cat "$HOLD_FILE")" = always ] || { [ "$(cat "$HOLD_FILE")" = switch ] && grep -q JARVIS_REQUIRE_AGENT_IDENTITY "$STUB_SETTINGS"; }; }; then
+      echo $$ >"$HOLD_FILE.held"; exec sleep 60
+    fi ;;
+  esac ;;
+esac
+exec "$REAL_JQ" "$@"
+EOF
+chmod +x "$root/shim/jq"
+if [ "$(id -u)" != 0 ]; then
+  rsandbox
+  echo switch >"$dir/hold"
+  XENV="HOLD_FILE=$dir/hold REAL_JQ=$real_jq"
+  (cd "$dir" && TEST_PATH="$root/shim:$root/bin:$orig_path" base_env bash "$apply" --require </dev/null >"$dir/out" 2>&1) &
+  pid=$!
+  for _ in $(seq 1 240); do [ -f "$dir/hold.held" ] && break; sleep 0.5; done
+  kill -TERM "$(script_pid "$dir/hold.held")" 2>/dev/null; kill -TERM "$(cat "$dir/hold.held" 2>/dev/null)" 2>/dev/null
+  wait "$pid"; rc=$?
+  check "interrupt during --require, after settings.json was written: exit 143" test "$rc" = 143
+  check "interrupt during --require: says it was interrupted" has "interrupted (TERM)"
+  check "interrupt during --require: settings.json is as it was, no record" bash -c "jq -S . '$settings' | cmp -s - <(jq -S . '$dir/settings.orig') && test ! -e '$swrec'"
+  check "interrupt during --require: the Codex hook is unchanged" cmp -s "$hooks" "$dir/hooks.orig"
+
+  # after apply-codex-guard.sh has written hooks.json: both sides go back to where they were
+  rsandbox
+  echo after-codex >"$dir/hold"
+  XENV="HOLD_FILE=$dir/hold REAL_JQ=$real_jq HOOKS_FILE=$hooks"
+  (cd "$dir" && TEST_PATH="$root/shim:$root/bin:$orig_path" base_env bash "$apply" --require </dev/null >"$dir/out" 2>&1) &
+  pid=$!
+  for _ in $(seq 1 240); do [ -f "$dir/hold.held" ] && break; sleep 0.5; done
+  check "interrupt after apply-codex-guard.sh wrote hooks.json: the hook carries the switch while held" hook_on
+  kill -TERM "$(script_pid "$dir/hold.held")" 2>/dev/null; kill -TERM "$(cat "$dir/hold.held" 2>/dev/null)" 2>/dev/null
+  wait "$pid"; rc=$?
+  check "interrupt after the Codex write: exit 143" test "$rc" = 143
+  check "interrupt after the Codex write: settings.json is as it was, no record" bash -c "jq -S . '$settings' | cmp -s - <(jq -S . '$dir/settings.orig') && test ! -e '$swrec'"
+  check "interrupt after the Codex write: the Codex hook is back to the earlier command" bash -c "jq -S . '$hooks' | cmp -s - <(jq -S . '$dir/hooks.orig')"
+  check "interrupt after the Codex write: and says it put things back" has "interrupted (TERM)"
+
+  rsandbox
+  run --require >/dev/null 2>&1
+  trust_codex
+  cp "$settings" "$dir/settings.on"; cp "$hooks" "$dir/hooks.on"
+  echo always >"$dir/hold"
+  XENV="HOLD_FILE=$dir/hold REAL_JQ=$real_jq"
+  (cd "$dir" && TEST_PATH="$root/shim:$root/bin:$orig_path" base_env bash "$apply" --unrequire </dev/null >"$dir/out" 2>&1) &
+  pid=$!
+  for _ in $(seq 1 240); do [ -f "$dir/hold.held" ] && break; sleep 0.5; done
+  kill -TERM "$(script_pid "$dir/hold.held")" 2>/dev/null; kill -TERM "$(cat "$dir/hold.held" 2>/dev/null)" 2>/dev/null
+  wait "$pid"; rc=$?
+  check "interrupt during --unrequire, after settings.json was written: exit 143" test "$rc" = 143
+  check "interrupt during --unrequire: the Claude Code side is put back" bash -c "grep -q 'interrupted (TERM)' '$dir/out' && jq -e '$sw_claude' '$settings' >/dev/null && test -e '$swrec'"
+  check "interrupt during --unrequire: the Codex hook is unchanged" cmp -s "$hooks" "$dir/hooks.on"
+  XENV=""
+fi
+
+# a signal after a write but before the line that records it must still roll back: the decision is from state (abort_switch driven directly, no flag set)
+rsandbox
+run --require >/dev/null 2>&1
+trust_codex
+(cd "$dir" && base_env bash -c 'source "$1"; trap cleanup EXIT; init
+  sw_op=require sw_claude_done=0 sw_codex_before=off sw_rec_before=0 sw_set_before=off sw_before_val= sw_before_envexists=true sw_before_rec_text=
+  abort_switch TERM' _ "$apply") >"$dir/out" 2>&1; rc=$?
+check "abort_switch decides from state: a switch written but not flagged is rolled back (both sides), exit 143" bash -c "test $rc = 143 && ! grep -q JARVIS_REQUIRE_AGENT_IDENTITY '$settings' && test ! -e '$swrec' && jq -e '.hooks.PreToolUse[0].hooks[0].command | endswith(\" --codex\")' '$hooks' >/dev/null"
+rsandbox
+run --require >/dev/null 2>&1
+trust_codex
+(cd "$dir" && base_env bash -c 'source "$1"; trap cleanup EXIT; init; sw_capture_before; claude_switch_clear >/dev/null
+  sw_op=unrequire
+  abort_switch TERM' _ "$apply") >"$dir/out" 2>&1; rc=$?
+check "abort_switch decides from state: a switch removed but not flagged is put back, exit 143" bash -c "test $rc = 143 && jq -e '$sw_claude' '$settings' >/dev/null && test -e '$swrec'"
+
+# a stale require record: the guard obeys it, so --check must say the switch is on
+rsandbox
+put "$swrec" '{"version": 1, "env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "1"}, "env_created": false}'
+run --check; rc=$?
+check "stale record, settings.json without the variable: --check exit 0 but WARN, not 'off'" bash -c "test $rc = 0 && grep -q '^WARN  agent-identity switch: Claude Code on (only $swrec says so' '$dir/out' && ! grep -q 'Claude Code off' '$dir/out'"
+check "stale record: the fix names --unrequire and --require" bash -c "grep -q -- '--unrequire removes the stale record' '$dir/out' && grep -q -- '--require sets the variable again' '$dir/out'"
+crun --check
+check "stale record: --check --codex says it too" has "Claude Code on (only $swrec says so"
+run --unrequire; rc=$?
+check "stale record: --unrequire removes it" bash -c "test $rc = 0 && test ! -e '$swrec'"
+run --check
+check "stale record removed: the switch is off again" has "OK  agent-identity switch: Claude Code off, Codex off"
+rsandbox
+put "$swrec" '{"version": 1, "env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "1"}}'
+CODEX_HOME="$codex" HOME="$home" bash "$cg_apply" --require-identity >/dev/null 2>&1
+run --check
+check "stale record with the Codex switch on: still WARN" has "WARN  agent-identity switch: Claude Code on (only"
+sandbox
+put "$home/.claude/agent-identity.require.json" '{ not json'
+run --check
+check "unreadable record: counts as on, as the guard does" has "WARN  agent-identity switch: Claude Code on (only"
+
+# --- the require record when the value was set by hand: owned false, kept on by the guard, left by --unrequire
+rsandbox
+jqset '.env.JARVIS_REQUIRE_AGENT_IDENTITY = "1"'
+cp "$settings" "$dir/settings.hand"
+run --require; rc=$?
+check "require, already on by hand: exit 0, a record is written and marked not ours" bash -c "test $rc = 0 && jq -e '.version == 1 and .env.JARVIS_REQUIRE_AGENT_IDENTITY == \"1\" and .owned == false' '$swrec' >/dev/null && grep -q 'owned false' '$dir/out'"
+check "require, already on by hand: settings.json is not touched" cmp -s "$settings" "$dir/settings.hand"
+check "require, already on by hand: the Codex side is on now" hook_on
+jq '.env.JARVIS_REQUIRE_AGENT_IDENTITY = ""' "$settings" >"$dir/s.blank" && cat "$dir/s.blank" >"$settings"
+run --check
+check "require, already on by hand: if a project blanks the variable the record still counts the switch as on" has "Claude Code on (only $swrec says so"
+cp "$dir/settings.hand" "$settings"
+trust_codex
+run --unrequire; rc=$?
+check "unrequire, record not ours: exit 0, the record goes and the value stays" bash -c "test $rc = 0 && test ! -e '$swrec' && jq -e '$sw_claude' '$settings' >/dev/null"
+check "unrequire, record not ours: the output says the value was left" bash -c "grep -q 'owned false' '$dir/out' && grep -q 'the value was left' '$dir/out' && grep -q 'still on (set by hand' '$dir/out'"
+check "unrequire, record not ours: Codex is off" hook_off
+
+# a record that does not list the value is a CONFLICT: the value in settings.json is not removed
+rsandbox
+run --require >/dev/null 2>&1
+trust_codex
+put "$swrec" '{"version": 1, "env": {}, "env_created": false, "owned": true}'
+cp "$settings" "$dir/settings.on"; cp "$hooks" "$dir/hooks.on"
+run --unrequire; rc=$?
+check "unrequire, the record does not list the value: exit 1, CONFLICT, the value stays" bash -c "test $rc = 1 && grep -q 'CONFLICT: env.JARVIS_REQUIRE_AGENT_IDENTITY is \"1\"' '$dir/out' && grep -q 'does not say this script wrote it' '$dir/out' && cmp -s '$settings' '$dir/settings.on' && test -e '$swrec'"
+check "unrequire, the record does not list the value: Codex was not touched" cmp -s "$hooks" "$dir/hooks.on"
+
+# a record-only switch (a valid record, no value in settings.json) is put back when a rollback is needed
+if [ "$(id -u)" != 0 ]; then
+  rsandbox
+  put "$swrec" '{"version": 1, "env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "1"}, "env_created": false, "owned": true}'
+  cp "$swrec" "$dir/rec.orig"
+  CODEX_HOME="$codex" HOME="$home" bash "$cg_apply" --require-identity >/dev/null 2>&1
+  trust_codex
+  cp "$hooks" "$dir/hooks.on"; cp "$settings" "$dir/settings.orig"
+  chmod 555 "$codex"
+  run --unrequire; rc=$?
+  chmod 755 "$codex"
+  check "unrequire of a record-only switch, Codex fails: exit 1 and the record is back as it was" bash -c "test $rc = 1 && [ "$(cat '$swrec')" = "$(cat '$dir/rec.orig')" ] && cmp -s '$settings' '$dir/settings.orig' && grep -q 'rolled back' '$dir/out'"
+  rsandbox
+  put "$swrec" '{"version": 1, "env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "1"}, "env_created": false, "owned": true}'
+  cp "$swrec" "$dir/rec.orig"; cp "$settings" "$dir/settings.orig"
+  chmod 555 "$codex"
+  run --require; rc=$?
+  chmod 755 "$codex"
+  check "require from a record-only switch, Codex fails: exit 1 and it is a record-only switch again" bash -c "test $rc = 1 && [ "$(cat '$swrec')" = "$(cat '$dir/rec.orig')" ] && jq -S . '$settings' | cmp -s - <(jq -S . '$dir/settings.orig')"
+fi
+rsandbox
+put "$swrec" '{"version": 1, "env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "1"}, "env_created": false, "owned": true}'
+cp "$swrec" "$dir/rec.orig"
+(cd "$dir" && base_env bash -c 'source "$1"; trap cleanup EXIT; init; sw_capture_before; claude_switch_clear >/dev/null
+  sw_op=unrequire; abort_switch TERM' _ "$apply") >"$dir/out" 2>&1; rc=$?
+check "an interrupt after a record-only switch was removed puts the record back" bash -c "test $rc = 143 && [ "$(cat '$swrec')" = "$(cat '$dir/rec.orig')" ]"
+
+# a Codex hook whose command carries --require-identity before another argument: on for the status and for --unrequire
+rsandbox
+CODEX_HOME="$codex" HOME="$home" bash "$cg_apply" --require-identity >/dev/null 2>&1
+sed -i.bak 's#--codex --require-identity"#--codex --require-identity --extra"#' "$hooks" && rm -f "$hooks.bak"
+trust_codex
+run --check; rc=$?
+check "Codex hook with a later argument: --check says Codex is on" bash -c "test $rc = 0 && grep -q 'agent-identity switch: Claude Code off, Codex on' '$dir/out'"
+run --unrequire; rc=$?
+check "Codex hook with a later argument: --unrequire turns it off, not 'already off'" bash -c "test $rc = 0 && ! grep -q 'already off in the hook' '$dir/out' && ! jq -e '.hooks.PreToolUse[0].hooks[0].command | contains(\"--require-identity\")' '$hooks' >/dev/null"
+
+# the process environment is part of the state
+rsandbox
+XENV="JARVIS_REQUIRE_AGENT_IDENTITY=1"
+run --check; rc=$?
+check "environment switch: --check says Claude Code is on (environment), and warns that Codex is off" bash -c "test $rc = 0 && grep -q '^WARN  agent-identity switch: Claude Code on (environment), Codex off' '$dir/out'"
+XENV="JARVIS_REQUIRE_AGENT_IDENTITY=1"
+run --unapply; rc=$?
+check "environment switch: --unapply says the switch stays on" bash -c "test $rc = 0 && grep -q 'switch stays ON' '$dir/out'"
+
+# settings.json cannot be replaced: nothing else is touched, the failure is reported, the exit is non-zero
+mkdir -p "$root/mvshim"
+cat >"$root/mvshim/mv" <<'EOF'
+#!/bin/sh
+for a in "$@"; do last=$a; done
+case "$last" in */settings.json) echo "mv: simulated failure replacing settings.json" >&2; exit 1 ;; esac
+exec /bin/mv "$@"
+EOF
+chmod +x "$root/mvshim/mv"
+rsandbox
+cp "$settings" "$dir/settings.orig"; cp "$hooks" "$dir/hooks.orig"
+TEST_PATH="$root/mvshim:$root/bin:$orig_path" run --require; rc=$?
+check "require, settings.json cannot be replaced: exit 1, Codex not touched" bash -c "test $rc = 1 && grep -q 'cannot replace $settings' '$dir/out' && grep -q 'Codex was not touched' '$dir/out' && jq -S . '$hooks' | cmp -s - <(jq -S . '$dir/hooks.orig')"
+check "require, settings.json cannot be replaced: settings.json and the record are as they were" bash -c "cmp -s '$settings' '$dir/settings.orig' && test ! -e '$swrec'"
+rsandbox
+run --require >/dev/null 2>&1
+trust_codex
+cp "$settings" "$dir/settings.on"; cp "$hooks" "$dir/hooks.on"
+TEST_PATH="$root/mvshim:$root/bin:$orig_path" run --unrequire; rc=$?
+check "unrequire, settings.json cannot be replaced: exit 1, the record stays, Codex not touched" bash -c "test $rc = 1 && grep -q 'cannot replace $settings' '$dir/out' && test -e '$swrec' && cmp -s '$settings' '$dir/settings.on' && cmp -s '$hooks' '$dir/hooks.on' && grep -q 'Codex was not touched' '$dir/out'"
+check "unrequire, settings.json cannot be replaced: it does not say the switch is off" bash -c "! grep -q 'switch is OFF' '$dir/out'"
+
+# the record changed since it was read (by another process): detected, nothing is overwritten or removed
+rsandbox
+(cd "$dir" && base_env bash -c 'source "$1"; trap cleanup EXIT; init
+  eval "orig_$(declare -f sw_write_json)"
+  sw_write_json() { orig_sw_write_json "$@"; printf "{\"other\": 1}\n" >"$sw_record"; }
+  claude_switch_set; echo "rc=$?"' _ "$apply") >"$dir/out" 2>&1
+check "record written by someone else while the switch is set: detected, not overwritten" bash -c "grep -q '^rc=1' '$dir/out' && grep -q 'changed while this ran' '$dir/out' && jq -e '.other == 1' '$swrec' >/dev/null && ! grep -q JARVIS_REQUIRE_AGENT_IDENTITY '$settings'"
+rsandbox
+run --require >/dev/null 2>&1
+cp "$settings" "$dir/settings.on"
+(cd "$dir" && base_env bash -c 'source "$1"; trap cleanup EXIT; init
+  eval "orig_$(declare -f sw_write_json)"
+  sw_write_json() { orig_sw_write_json "$@"; printf " " >>"$sw_record"; }
+  claude_switch_clear; echo "rc=$?"' _ "$apply") >"$dir/out" 2>&1
+check "record edited by someone else while the switch is cleared: detected, the record and the value stay" bash -c "grep -q '^rc=1' '$dir/out' && grep -q 'changed while this ran' '$dir/out' && test -e '$swrec' && jq -e '$sw_claude' '$settings' >/dev/null"
+rsandbox
+jqset '.env.JARVIS_REQUIRE_AGENT_IDENTITY = "1"'
+(cd "$dir" && base_env bash -c 'source "$1"; trap cleanup EXIT; init
+  eval "orig_$(declare -f sw_write_json)"
+  sw_write_json() { orig_sw_write_json "$@"; printf "{\"other\": 1}\n" >"$sw_record"; }
+  claude_switch_set; echo "rc=$?"' _ "$apply") >"$dir/out" 2>&1
+check "record written by someone else while a by-hand value is recorded: detected, not overwritten" bash -c "grep -q '^rc=1' '$dir/out' && jq -e '.other == 1' '$swrec' >/dev/null"
+
+# the machine-readable state of a check: applied, ready or problems
+rsandbox
+run --check
+check "state line: applied (Claude Code)" hasl "apply-agent-identity: state: applied"
+crun --check
+check "state line: applied (Codex)" hasl "apply-agent-identity: state: applied"
+csandbox
+run --check
+check "state line: ready (Claude Code, checks pass, nothing applied)" hasl "apply-agent-identity: state: ready"
+crun --check
+check "state line: ready (Codex)" hasl "apply-agent-identity: state: ready"
+check "state line: Next is built from the same state" has "Next: run without --check to apply"
+rm "$key"
+run --check
+check "state line: problems" hasl "apply-agent-identity: state: problems"
+
+# --- --unrequire
+rsandbox
+run --require
+trust_codex
+run --unrequire; rc=$?
+check "unrequire: exit 0" test "$rc" = 0
+check "unrequire: the switch is out of settings.json, the rest as it was" settings_orig
+check "unrequire: the record is gone" test ! -e "$swrec"
+check "unrequire: the Codex hook command is without the switch" hook_off
+check "unrequire: says the switch is off for both" has "switch is OFF for Claude Code and for Codex"
+check "unrequire: says Codex needs a trust again, with the same message" bash -c "grep -q 'open /hooks in Codex and trust the Jarvis guard' '$dir/out' && grep -q 'skips the guard until you do' '$dir/out'"
+check "unrequire: says a running session may drop it at once" bash -c "grep -q 'a running Claude Code session may drop the switch immediately' '$dir/out' && ! grep -q 'keeps the old' '$dir/out'"
+check "unrequire: says how to turn it on again" has "--require"
+crun --check; rc=$?
+check "unrequire: Codex reports the hook UNTRUSTED until it is trusted again" bash -c "test $rc = 1 && grep -q '(UNTRUSTED)' '$dir/out'"
+run --unrequire; rc=$?
+check "unrequire twice: exit 0, says it is already off" bash -c "test $rc = 0 && grep -q 'already off' '$dir/out'"
+
+# it needs no checks: a broken machine can still be switched off
+rsandbox
+run --require
+rm "$key" "$ckey"
+run --unrequire; rc=$?
+check "unrequire with failing checks: still exit 0 and off on both sides" bash -c "test $rc = 0 && ! grep -q JARVIS_REQUIRE_AGENT_IDENTITY '$settings'"
+check "unrequire with failing checks: the Codex hook is off too" hook_off
+
+# hooks.json that cannot be parsed: never "already off"
+rsandbox
+run --require
+cp "$settings" "$dir/settings.on"
+printf '{ not json' >"$hooks"
+run --unrequire; rc=$?
+check "unrequire, hooks.json unparseable: exit 1 with the reason and a fix, never 'already off'" bash -c "test $rc = 1 && grep -q 'cannot be parsed' '$dir/out' && grep -q 'jq . ' '$dir/out' && ! grep -q 'already off' '$dir/out'"
+check "unrequire, hooks.json unparseable: nothing was changed" bash -c "cmp -s '$settings' '$dir/settings.on' && test -e '$swrec'"
+
+# a changed value is a CONFLICT and nothing is touched
+rsandbox
+run --require
+put "$settings" '{"model":"opus","env":{"JARVIS_REQUIRE_AGENT_IDENTITY":"2"}}'
+cp "$hooks" "$dir/hooks.on"
+run --unrequire; rc=$?
+check "unrequire, the value was changed since: exit 1, CONFLICT" bash -c "test $rc = 1 && grep -q 'CONFLICT: env.JARVIS_REQUIRE_AGENT_IDENTITY in $settings is \"2\", but this script wrote \"1\"' '$dir/out'"
+check "unrequire, the value was changed since: neither side touched" bash -c "cmp -s '$hooks' '$dir/hooks.on' && test -e '$swrec'"
+
+# a failure on the Codex side puts the Claude Code side back
+if [ "$(id -u)" != 0 ]; then
+  rsandbox
+  run --require
+  trust_codex
+  cp "$hooks" "$dir/hooks.on"
+  chmod 555 "$codex"
+  run --unrequire; rc=$?
+  chmod 755 "$codex"
+  check "unrequire, apply-codex-guard.sh fails: exit 1 and the Claude Code side is put back" bash -c "test $rc = 1 && jq -e '$sw_claude' '$settings' >/dev/null && test -e '$swrec' && grep -q 'rolled back; the switch is on for both' '$dir/out'"
+  check "unrequire, apply-codex-guard.sh fails: the Codex hook is unchanged" cmp -s "$hooks" "$dir/hooks.on"
+fi
+
+# no Codex guard installed: nothing to turn off there, and the hook is not installed by --unrequire
+rsandbox
+run --require
+trust_codex
+rm "$hooks"
+run --unrequire; rc=$?
+check "unrequire, no Codex hook installed: exit 0 and none is created" bash -c "test $rc = 0 && test ! -e '$hooks' && grep -q 'no Jarvis guard hook is installed' '$dir/out'"
+
+# --- --unapply leaves the switch and says so
+rsandbox
+run --require; rc=$?
+check "require after the identity: exit 0" test "$rc" = 0
+run --unapply; rc=$?
+check "unapply: exit 0, the identity keys are gone" bash -c "test $rc = 0 && jq -e '.env | has(\"JARVIS_AGENT_IDENTITY\") | not' '$settings' >/dev/null"
+check "unapply: the switch stays in settings.json, with its record" bash -c "jq -e '$sw_claude' '$settings' >/dev/null && test -e '$swrec'"
+check "unapply: says the switch stays on and the machine fails closed" bash -c "grep -q 'switch stays ON' '$dir/out' && grep -q 'fails closed' '$dir/out' && grep -q -- '--unrequire' '$dir/out'"
+check "unapply: says a running session may drop the identity at once" bash -c "grep -q 'may drop the identity immediately' '$dir/out'"
+rsandbox
+run --require
+run --unapply --codex; rc=$?
+check "unapply --codex: exit 0, and the hook keeps the switch" bash -c "test $rc = 0 && jq -e '.hooks.PreToolUse[0].hooks[0].command | endswith(\" --codex --require-identity\")' '$hooks' >/dev/null"
+check "unapply --codex: says the switch stays on" bash -c "grep -q 'switch stays ON' '$dir/out' && grep -q 'in the hook command' '$dir/out'"
+rsandbox
+run --unapply; rc=$?
+check "unapply with the switch off: no word about it" bash -c "test $rc = 0 && ! grep -q 'switch stays' '$dir/out'"
+
+# --- --check says the state of the switch on each side, and warns when they differ
+csandbox
+run --check; rc=$?
+check "check, no hook, switch off: both off, OK" bash -c "test $rc = 0 && grep -q '^OK  agent-identity switch: Claude Code off, Codex off (no Codex guard hook installed)' '$dir/out'"
+crun --check; rc=$?
+check "check --codex, no hook: the same line, and no trust to check" bash -c "test $rc = 0 && grep -q '^OK  agent-identity switch: Claude Code off, Codex off' '$dir/out' && grep -q '^SKIP  the Codex guard hook is not installed' '$dir/out'"
+rsandbox
+run --check; rc=$?
+check "check, hook installed, switch off: both off" bash -c "test $rc = 0 && grep -q '^OK  agent-identity switch: Claude Code off, Codex off$' '$dir/out'"
+crun --check; rc=$?
+check "check --codex, hook installed and trusted: OK" bash -c "test $rc = 0 && grep -q '^OK  Codex trusts the Jarvis guard entry $(cd "$codex" && pwd -P)/hooks.json:pre_tool_use:0:0' '$dir/out'"
+jqset '.env.JARVIS_REQUIRE_AGENT_IDENTITY = "1"'
+run --check; rc=$?
+check "check, Claude Code on and Codex off: WARN, still exit 0" bash -c "test $rc = 0 && grep -q '^WARN  agent-identity switch: Claude Code on, Codex off' '$dir/out' && grep -q 'all checks passed (1 warning(s))' '$dir/out'"
+check "check, the two sides differ: the fix names --require and --unrequire" bash -c "grep -q -- '--require turns it on for both' '$dir/out' && grep -q -- '--unrequire turns it off for both' '$dir/out'"
+crun --check; rc=$?
+check "check --codex warns about the same difference" bash -c "test $rc = 0 && grep -q '^WARN  agent-identity switch: Claude Code on, Codex off' '$dir/out'"
+rsandbox
+CODEX_HOME="$codex" HOME="$home" bash "$cg_apply" --require-identity >/dev/null 2>&1
+trust_codex
+run --check; rc=$?
+check "check, Claude Code off and Codex on: WARN" bash -c "test $rc = 0 && grep -q '^WARN  agent-identity switch: Claude Code off, Codex on' '$dir/out'"
+jqset '.env.JARVIS_REQUIRE_AGENT_IDENTITY = "0"'
+run --check
+check "check, the Claude Code value is not 1: off" has "Claude Code off, Codex on"
+rsandbox
+put "$settings" '{ not json'
+crun --check; rc=$?
+check "check --codex does not fail on an unreadable settings.json (it is Claude Code's); the switch there is unknown" bash -c "test $rc = 0 && grep -q 'agent-identity switch: Claude Code unknown, Codex off' '$dir/out'"
+
+# --- a Codex hook that is installed but not trusted fails --check --codex, and a plain --codex run does not need the trust
+rsandbox
+untrust_codex
+crun --check; rc=$?
+check "check --codex, hook not trusted: WRONG, exit 1" bash -c "test $rc = 1 && grep -q '^WRONG  Codex does not run the guard hook (UNTRUSTED)' '$dir/out'"
+check "check --codex, hook not trusted: Next names it" bash -c "grep -q '^Next: step 6 of 6' '$dir/out' && grep -q 'open /hooks in Codex and trust the Jarvis guard' '$dir/out'"
+crun; rc=$?
+check "plain --codex run does not depend on the trust" test "$rc" = 0
+rsandbox
+printf 'enabled = false\n' >>"$toml"
+crun --check; rc=$?
+check "check --codex, hook disabled: WRONG DISABLED, with its own fix" bash -c "test $rc = 1 && grep -q '^WRONG  Codex does not run the guard hook (DISABLED)' '$dir/out' && grep -q 'fix: enable (and trust) the Jarvis guard in /hooks' '$dir/out'"
+
+# --- the identity apply messages: a running Claude Code session may pick the environment up at once
+sandbox
+run; rc=$?
+check "apply: says a running session may pick the environment up immediately" bash -c "test $rc = 0 && grep -q 'a running Claude Code session may pick the new environment up immediately' '$dir/out' && ! grep -q 'a running one keeps the old' '$dir/out'"
+
+# --- usage
+sandbox
+swrec="$home/.claude/agent-identity.require.json"
+for args in "--require --codex" "--unrequire --codex" "--require --check" "--require --unrequire" "--unrequire --unapply" "--setup --require"; do
+  # shellcheck disable=SC2086
+  run $args; rc=$?
+  check "usage: $args exits 2" test "$rc" = 2
+done
+check "usage: nothing written" test ! -e "$swrec"
+
 echo "== no account is named in the script"
 check "the script names no account of its own" bash -c "! grep -n -i 'shenyo' '$repo/scripts/apply-agent-identity.sh' | grep -q ."
 

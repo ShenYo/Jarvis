@@ -543,7 +543,14 @@ bash ~/.Jarvis/scripts/apply-codex-guard.sh --check  # exit 1 when it would chan
 ```
 
 Codex runs the hook only after you trust it in `/hooks`, and trust is by hash,
-so trust it again after every change to the hook or its entry.
+so trust it again after every change to the hook or its entry. `--check` also
+reads `~/.codex/config.toml` and reports `UNTRUSTED` (no matching `trusted_hash`)
+or `DISABLED` (`enabled = false`) with exit 1, because until then Codex skips the
+hook; it never writes that trust, which is yours to give. Reading it needs a
+`python3` with `tomllib` (Python 3.11+), and without one `--check` fails and says
+so. `--require-identity` and `--no-require-identity` set the agent-identity
+switch (see [Turning the switch on](#turning-the-switch-on)); a re-run with
+neither keeps the switch as the installed hook has it.
 
 What this does not do. Codex fails open: a hook that exits non-zero or overruns
 its timeout is marked failed and the command runs. In Codex mode the guard
@@ -626,11 +633,16 @@ A real run merges `GIT_AUTHOR_NAME`, `GIT_COMMITTER_NAME`, `GIT_AUTHOR_EMAIL`,
 `JARVIS_AGENT_IDENTITY` and the `GIT_CONFIG_*` pairs below into `env`, keeps a backup, and records what it wrote in
 `~/.claude/agent-identity.applied.json`. A key that someone else set to a
 different value is reported as a conflict and is not overwritten, and a
-settings file that changes while the script runs is not written. Start a new
-Claude Code session afterwards: a running one keeps the old environment. The agent's git is also forced onto SSH
+settings file that changes while the script runs is not written. A running Claude Code session
+may pick the new environment up at once (on this machine one did), and a new one
+does. The agent's git is also forced onto SSH
 (`GIT_CONFIG_COUNT` and the `url.git@github.com:.insteadOf` and
 `credential.helper` pairs), because an HTTPS remote ignores `GIT_SSH_COMMAND` and
 would push with the credentials in the operator's keychain, as the wrong account.
+Commands you type yourself with `!` in Claude Code also run with this identity
+(verified on 2026-11-02 in #14: `!` printed the author `Claude Code` and the login
+`agent-claude-code`); use an external terminal to act as yourself. Codex's `!` is
+noted in the Codex part below.
 
 The guard has a switch for this, and it is off. With
 `JARVIS_REQUIRE_AGENT_IDENTITY=1` in the environment and `JARVIS_AGENT_IDENTITY`
@@ -638,10 +650,10 @@ empty, [`bash-guard.py`](./.agents/claude-guard/bash-guard.py) refuses every
 GitHub write: a push to a shared remote, every `gh` subcommand except the known
 read-only forms (`view`, `list`, `status`, `diff`, `checks`, `search`,
 `browse --no-browser`, `auth status`, `--help`), and a `gh api` request that is
-not a `GET` or a GraphQL query. Nothing sets the switch; the owner turns it on
-after this machine passes `--check`, by adding it to the `env` of
-`~/.claude/settings.json`. It applies in Codex too, but the script writes only
-Claude Code's environment under this mode; see the Codex part below.
+not a `GET` or a GraphQL query. A plain run never sets the switch; `--require`
+does, for Claude Code and Codex together, once this machine passes `--check` (see
+[Turning the switch on](#turning-the-switch-on)). In Codex the switch is an argument
+of the hook's command, not the environment.
 
 Once the identity is applied (the marker is set), the guard also refuses a
 GitHub write that would not act as the agent, whether or not the switch is on:
@@ -696,8 +708,9 @@ overwritten. Reading `config.toml` needs a `python3` with `tomllib` (Python 3.11
 record. The Codex guard cannot see that policy (a Codex hook gets Codex's own
 environment, not its commands'), so it takes the record's presence as "the identity is
 applied" and then refuses the same overrides as above; it does not compare its own
-environment with anything. `JARVIS_REQUIRE_AGENT_IDENTITY` is still not set anywhere;
-how Codex will receive it is a later change.
+environment with anything. A `JARVIS_AGENT_IDENTITY` marker inherited from a Claude
+Code session counts for nothing there: the record is the only thing that makes the
+identity applied under Codex.
 
 `--check --codex` also reports a state that is only partly there as `MISSING`: a record
 with no `agent-identity.gitconfig` (the policy's `GIT_CONFIG_GLOBAL` would point at
@@ -752,6 +765,55 @@ required and the `gh` directory must differ from `gh_config_dir`; every `--codex
 check, and what is written, then use that account. `codex_login` equal to `login`
 means the same as not set. A `codex_email` or `codex_gh_config_dir` without `codex_login` is an
 error, and `codex_email` must differ from `email`.
+
+#### Turning the switch on
+
+The switch is off until you turn it on, and a plain run, `--setup` and `--unapply`
+never change it. Apply the identity on both sides first (the plain run, and `--codex`),
+trust the installed Codex hook in `/hooks`, and make sure `--check` and `--check --codex`
+are clean:
+
+```sh
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --require     # on, for Claude Code and Codex together
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --unrequire   # off, for both
+```
+
+`--require` first runs every check for Claude Code and for Codex, requires the identity to
+be applied on both sides (with the switch on and no identity, every GitHub write is refused,
+including the running session's), and checks that Codex trusts the hook that is installed
+now; one failure writes nothing and names the check that failed (a `WARN` is allowed). Then it writes `JARVIS_REQUIRE_AGENT_IDENTITY=1`
+into the `env` of `~/.claude/settings.json`, with a backup, a record of its own
+(`~/.claude/agent-identity.require.json`, apart from the identity's) and the same
+conflict and concurrent-change rules, and runs `apply-codex-guard.sh --require-identity`,
+which adds `--require-identity` to the hook's command. If that second step fails, the
+first is rolled back. `--unrequire` is the reverse, needs no checks, and prints the
+same messages. `--unapply` leaves the switch where it is and says so: with it on,
+a runtime without an identity refuses GitHub writes, which is the safe way round. The
+Claude Code guard treats the switch as on while `~/.claude/agent-identity.require.json`
+says so, even if a project's own `settings.json` blanks the variable; only `--unrequire`
+removes that record. The record is looked up in `$CLAUDE_CONFIG_DIR` and in `~/.claude`, so a
+project cannot redirect the lookup, and a record that exists but cannot be read counts as on.
+A value `"1"` that you set in `settings.json` by hand is recorded too, marked `"owned": false`;
+`--unrequire` removes that record and leaves your value.
+
+**Codex must be told to trust the guard again.** A Codex hook does not see the
+environment, so the switch is the hook's own argument, and Codex mode reads nothing
+else: not the environment variable, and not the `JARVIS_AGENT_IDENTITY` marker. Changing
+the argument changes the hook's hash, and Codex skips a hook whose hash it has not been
+shown, so after `--require` and after `--unrequire` the whole Codex guard is off until you
+open `/hooks` in Codex and trust it. `--check --codex` reports `UNTRUSTED` until you do.
+
+With the switch on, a GitHub write from a runtime whose identity is not applied (or whose
+record fails) is refused, and reads stay allowed. The refusal says what to do:
+
+```text
+Codex guard: gh pr create writes to GitHub; GitHub writes need this machine's agent
+identity, and it has none (...). The agent-identity switch (--require-identity in the
+Codex hook's command) caused this refusal. Fix: run `bash ~/.Jarvis/scripts/apply-agent-identity.sh
+--check --codex` and do what it lists (on a new machine start with `... --setup --codex`).
+Roll back: `bash ~/.Jarvis/scripts/apply-agent-identity.sh --unrequire` turns the switch
+off for Claude Code and Codex.
+```
 
 ## Bridge status and limitations
 
