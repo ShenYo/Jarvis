@@ -414,13 +414,23 @@ probe ask 'gh release create v2.0.0 --notes x'
 probe deny 'git push --force origin feat/x'
 probe deny 'gh api -X DELETE repos/o/r/git/refs/heads/x'
 echo "== agent identity: the same in Codex mode, where an ask is a deny anyway"
-hook_args=--codex
-probe allow 'gh pr create --title x'
+# Codex mode reads the switch from the hook's --require-identity argument only, and counts only a
+# Codex record as the applied identity: the marker in the environment, which the Claude Code
+# session sets, means nothing to it. (Changed from before: with the marker and no record the
+# answer was allow; with the environment switch and no marker it was deny.)
+hook_args="--codex --require-identity"
+probe deny 'gh pr create --title x'
+probe deny 'git push origin feat/y' "$onmain"
 probe deny 'gh pr merge 12'
+probe allow 'gh pr view 12'
 drop_identity
 probe deny 'gh pr create --title x'
 probe deny 'git push origin feat/y' "$onmain"
 probe allow 'gh pr view 12'
+hook_args="--codex"
+probe allow 'gh pr create --title x'
+probe allow 'git push origin feat/y' "$onmain"
+probe deny 'gh pr merge 12'
 hook_args=""
 unset JARVIS_REQUIRE_AGENT_IDENTITY
 
@@ -581,7 +591,7 @@ codex_home="$root/codex-home"; mkdir -p "$codex_home"
 codex_fixture "$codex_home"
 export CODEX_HOME="$codex_home"
 for sw in off on; do
-  [ "$sw" = on ] && export JARVIS_REQUIRE_AGENT_IDENTITY=1
+  [ "$sw" = on ] && hook_args="--codex --require-identity"
   probe deny 'GH_TOKEN=x gh pr create --title t'
   probe deny 'GITHUB_TOKEN=x gh pr create --title t'
   probe deny 'GH_HOST=h.example gh pr create --title t'
@@ -596,7 +606,7 @@ for sw in off on; do
   probe allow 'gh pr view 12'
   probe allow 'GH_TOKEN=x gh pr view 12'
 done
-unset JARVIS_REQUIRE_AGENT_IDENTITY
+hook_args="--codex"
 echo "== Codex: the hook's own environment is not the command's, so it is not compared"
 export GH_TOKEN=x GH_CONFIG_DIR=/other GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.editor GIT_CONFIG_VALUE_0=vim
 probe allow 'gh pr create --title t'
@@ -661,15 +671,121 @@ mkdir -p "$root/codex-none"; export CODEX_HOME="$root/codex-none"
 probe allow 'GH_TOKEN=x gh pr create --title t'
 probe allow 'GIT_CONFIG_GLOBAL=/x git push origin feat/x'
 probe allow 'gh pr create --title t'
+# The environment variable is Claude Code's switch; a Codex hook ignores it.
 export JARVIS_REQUIRE_AGENT_IDENTITY=1
-probe deny 'gh pr create --title t'
+probe allow 'gh pr create --title t'
+probe allow 'git push origin feat/y' "$onmain"
 unset JARVIS_REQUIRE_AGENT_IDENTITY
+echo "== Codex: the switch is the hook's --require-identity argument, and only that"
+hook_args="--codex --require-identity"
+probe deny 'gh pr create --title t'
+probe deny 'git push origin feat/y' "$onmain"
+probe deny 'gh api -X POST repos/o/r/issues -f title=x'
+probe allow 'gh pr view 12'
+probe allow 'git fetch origin'
+probe allow 'git push --dry-run origin feat/x'
+# a marker inherited from a Claude Code session does not make the identity applied
+export JARVIS_AGENT_IDENTITY=some-agent
+probe deny 'gh pr create --title t'
+probe deny 'git push origin feat/y' "$onmain"
+probe deny 'git push origin feat/y' "$root/https"
+unset JARVIS_AGENT_IDENTITY
+# with a sound record, the identity is applied and the switch changes nothing
+export CODEX_HOME="$codex_home"
+probe allow 'gh pr create --title t'
+probe allow 'git push origin feat/y' "$onmain"
+probe deny 'GH_TOKEN=x gh pr create --title t'
+# with a record that fails, the switch says so too
+export CODEX_HOME="$root/cx-gitconfig-gone"
+probe deny 'gh pr create --title t'
+probe allow 'gh pr view 12'
+export CODEX_HOME="$root/codex-none"
+hook_args="--codex"
 echo "== Claude Code: a Codex record changes nothing"
 hook_args=""
 export CODEX_HOME="$codex_home"
 probe allow 'GH_TOKEN=x gh pr create --title t'
 probe allow 'GIT_CONFIG_GLOBAL=/x git push origin feat/x'
 export CODEX_HOME="$no_codex"
+
+echo "== agent identity: the --require record keeps the switch on in Claude mode, whatever the environment says"
+rec_home="$root/require-home"; mkdir -p "$rec_home"
+echo '{"version": 1, "env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "1"}, "env_created": false}' >"$rec_home/agent-identity.require.json"
+export CLAUDE_CONFIG_DIR="$rec_home"
+probe deny 'gh pr create --title t'
+probe deny 'git push origin feat/y' "$onmain"
+probe allow 'gh pr view 12'
+export JARVIS_REQUIRE_AGENT_IDENTITY=      # a project's env blanks the variable
+probe deny 'gh pr create --title t'
+export JARVIS_REQUIRE_AGENT_IDENTITY=0
+probe deny 'gh pr create --title t'
+unset JARVIS_REQUIRE_AGENT_IDENTITY
+# with the identity applied the usual behaviour follows, record or not
+cp "$applied_home/agent-identity.applied.json" "$rec_home/agent-identity.applied.json"
+apply_identity; export CLAUDE_CONFIG_DIR="$rec_home"
+probe allow 'gh pr create --title t'
+probe deny 'GH_TOKEN=x gh pr create --title t'
+drop_identity
+# a record that does not say "1", or cannot be read, leaves the switch off
+export CLAUDE_CONFIG_DIR="$rec_home"
+echo '{"env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "0"}}' >"$rec_home/agent-identity.require.json"
+probe allow 'gh pr create --title t'
+echo '{ not json' >"$rec_home/agent-identity.require.json"
+probe allow 'gh pr create --title t'
+echo '{"env": {"JARVIS_REQUIRE_AGENT_IDENTITY": "1"}}' >"$rec_home/agent-identity.require.json"
+# the refusal names the record, not the variable, as the cause when the record alone turned the switch on
+jq -n --arg d "$feat" '{tool_name: "Bash", tool_input: {command: "gh pr create --title t"}, cwd: $d}' >"$root/in.json"
+reason=$("$py" -I "$hook" <"$root/in.json" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+total=$((total + 1))
+if printf '%s' "$reason" | grep -qF "switch ($rec_home/agent-identity.require.json records it as on) caused" && ! printf '%s' "$reason" | grep -qF '(JARVIS_REQUIRE_AGENT_IDENTITY=1)' \
+   && printf '%s' "$reason" | grep -qF "$rec_home/agent-identity.require.json records it as on but JARVIS_AGENT_IDENTITY is empty"; then
+  echo "ok   a record-only switch is named as the cause, with its path"
+else
+  echo "FAIL a record-only switch is named as the cause, with its path: $reason"; fails=$((fails + 1))
+fi
+reason=$(JARVIS_REQUIRE_AGENT_IDENTITY=1 "$py" -I "$hook" <"$root/in.json" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+total=$((total + 1))
+if printf '%s' "$reason" | grep -qF 'switch (JARVIS_REQUIRE_AGENT_IDENTITY=1) caused'; then
+  echo "ok   with the variable on, the variable is the cause"
+else
+  echo "FAIL with the variable on, the variable is the cause: $reason"; fails=$((fails + 1))
+fi
+# Codex mode does not read it
+hook_args="--codex"
+probe allow 'gh pr create --title t'
+hook_args=""
+export CLAUDE_CONFIG_DIR="$no_claude"
+probe allow 'gh pr create --title t'
+
+echo "== agent identity: the refusal under Codex names the switch, the fix and the way back"
+jq -n --arg d "$feat" '{tool_name: "Bash", tool_input: {command: "gh pr create --title x"}, cwd: $d}' >"$root/in.json"
+reason=$("$py" -I "$hook" --codex --require-identity <"$root/in.json" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+total=$((total + 1))
+if printf '%s' "$reason" | grep -qF "agent-identity switch" && printf '%s' "$reason" | grep -qF 'bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex' \
+   && printf '%s' "$reason" | grep -qF 'apply-agent-identity.sh --setup --codex' && printf '%s' "$reason" | grep -qF 'bash ~/.Jarvis/scripts/apply-agent-identity.sh --unrequire' \
+   && printf '%s' "$reason" | grep -qF 'gh pr create'; then
+  echo "ok   the Codex reason names the switch, --check --codex, --setup --codex and --unrequire"
+else
+  echo "FAIL the Codex reason names the switch, --check --codex, --setup --codex and --unrequire: $reason"; fails=$((fails + 1))
+fi
+reason=$(CODEX_HOME="$root/cx-gitconfig-gone" "$py" -I "$hook" --codex --require-identity <"$root/in.json" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+total=$((total + 1))
+if printf '%s' "$reason" | grep -qF 'no longer' || printf '%s' "$reason" | grep -qF 'is missing'; then
+  if printf '%s' "$reason" | grep -qF "agent-identity switch" && printf '%s' "$reason" | grep -qF 'apply-agent-identity.sh --unrequire'; then
+    echo "ok   a failing Codex record with the switch on also names the switch and --unrequire"
+  else
+    echo "FAIL a failing Codex record with the switch on also names the switch and --unrequire: $reason"; fails=$((fails + 1))
+  fi
+else
+  echo "FAIL the failing-record case did not fail on the record: $reason"; fails=$((fails + 1))
+fi
+reason=$(CODEX_HOME="$root/cx-gitconfig-gone" "$py" -I "$hook" --codex <"$root/in.json" | jq -r '.hookSpecificOutput.permissionDecisionReason')
+total=$((total + 1))
+if printf '%s' "$reason" | grep -qF "agent-identity switch"; then
+  echo "FAIL with the switch off the record problem does not blame the switch: $reason"; fails=$((fails + 1))
+else
+  echo "ok   with the switch off a record problem does not blame the switch"
+fi
 
 echo "== agent identity not applied and switch off: an override changes nothing"
 probe allow 'GH_TOKEN=x gh pr create --title t'
@@ -686,6 +802,13 @@ if printf '%s' "$reason" | grep -qF 'bash ~/.Jarvis/scripts/apply-agent-identity
   echo "ok   the reason names the --check command, the config path and the command"
 else
   echo "FAIL the reason names the --check command, the config path and the command: $reason"; fails=$((fails + 1))
+fi
+total=$((total + 1))
+if printf '%s' "$reason" | grep -qF "agent-identity switch" && printf '%s' "$reason" | grep -qF 'apply-agent-identity.sh --setup' \
+   && printf '%s' "$reason" | grep -qF 'bash ~/.Jarvis/scripts/apply-agent-identity.sh --unrequire' && ! printf '%s' "$reason" | grep -qF -- '--codex'; then
+  echo "ok   the Claude reason names the switch, --setup and --unrequire, and no Codex flag"
+else
+  echo "FAIL the Claude reason names the switch, --setup and --unrequire, and no Codex flag: $reason"; fails=$((fails + 1))
 fi
 
 apply_identity

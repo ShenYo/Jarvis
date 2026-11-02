@@ -23,7 +23,7 @@ How an entry is written:
 
 ## Unreleased
 
-A MINOR release: the agent identity reaches Codex, and the tests no longer depend on the session they run in.
+A MINOR release (v1.2.0): the agent identity reaches Codex, the guard's agent-identity switch can be turned on for both runtimes and back off, and the tests no longer depend on the session they run in.
 
 - **Codex identity.** `scripts/apply-agent-identity.sh --codex` (with `--check`,
   `--setup`, `--unapply`) gives Codex the same machine account with its own SSH
@@ -51,8 +51,55 @@ A MINOR release: the agent identity reaches Codex, and the tests no longer depen
   the same overrides as under Claude Code, skips the hook-environment comparison, and
   refuses GitHub writes if the record is unreadable, or if what it lists is gone (its
   block is not in `config.toml` exactly once, or the gitconfig is missing or has another
-  sha256). With no record, its answers are byte-identical to before over the whole probe
-  corpus.
+  sha256). With no record and no marker, its answers are byte-identical to before over the
+  whole probe corpus (see the next entry for what changed with a marker).
+- **The agent-identity switch can be turned on (#52).** The guard refuses every GitHub write
+  from a runtime whose identity is not applied when its switch is on; until now nothing
+  could set it for Codex, so it stayed off. It is still off by default. Under Claude Code
+  it is `JARVIS_REQUIRE_AGENT_IDENTITY=1` in the environment, as before. Under Codex it is
+  the hook's own argument `--require-identity`, because a Codex hook does not see the
+  environment; Codex mode now ignores the environment variable, and it also ignores the
+  `JARVIS_AGENT_IDENTITY` marker: "applied" means only that the Codex record exists and
+  passes its checks. That is a deliberate change: a marker inherited from a Claude Code
+  session used to count in Codex, and Codex strips `GIT_CONFIG_COUNT`, so an HTTPS push
+  could use the owner's keychain. A refusal under the switch now names the switch as the
+  cause, the fix (`apply-agent-identity.sh --check` or `--check --codex`, and `--setup`
+  on a new machine) and the rollback (`--unrequire`). With the switch off and no marker,
+  Claude-mode answers are byte-identical to before. In Claude mode the switch also counts as
+  on while `~/.claude/agent-identity.require.json` records it, so a project's own
+  `settings.json` env cannot blank it.
+- **`apply-agent-identity.sh --require` / `--unrequire`.** `--require` runs every Claude Code
+  check, every Codex check and the trust check of the installed Codex hook, and requires the
+  identity to be applied on both sides: a switch on with no identity would lock out every
+  GitHub write, the running session's included. It reads that from the fixed
+  `state: applied|ready|problems` line `--check` now prints. Any failure writes nothing and
+  names the failing check; the plain run (`bash …/apply-agent-identity.sh`, `--codex`) is the
+  fix for an identity not yet applied. Then it writes `JARVIS_REQUIRE_AGENT_IDENTITY=1` into
+  the `env` of `~/.claude/settings.json` (backup, its own record
+  `~/.claude/agent-identity.require.json`, the identity's conflict and concurrent-change
+  rules) and runs `apply-codex-guard.sh --require-identity`; if that fails, the settings change
+  is rolled back. An interrupt (INT, TERM) rolls back whatever this run changed, decided from
+  the state of the files. `--unrequire` is the reverse and needs no checks. Both refuse, with
+  a fix, when `hooks.json` cannot be parsed. `--unapply` leaves the switch and says so, so the
+  machine fails closed. `--check` states the switch for each side, counts a stale require
+  record as on (the guard obeys it, and its refusal names the record's path) with a warning and
+  the fix, warns when one side is on and the other off, and under `--codex` checks that Codex
+  trusts the installed hook. A running Claude Code session may pick up a changed
+  `settings.json` env at once, and the messages say so.
+- **`apply-codex-guard.sh`.** New `--require-identity` and `--no-require-identity`; with
+  neither, the installed hook's switch state is kept, so re-running after a Jarvis update
+  never turns it off (a first install starts off). `--check` (and the new `--trust`) read
+  `[hooks.state."<hooks.json>:pre_tool_use:<g>:<h>"]` in `config.toml` and report
+  `UNTRUSTED` or `DISABLED` with exit 1, because Codex skips a hook it has not been shown;
+  they need a `python3` with `tomllib` (3.11+) and fail closed without one. The hash formula
+  (sha256 of the compact, key-sorted JSON of the event, matcher and handler) matched all 11
+  handlers of the owner's real `hooks.json` and `config.toml` on 2026-11-02. The script never
+  writes the trust. The check follows Codex 0.166: it hashes `additionalContextLimit`,
+  drops null-valued keys, and answers `UNVERIFIABLE` (naming the key) for any handler key it
+  does not know; the key is `$CODEX_HOME/hooks.json` made canonical (links, trailing slash),
+  or `$HOME/.codex/hooks.json` as written when `CODEX_HOME` is unset; `[features] hooks =
+  false` (or the legacy `codex_hooks = false`) is reported as `DISABLED`. A first install
+  while Claude Code's switch is on warns that Codex's starts off.
 - **Optional separate Codex account.** `codex_login`, `codex_email` and
   `codex_gh_config_dir` (typed by hand; `--setup` never adds them) make Codex a second
   GitHub account, with its own `gh` login directory and repository invitations; messages
@@ -82,7 +129,14 @@ A MINOR release: the agent identity reaches Codex, and the tests no longer depen
   restart Codex. Re-run `bash ~/.Jarvis/scripts/apply-codex-guard.sh` to install the
   updated hook and trust it again in `/hooks`. Commands Codex runs outside its sandbox
   after an approval, and commands typed with `!` in the Codex TUI, are not yet verified
-  to receive the policy.
+  to receive the policy. To turn the agent-identity switch on, once `--check` and
+  `--check --codex` are clean and Codex trusts the installed hook:
+  `bash ~/.Jarvis/scripts/apply-agent-identity.sh --require`, then open `/hooks` in Codex
+  and trust the Jarvis guard again (its command gained `--require-identity`, so Codex skips
+  it until you do; `--check --codex` reports `UNTRUSTED` meanwhile), and start a new Claude
+  Code session. To turn it off: `--unrequire` and the same re-trust. Re-running
+  `apply-codex-guard.sh` keeps the switch as it is. Commands typed with `!` in Claude Code
+  also run with the agent identity (verified 2026-11-02 in #14).
 
 ## v1.1.0 (2026-10-29)
 

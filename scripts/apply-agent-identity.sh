@@ -52,7 +52,19 @@
 # value is a CONFLICT: reported, never overwritten. Settings are written through
 # links, after a backup (settings.json.agent-identity-backup), and not at all if
 # the file changed while the script ran. A new Claude Code session picks the
-# environment up; a running one keeps the old.
+# environment up, and a running one may do so at once.
+#
+# The guard's switch JARVIS_REQUIRE_AGENT_IDENTITY, which refuses every GitHub write from a
+# runtime whose identity is not applied, is off by default and is not touched by a plain run,
+# --unapply or --setup. --require turns it on for Claude Code and Codex together, after every
+# check for both has passed and the installed Codex hook is trusted: it writes
+# env.JARVIS_REQUIRE_AGENT_IDENTITY="1" to settings.json (record: agent-identity.require.json
+# beside the identity record, backup: settings.json.agent-identity-backup, same conflict and
+# concurrent-change rules) and runs apply-codex-guard.sh --require-identity, and it rolls the
+# first back when the second fails. Codex then skips the hook until the person trusts its new
+# hash in /hooks. --unrequire is the reverse, and needs no checks. --unapply leaves the switch
+# on and says so, so the machine fails closed. --check also says the switch's state on each
+# side, warns when they differ, and under --codex checks that Codex trusts the installed hook.
 #
 # --setup walks a new machine through steps 1 to 4. It is interactive, does
 # only safe local things after asking, and never writes settings.json.
@@ -75,11 +87,14 @@
 # keeps the old.
 #
 # Usage: apply-agent-identity.sh [--codex] [--check | --setup | --unapply]
+#        apply-agent-identity.sh --require | --unrequire
 #   (none)     run every check; when all pass, write the identity into settings
 #   --check    run every check and write nothing
 #   --setup    guided setup of steps 1-4 on a new machine (needs a terminal)
 #   --unapply  remove exactly what a real run recorded, and the record
 #   --codex    the same, for Codex instead of Claude Code
+#   --require  turn the guard's agent-identity switch on, for Claude Code and Codex together
+#   --unrequire  turn it off for both
 #   Exit: 0 all checks pass; 1 something to fix (nothing written); 2 usage or
 #   internal error.
 set -uo pipefail
@@ -1108,8 +1123,8 @@ do_apply() {
   else
     echo "apply-agent-identity: $settings already carried the keys; wrote $record"
   fi
-  echo "apply-agent-identity: start a new Claude Code session to pick the environment up; a running one keeps the old."
-  echo "apply-agent-identity: the guard's JARVIS_REQUIRE_AGENT_IDENTITY switch is not touched; this script never sets it."
+  echo "apply-agent-identity: a running Claude Code session may pick the new environment up immediately; start a new Claude Code session to be sure."
+  echo "apply-agent-identity: the guard's JARVIS_REQUIRE_AGENT_IDENTITY switch is not touched; only --require and --unrequire change it."
 }
 
 do_unapply() {
@@ -1170,7 +1185,7 @@ do_unapply() {
     echo "apply-agent-identity: none of the recorded keys is in $settings"
   fi
   rm -f "$record"
-  echo "apply-agent-identity: removed $record; a new Claude Code session drops the identity"
+  echo "apply-agent-identity: removed $record; a running Claude Code session may drop the identity immediately, and a new one does"
   return 0
 }
 
@@ -1798,7 +1813,7 @@ $tmp_git"
     echo "apply-agent-identity: $codex_cfg already carried the block; wrote $cg_file and $cg_record as needed"
   fi
   echo "apply-agent-identity: restart Codex to pick the policy up; a running session keeps the old environment."
-  echo "apply-agent-identity: the guard's JARVIS_REQUIRE_AGENT_IDENTITY switch is not touched; this script never sets it."
+  echo "apply-agent-identity: the guard's JARVIS_REQUIRE_AGENT_IDENTITY switch is not touched; only --require and --unrequire change it."
 }
 
 do_unapply_codex() {
@@ -1870,6 +1885,382 @@ $tmp_cfg"
   return 0
 }
 
+# --- the agent-identity switch: --require, --unrequire and what --check says about it ---------------------
+
+# The guard refuses every GitHub write from a runtime whose identity is not applied when its switch is on.
+# Under Claude Code the switch is JARVIS_REQUIRE_AGENT_IDENTITY=1 in the env of settings.json, which this
+# script writes with a record of its own (agent-identity.require.json, apart from the identity record, so
+# --unapply leaves the switch on and the machine fails closed). Under Codex it is the hook command's
+# --require-identity argument, which apply-codex-guard.sh writes; it changes the hook's hash, so Codex
+# skips the hook until the person trusts it again in /hooks.
+SWITCH_KEY=JARVIS_REQUIRE_AGENT_IDENTITY
+
+claude_switch_state() { # on | on (record) | off | unknown, read quietly. The guard obeys the require record
+  # as well as the env, so a record that says "1" counts as on even where settings.json does not.
+  local st=off
+  if [ -e "$settings" ]; then
+    st=$(jq -r --arg k "$SWITCH_KEY" '
+      if type != "object" then "unknown"
+      elif ((.env // {}) | type) != "object" then "unknown"
+      elif (.env // {})[$k] == "1" then "on" else "off" end' "$settings" 2>/dev/null) || st=unknown
+  fi
+  if [ "$st" != on ] && jq -e --arg k "$SWITCH_KEY" '.env[$k] == "1"' "$sw_record" >/dev/null 2>&1; then st="on (record)"; fi
+  echo "$st"
+}
+switch_is_on() { case $1 in on|"on (record)") return 0 ;; esac; return 1; }
+
+codex_switch_state() { # on | off | none (no Jarvis hook installed) | unknown
+  local hj="$codex_home/hooks.json"
+  [ -e "$hj" ] || { echo none; return 0; }
+  jq -r '
+    def own_h: (.command? // "") | contains("/hooks/jarvis-guard.py");
+    [(.hooks.PreToolUse // [])[] | .hooks[]? | select(own_h)] | first
+    | if . == null then "none" elif ((.command // "") | endswith(" --require-identity")) then "on" else "off" end' "$hj" 2>/dev/null || echo unknown
+}
+
+# Does Codex trust the installed Jarvis hook? Asks apply-codex-guard.sh --trust and sets cg_state (OK, UNTRUSTED,
+# DISABLED, NOT-INSTALLED, UNVERIFIABLE, or ERROR when that script did not answer), cg_msg and cg_fix.
+codex_trust() {
+  cg_state=ERROR cg_msg="" cg_fix=""
+  if [ ! -f "$cg_script" ]; then
+    cg_msg="$cg_script is missing, so the trust of the Codex hook cannot be read"
+    return 0
+  fi
+  local out line
+  out=$(bash "$cg_script" --trust 2>&1)
+  line=$(sed -n 's/^apply-codex-guard: trust: \([A-Z-]*\) - \(.*\)$/\1 \2/p' <<<"$out" | sed -n 1p)
+  if [ -z "$line" ]; then
+    cg_msg="apply-codex-guard.sh --trust gave no answer: $(first_line "$out")"
+    return 0
+  fi
+  cg_state=${line%% *}; cg_msg=${line#* }
+  cg_fix=$(sed -n 's/^apply-codex-guard: fix: //p' <<<"$out" | sed -n 1p)
+}
+
+chk_switch() { # --check, both targets: the switch on each side
+  step 6
+  local c k kw
+  c=$(claude_switch_state); k=$(codex_switch_state)
+  case $k in none) kw="off (no Codex guard hook installed)" ;; *) kw=$k ;; esac
+  if [ "$c" = "on (record)" ]; then
+    say WARN "agent-identity switch: Claude Code on (only $sw_record says so; env.$SWITCH_KEY is not \"1\" in $settings, and the guard obeys the record), Codex $kw; a stale record keeps refusing GitHub writes"
+    fix "bash $self --unrequire removes the stale record (if it reports a CONFLICT, settle the env value by hand first), or bash $self --require sets the variable again"
+  elif { switch_is_on "$c" && [ "$k" != on ]; } || { ! switch_is_on "$c" && [ "$k" = on ]; }; then
+    say WARN "agent-identity switch: Claude Code $c, Codex $kw; with one side on and the other off, GitHub writes are refused in one runtime and not in the other"
+    fix "bash $self --require turns it on for both, bash $self --unrequire turns it off for both"
+  else
+    say OK "agent-identity switch: Claude Code $c, Codex $kw"
+  fi
+}
+
+chk_codex_trust() { # --check --codex: does Codex trust the installed hook?
+  step 6
+  codex_trust
+  case $cg_state in
+    OK) say OK "$cg_msg" ;;
+    NOT-INSTALLED) say SKIP "the Codex guard hook is not installed, so there is no trust to check (bash $(q "$(dirname "$self")/apply-codex-guard.sh") installs it)" ;;
+    ERROR) say WRONG "the trust of the Codex guard hook could not be checked: $cg_msg"
+           fix "restore $(q "$cg_script") from the Jarvis repository, then re-run" ;;
+    *) say WRONG "Codex does not run the guard hook ($cg_state): $cg_msg"
+       fix "${cg_fix:-open /hooks in Codex and trust the Jarvis guard (until then Codex skips it)}" ;;
+  esac
+}
+
+indent_out() { sed 's/^/  | /'; }
+
+sw_snapshot() { # settings and the switch's own record
+  snapshot_settings
+  sw_rec_state=absent; sw_rec_json='{}'
+  if [ -e "$sw_record" ]; then
+    sw_rec_json=$(cat "$sw_record" 2>/dev/null)
+    if jq -e 'type == "object" and ((.env // {}) | type == "object")' >/dev/null 2>&1 <<<"$sw_rec_json"; then sw_rec_state=ok
+    else sw_rec_state=bad; sw_rec_json='{}'; fi
+  fi
+}
+
+sw_precheck() { # 0 when settings and record can be worked with; otherwise says why and returns 1
+  case $settings_state in
+    bad) echo "apply-agent-identity: $settings is not a readable JSON object; repair it by hand (jq . $(q "$settings") shows the error); nothing was changed"; return 1 ;;
+  esac
+  if [ "$sw_rec_state" = bad ]; then
+    echo "apply-agent-identity: $sw_record is not a JSON object with an env object; inspect it by hand; nothing was changed"; return 1
+  fi
+  if ! jq -e '(.env // {}) | type == "object"' >/dev/null 2>&1 <<<"$settings_text"; then
+    echo "apply-agent-identity: the env of $settings is not an object; make it one by hand; nothing was changed"; return 1
+  fi
+  return 0
+}
+
+# Write the switch into the env of settings.json, with a record, a backup and the same rules as the identity env:
+# a value someone else set to something else is a CONFLICT and is never overwritten, and a settings.json saved
+# while this ran is not overwritten either. Sets sw_changed=1 when it wrote. Returns 1 with nothing written on a problem.
+claude_switch_set() {
+  sw_changed=0
+  sw_snapshot
+  sw_precheck || return 1
+  local cur created merged_s new_rec rec_tmp="" set_tmp=""
+  cur=$(jq -c --arg k "$SWITCH_KEY" '.env[$k] // empty' <<<"$settings_text")
+  if [ -n "$cur" ] && [ "$cur" != '"1"' ]; then
+    echo "apply-agent-identity: CONFLICT: env.$SWITCH_KEY in $settings is $cur, which this script did not write; it would write \"1\""
+    echo "apply-agent-identity: fix: set it to \"1\" or delete it from the env block of $(q "$settings") by hand, then re-run; nothing was changed"
+    return 1
+  fi
+  if [ "$cur" = '"1"' ]; then
+    if [ "$sw_rec_state" = ok ] && [ -e "$sw_record" ]; then
+      echo "apply-agent-identity: Claude Code: the switch is already on in $settings"
+    else
+      echo "apply-agent-identity: Claude Code: the switch is already on in $settings (not set by this script, so --unrequire will leave it)"
+    fi
+    return 0
+  fi
+  if [ "$sw_rec_state" = ok ] && [ -e "$sw_record" ]; then
+    created=$(jq '.env_created // false' <<<"$sw_rec_json")
+  else
+    created=$(jq 'has("env") | not' <<<"$settings_text")
+  fi
+  merged_s=$(jq --arg k "$SWITCH_KEY" '.env = ((.env // {}) + {($k): "1"})' <<<"$settings_text")
+  new_rec=$(jq -n --arg k "$SWITCH_KEY" --argjson created "$created" '{version: 1, env: {($k): "1"}, env_created: $created}')
+  write_json "$sw_record" "$new_rec"; rec_tmp=$WROTE_TMP
+  write_json "$settings" "$merged_s"; set_tmp=$WROTE_TMP
+  if changed_since_read; then
+    rm -f "$rec_tmp" "$set_tmp"
+    echo "apply-agent-identity: $settings changed while this ran; nothing was written, run it again"
+    return 1
+  fi
+  mv "$rec_tmp" "$sw_record"
+  if [ -e "$settings" ]; then cp -p "$settings" "$settings.agent-identity-backup"; fi
+  mv "$set_tmp" "$settings"
+  sw_changed=1
+  echo "apply-agent-identity: Claude Code: wrote env.$SWITCH_KEY=\"1\" to $settings (previous copy: $settings.agent-identity-backup) and $sw_record"
+  return 0
+}
+
+# The reverse: remove exactly what claude_switch_set recorded. A value changed since is a CONFLICT and stays.
+claude_switch_clear() {
+  sw_changed=0
+  sw_snapshot
+  if [ "$sw_rec_state" = absent ]; then
+    if [ "$(claude_switch_state)" = on ]; then
+      echo "apply-agent-identity: Claude Code: env.$SWITCH_KEY is on in $settings but this script did not set it (no $sw_record), so it was left; remove it from the env block by hand if you want it off"
+      sw_unclaimed=1
+    else
+      echo "apply-agent-identity: Claude Code: the switch is already off"
+    fi
+    return 0
+  fi
+  sw_precheck || return 1
+  local cur out set_tmp
+  cur=$(jq -c --arg k "$SWITCH_KEY" '.env[$k] // empty' <<<"$settings_text")
+  if [ -n "$cur" ] && [ "$cur" != '"1"' ]; then
+    echo "apply-agent-identity: CONFLICT: env.$SWITCH_KEY in $settings is $cur, but this script wrote \"1\" and someone changed it since"
+    echo "apply-agent-identity: fix: restore the value or delete \"$SWITCH_KEY\" from the env block of $(q "$settings") by hand, then re-run; nothing was changed"
+    return 1
+  fi
+  if [ -n "$cur" ]; then
+    out=$(jq --arg k "$SWITCH_KEY" --argjson created "$(jq '.env_created // false' <<<"$sw_rec_json")" '
+      del(.env[$k]) | if $created and ((.env // null) == {}) then del(.env) else . end' <<<"$settings_text")
+    write_json "$settings" "$out"; set_tmp=$WROTE_TMP
+    if changed_since_read; then
+      rm -f "$set_tmp"
+      echo "apply-agent-identity: $settings changed while this ran; nothing was written, run it again"
+      return 1
+    fi
+    if [ -e "$settings" ]; then cp -p "$settings" "$settings.agent-identity-backup"; fi
+    mv "$set_tmp" "$settings"
+    sw_changed=1
+    echo "apply-agent-identity: Claude Code: removed env.$SWITCH_KEY from $settings (previous copy: $settings.agent-identity-backup)"
+  else
+    echo "apply-agent-identity: Claude Code: env.$SWITCH_KEY is not in $settings"
+  fi
+  rm -f "$sw_record"
+  echo "apply-agent-identity: Claude Code: removed $sw_record"
+  return 0
+}
+
+run_codex_guard() { # apply-codex-guard.sh flag: its output indented; its exit status
+  local out rc
+  out=$(bash "$cg_script" "$1" 2>&1); rc=$?
+  printf '%s\n' "$out" | indent_out
+  return $rc
+}
+
+# After the hook's command changed: does Codex run it now? Only if it already trusts this very hash.
+say_retrust() {
+  codex_trust
+  if [ "$cg_state" = OK ]; then
+    echo "apply-agent-identity: Codex already trusts the hook as it is now, so nothing more is needed in /hooks."
+  else
+    echo "apply-agent-identity: next: open /hooks in Codex and trust the Jarvis guard. The hook's command changed, so its hash did, and Codex skips the guard until you do (bash $self --check --codex reports UNTRUSTED until then)."
+  fi
+}
+
+codex_unreadable() { # says why the Codex side of the switch cannot be read
+  echo "$codex_home/hooks.json cannot be parsed, so the Codex side of the switch cannot be read"
+}
+
+# An interrupt puts back whatever this run changed, decided from the state of the files and not from
+# a flag set after the write: a signal can land between a write and the line that records it. So a
+# Ctrl-C or a kill never leaves the switch on for one runtime only.
+sw_op="" sw_claude_done=0 sw_codex_before="" sw_rec_before=0 sw_set_before=off
+sw_capture_before() { # the state a --require / --unrequire starts from
+  sw_codex_before=$(codex_switch_state)
+  if [ -e "$sw_record" ]; then sw_rec_before=1; else sw_rec_before=0; fi
+  sw_set_before=$(claude_switch_state)
+}
+abort_switch() { # signal name
+  trap '' INT TERM
+  echo
+  echo "apply-agent-identity: interrupted ($1); putting back what this run changed"
+  local rec_now=0 codex_now
+  [ ! -e "$sw_record" ] || rec_now=1
+  codex_now=$(codex_switch_state)
+  if [ "$sw_op" = require ]; then
+    # the record or the setting appeared since the start: take them away again
+    if { [ "$rec_now" = 1 ] && [ "$sw_rec_before" = 0 ]; } || { [ "$(claude_switch_state)" = on ] && [ "$sw_set_before" != on ] && [ "$sw_rec_before" = 0 ]; }; then
+      claude_switch_clear || echo "apply-agent-identity: the Claude Code side was not put back; run bash $self --unrequire"
+    fi
+    if [ "$sw_codex_before" != on ] && [ "$codex_now" = on ]; then
+      run_codex_guard --no-require-identity || echo "apply-agent-identity: the Codex side was not put back; run bash $self --unrequire"
+    fi
+  else
+    # the record or the setting that were there at the start are gone: put them back
+    if [ "$sw_rec_before" = 1 ] && { [ "$rec_now" = 0 ] || [ "$(claude_switch_state)" != on ]; }; then
+      claude_switch_set || echo "apply-agent-identity: the Claude Code side was not put back; run bash $self --require"
+    fi
+    if [ "$sw_codex_before" = on ] && [ "$codex_now" != on ]; then
+      run_codex_guard --require-identity || echo "apply-agent-identity: the Codex side was not put back; run bash $self --require"
+    fi
+  fi
+  case $1 in INT) exit 130 ;; *) exit 143 ;; esac
+}
+
+do_require() {
+  local failed="" out_c out_x rc_c rc_x
+  [ -f "$cg_script" ] || die "$cg_script is missing; --require needs it"
+  echo "apply-agent-identity: --require: the identity must be applied and every check must pass for Claude Code and for Codex, and Codex must trust the installed hook; nothing is written until they do"
+  echo "== Claude Code"
+  out_c=$(bash "$self" --check 2>&1); rc_c=$?
+  printf '%s\n' "$out_c" | indent_out
+  if [ "$rc_c" != 0 ]; then
+    failed="$failed
+  the Claude Code checks (bash $self --check) failed"
+  elif ! grep -qx 'apply-agent-identity: state: applied' <<<"$out_c"; then
+    failed="$failed
+  the Claude Code identity is not applied yet (or settings.json differs from what a run would write); with the switch on that locks out every GitHub write, including this session's. Fix: bash $self"
+  fi
+  echo "== Codex"
+  out_x=$(bash "$self" --check --codex 2>&1); rc_x=$?
+  printf '%s\n' "$out_x" | indent_out
+  if [ "$rc_x" != 0 ]; then
+    failed="$failed
+  the Codex checks (bash $self --check --codex) failed"
+  elif ! grep -qx 'apply-agent-identity: state: applied' <<<"$out_x"; then
+    failed="$failed
+  the Codex identity is not applied yet (or config.toml differs from what a run would write); with the switch on that locks out every GitHub write from Codex. Fix: bash $self --codex"
+  fi
+  if [ "$(codex_switch_state)" = unknown ]; then
+    failed="$failed
+  $(codex_unreadable); fix it by hand (jq . $(q "$codex_home/hooks.json") shows the error)"
+  fi
+  codex_trust
+  if [ "$cg_state" != OK ]; then
+    echo "== Codex hook trust"
+    echo "  | $cg_state - $cg_msg"
+    [ -z "$cg_fix" ] || echo "  | fix: $cg_fix"
+    failed="$failed
+  Codex does not trust the installed guard hook ($cg_state); the hook has to be installed (apply-codex-guard.sh) and trusted in /hooks before the switch can go on, or Codex would run with no guard at all"
+  fi
+  if [ -n "$failed" ]; then
+    echo "apply-agent-identity: --require refused, nothing was written:$failed"
+    return 1
+  fi
+  echo "== Turning the switch on"
+  sw_op=require sw_claude_done=0
+  sw_capture_before
+  trap 'abort_switch INT' INT; trap 'abort_switch TERM' TERM
+  claude_switch_set || { trap - INT TERM; echo "apply-agent-identity: --require stopped at Claude Code, nothing was changed"; return 1; }
+  sw_claude_done=$sw_changed
+  if ! run_codex_guard --require-identity; then
+    trap '' INT TERM
+    echo "apply-agent-identity: apply-codex-guard.sh --require-identity failed, so the switch is not on for Codex"
+    if [ "$sw_claude_done" = 1 ]; then
+      echo "apply-agent-identity: rolling back the Claude Code side"
+      if claude_switch_clear; then
+        echo "apply-agent-identity: --require rolled back; the switch is off for both"
+      else
+        echo "apply-agent-identity: the rollback of the Claude Code side did not finish; run bash $self --unrequire"
+      fi
+    else
+      echo "apply-agent-identity: nothing else was changed"
+    fi
+    trap - INT TERM
+    return 1
+  fi
+  trap - INT TERM
+  echo "apply-agent-identity: the agent-identity switch is ON for Claude Code (env.$SWITCH_KEY in $settings) and for Codex (--require-identity in the hook command)"
+  say_retrust
+  echo "apply-agent-identity: a running Claude Code session may pick the switch up immediately (its settings env is read again); a new session certainly does."
+  echo "apply-agent-identity: with the switch on, a runtime whose identity is not applied refuses GitHub writes."
+  echo "apply-agent-identity: to roll back: bash $self --unrequire (it needs a trust in /hooks again, for the same reason)."
+  return 0
+}
+
+do_unrequire() {
+  local sw_unclaimed=0 codex_changed=0 cs
+  [ -f "$cg_script" ] || die "$cg_script is missing; --unrequire needs it"
+  cs=$(codex_switch_state)
+  if [ "$cs" = unknown ]; then
+    echo "apply-agent-identity: $(codex_unreadable); fix it by hand (jq . $(q "$codex_home/hooks.json") shows the error), then re-run --unrequire; nothing was changed"
+    return 1
+  fi
+  echo "== Turning the switch off"
+  sw_op=unrequire sw_claude_done=0
+  sw_capture_before
+  trap 'abort_switch INT' INT; trap 'abort_switch TERM' TERM
+  claude_switch_clear || { trap - INT TERM; echo "apply-agent-identity: --unrequire stopped at Claude Code, nothing was changed"; return 1; }
+  sw_claude_done=$sw_changed
+  case $cs in
+    on)
+      if ! run_codex_guard --no-require-identity; then
+        trap '' INT TERM
+        echo "apply-agent-identity: apply-codex-guard.sh --no-require-identity failed, so the switch is still on for Codex"
+        if [ "$sw_claude_done" = 1 ]; then
+          echo "apply-agent-identity: putting the Claude Code side back"
+          if claude_switch_set; then
+            echo "apply-agent-identity: --unrequire rolled back; the switch is on for both"
+          else
+            echo "apply-agent-identity: putting it back did not finish; run bash $self --require"
+          fi
+        fi
+        trap - INT TERM
+        return 1
+      fi
+      codex_changed=1 ;;
+    none) echo "apply-agent-identity: Codex: no Jarvis guard hook is installed, so there is no switch to turn off" ;;
+    *) echo "apply-agent-identity: Codex: the switch is already off in the hook command" ;;
+  esac
+  trap - INT TERM
+  if [ "$sw_unclaimed" = 1 ]; then
+    echo "apply-agent-identity: the agent-identity switch is OFF for Codex; for Claude Code it is still on (set by hand, see above)"
+  else
+    echo "apply-agent-identity: the agent-identity switch is OFF for Claude Code and for Codex"
+  fi
+  if [ "$codex_changed" = 1 ]; then say_retrust; fi
+  echo "apply-agent-identity: a running Claude Code session may drop the switch immediately (its settings env is read again); a new session certainly does."
+  echo "apply-agent-identity: to turn it on again: bash $self --require"
+  return 0
+}
+
+# --unapply removes the identity and leaves the switch; say so, because with the switch on the machine now
+# refuses GitHub writes, which is the safe way round.
+note_switch_stays() {
+  local st where who
+  if [ "$target" = codex ]; then st=$(codex_switch_state); where="--require-identity in the hook command"; who=Codex
+  else st=$(claude_switch_state); where="env.$SWITCH_KEY in $settings"; who="Claude Code"; fi
+  switch_is_on "$st" || return 0
+  echo "apply-agent-identity: the agent-identity switch stays ON ($where), so $who now refuses GitHub writes until an identity is applied again (bash $self$([ "$target" = codex ] && echo " --codex")); the machine fails closed. To turn the switch off, for both: bash $self --unrequire"
+}
+
 # --- the checks, in the order a new machine is set up ----------------------------------------------
 
 run_checks() {
@@ -1897,20 +2288,32 @@ run_checks() {
     chk_settings
     chk_git_urls
   fi
+  if [ "$run_mode" = check ]; then
+    chk_switch
+    if [ "$target" = codex ]; then chk_codex_trust; fi
+  fi
 }
 
-finish_checks() { # prints Next and the summary
-  local ready_msg="run without --check to apply"
-  if [ "$problems" = 0 ] && [ "$target" = codex ]; then
-    if [ "$cplan_cfg" = none ] && [ "$cplan_git" = none ] && [ "$cplan_rec" = none ]; then
-      ready_msg="nothing — the identity is already applied; a new Codex session uses it"
-    fi
-  elif [ "$problems" = 0 ]; then
-    plan_settings 2>/dev/null
-    if [ "${settings_same:-0}" = 1 ] && [ "${record_same:-0}" = 1 ]; then
-      ready_msg="nothing — the identity is already applied; a new Claude Code session uses it"
+finish_checks() { # prints the state, Next and the summary
+  # One state for the whole check, which --require reads from the "state:" line: applied (nothing left
+  # to write), ready (every check passed, a run would write), problems (a check failed).
+  local state=problems ready_msg="run without --check to apply"
+  if [ "$problems" = 0 ]; then
+    state=ready
+    if [ "$target" = codex ]; then
+      if [ "$cplan_cfg" = none ] && [ "$cplan_git" = none ] && [ "$cplan_rec" = none ]; then
+        state=applied
+        ready_msg="nothing — the identity is already applied; a new Codex session uses it"
+      fi
+    else
+      plan_settings 2>/dev/null
+      if [ "${settings_same:-0}" = 1 ] && [ "${record_same:-0}" = 1 ]; then
+        state=applied
+        ready_msg="nothing — the identity is already applied; a new Claude Code session uses it"
+      fi
     fi
   fi
+  echo "apply-agent-identity: state: $state"
   print_next "$ready_msg"
 }
 
@@ -2168,6 +2571,8 @@ init() {
   codex_cfg=$(resolve_links "$codex_home/config.toml")
   cg_file="$codex_home/agent-identity.gitconfig"
   cg_record="$codex_home/agent-identity.applied.json"
+  sw_record="$claude_home/agent-identity.require.json"
+  cg_script="$(dirname "$self")/apply-codex-guard.sh"
 }
 
 main() {
@@ -2175,23 +2580,32 @@ main() {
   for a in "$@"; do
     case $a in
       --codex) [ "$have_codex" = 0 ] || { usage >&2; exit 2; }; have_codex=1; target=codex ;;
-      --check|--setup|--unapply|-h|--help)
+      --check|--setup|--unapply|--require|--unrequire|-h|--help)
         [ "$have_mode" = 0 ] || { usage >&2; exit 2; }
         have_mode=1
         case $a in
           --check) mode=check ;;
           --setup) mode=setup ;;
           --unapply) mode=unapply ;;
+          --require) mode=require ;;
+          --unrequire) mode=unrequire ;;
           *) usage; exit 0 ;;
         esac ;;
       *) usage >&2; exit 2 ;;
     esac
   done
+  case $mode in require|unrequire) [ "$have_codex" = 0 ] || { usage >&2; exit 2; } ;; esac
   trap cleanup EXIT
   init
   run_mode=$mode
   case $mode in
-    unapply) if [ "$target" = codex ]; then do_unapply_codex; else do_unapply; fi; exit $? ;;
+    require) do_require; exit $? ;;
+    unrequire) do_unrequire; exit $? ;;
+    unapply)
+      local urc
+      if [ "$target" = codex ]; then do_unapply_codex; urc=$?; else do_unapply; urc=$?; fi
+      [ "$urc" != 0 ] || note_switch_stays
+      exit "$urc" ;;
     setup) setup_main; exit $? ;;
   esac
   run_checks

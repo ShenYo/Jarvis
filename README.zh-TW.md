@@ -491,7 +491,12 @@ bash ~/.Jarvis/scripts/apply-codex-guard.sh --check  # 會改動任何東西時 
 ```
 
 Codex 要等你在 `/hooks` 裡信任這支 hook 才會執行它，而信任是依 hash 計算的，所以
-hook 或它的設定每次有變動，都要再信任一次。
+hook 或它的設定每次有變動，都要再信任一次。`--check` 也會讀 `~/.codex/config.toml`，回報
+`UNTRUSTED`（沒有吻合的 `trusted_hash`）或 `DISABLED`（`enabled = false`）並以 exit 1 結束，因為
+在那之前 Codex 會略過這支 hook；它絕不寫入那份信任，那是你的決定。讀它需要帶 `tomllib` 的
+`python3`（Python 3.11+），沒有的話 `--check` 會失敗並說明。`--require-identity` 與
+`--no-require-identity` 設定 agent-identity 開關（見[打開開關](#打開開關)）；兩者都不給的重跑，
+會讓開關維持已安裝 hook 目前的樣子。
 
 它做不到的事。Codex 是 fail open：hook 以非零狀態結束，或超過 timeout，只會被標成
 失敗，指令照樣執行。在 Codex mode 下，guard 會把自己的錯誤（包括無法解析的輸入）
@@ -561,16 +566,19 @@ bash ~/.Jarvis/tests/agent-identity.sh
 真正的執行會把 `GIT_AUTHOR_NAME`、`GIT_COMMITTER_NAME`、`GIT_AUTHOR_EMAIL`、
 `GIT_COMMITTER_EMAIL`、`GIT_SSH_COMMAND`、`GH_CONFIG_DIR` 與 `JARVIS_AGENT_IDENTITY` 合併進
 `env`、留下備份，並把寫入的內容記在 `~/.claude/agent-identity.applied.json`。別人設成不同值的
-key 會被報告為衝突而不覆蓋；腳本執行期間 settings 檔若被改動，就不寫入。之後請開新的 Claude
-Code session：執行中的 session 仍用舊的環境。Agent 的 git 也被強制走 SSH（`GIT_CONFIG_COUNT` 以及 `url.git@github.com:.insteadOf` 與 `credential.helper` 兩組設定），因為 HTTPS remote 不會用 `GIT_SSH_COMMAND`，會改用 operator keychain 裡的憑證 push，也就是以錯誤的帳號操作。
+key 會被報告為衝突而不覆蓋；腳本執行期間 settings 檔若被改動，就不寫入。執行中的 Claude Code
+session 可能馬上就讀到新的環境（在這台機器上就是如此），新開的 session 一定會。Agent 的 git 也被強制走 SSH（`GIT_CONFIG_COUNT` 以及 `url.git@github.com:.insteadOf` 與 `credential.helper` 兩組設定），因為 HTTPS remote 不會用 `GIT_SSH_COMMAND`，會改用 operator keychain 裡的憑證 push，也就是以錯誤的帳號操作。
+你自己在 Claude Code 裡用 `!` 輸入的指令，也會用這個 identity 執行（2026-11-02 在 #14 驗證：`!` 印出
+作者 `Claude Code` 與 login `agent-claude-code`）；要以你自己的身分操作，請用外部終端機。Codex 的 `!`
+記在下面的 Codex 部分。
 
 Guard 為此有一個開關，目前是關的。環境裡有 `JARVIS_REQUIRE_AGENT_IDENTITY=1` 而
 `JARVIS_AGENT_IDENTITY` 為空時，[`bash-guard.py`](./.agents/claude-guard/bash-guard.py)
 拒絕所有寫入 GitHub 的操作：push 到共用 remote、除了已知唯讀形式（`view`、`list`、`status`、
 `diff`、`checks`、`search`、`browse --no-browser`、`auth status`、`--help`）之外的每一個 `gh`
-子指令，以及不是 `GET` 也不是 GraphQL query 的 `gh api` 請求。沒有任何東西會設定這個開關；
-由 owner 在這台機器通過 `--check` 之後，把它加進 `~/.claude/settings.json` 的 `env` 來打開。
-它在 Codex 也生效，但在這個模式下腳本只寫 Claude Code 的環境；見下面的 Codex 部分。
+子指令，以及不是 `GET` 也不是 GraphQL query 的 `gh api` 請求。一般執行絕不設定這個開關；`--require` 會，
+而且是 Claude Code 與 Codex 一起，在這台機器通過 `--check` 之後（見[打開開關](#打開開關)）。在 Codex，
+開關是 hook 指令的一個參數，不是環境變數。
 
 Identity 套用之後（標記已設定），不論開關是否打開，guard 還會拒絕不會以 agent 身分執行的 GitHub
 寫入：hook 自己的環境帶有 `GH_TOKEN`、`GITHUB_TOKEN`、`GH_ENTERPRISE_TOKEN`、`GH_HOST` 或
@@ -611,7 +619,8 @@ Codex 會把整個環境傳下去。真正的 `--codex` 執行在每項檢查都
 `python3`（Python 3.11+）。`--unapply --codex` 只有在區塊與紀錄逐 byte 相同時才移除它。Codex 的 guard
 看不到那份 policy（Codex 的 hook 拿到的是 Codex 自己的環境，不是它的指令的環境），所以它以紀錄檔存在
 作為「identity 已套用」，然後拒絕與上面相同的 override；它不會拿自己的環境去比對任何東西。
-`JARVIS_REQUIRE_AGENT_IDENTITY` 仍然沒有在任何地方被設定；Codex 如何收到它留給之後的變更。
+從 Claude Code session 繼承來的 `JARVIS_AGENT_IDENTITY` 標記在這裡完全不算數：在 Codex 下，
+只有紀錄檔能讓 identity 成為已套用。
 
 `--check --codex` 也會把只做到一半的狀態回報為 `MISSING`：有紀錄卻沒有 `agent-identity.gitconfig`
 （policy 的 `GIT_CONFIG_GLOBAL` 會指向不存在的檔案，git 會退回用你自己的憑證走 HTTPS），或紀錄裡的區塊
@@ -656,6 +665,46 @@ Codex 也可以改用另一個獨立的 GitHub 帳號，而不是共用這一個
 `gh` 目錄必須和 `gh_config_dir` 不同；之後每一項 `--codex` 檢查與寫入的內容都用那個帳號。
 `codex_login` 與 `login` 相同，等於沒設。沒有 `codex_login` 卻設了 `codex_email` 或
 `codex_gh_config_dir` 是錯誤，而 `codex_email` 必須和 `email` 不同。
+
+#### 打開開關
+
+開關在你打開之前都是關的，一般執行、`--setup` 與 `--unapply` 都不會改它。請先在兩邊都套用
+identity（一般執行與 `--codex`），在 `/hooks` 信任已安裝的 Codex hook，並確認 `--check` 與
+`--check --codex` 都乾淨：
+
+```sh
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --require     # 打開，Claude Code 與 Codex 一起
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --unrequire   # 關閉，兩邊一起
+```
+
+`--require` 先跑 Claude Code 與 Codex 的每一項檢查，要求兩邊的 identity 都已套用（開關打開而沒有
+identity，會拒絕所有寫入 GitHub 的操作，包括正在執行的 session），並確認 Codex 信任目前已安裝的 hook；
+只要有一項失敗就什麼都不寫，並指出是哪一項失敗（允許 `WARN`）。接著它把 `JARVIS_REQUIRE_AGENT_IDENTITY=1` 寫進
+`~/.claude/settings.json` 的 `env`，附備份、自己的紀錄（`~/.claude/agent-identity.require.json`，
+與 identity 的紀錄分開），以及相同的衝突與並行修改規則，然後執行
+`apply-codex-guard.sh --require-identity`，它會在 hook 的指令後面加上 `--require-identity`。第二步
+若失敗，第一步會被回滾。`--unrequire` 是相反的操作，不需要任何檢查，印出相同的訊息。`--unapply`
+讓開關維持原狀並說明這件事：開關打開時，沒有 identity 的 runtime 會拒絕寫入 GitHub，這是比較安全的方向。只要
+`~/.claude/agent-identity.require.json` 這樣記錄，Claude Code 的 guard 就視開關為打開，即使專案自己的
+`settings.json` 把那個變數清空；只有 `--unrequire` 會移除那份紀錄。
+
+**Codex 必須被告知再信任一次 guard。** Codex 的 hook 看不到環境，所以開關是 hook 自己的參數，
+而 Codex mode 只讀它：不讀環境變數，也不讀 `JARVIS_AGENT_IDENTITY` 標記。改了參數，hook 的
+hash 就變了，而 Codex 會略過 hash 沒被確認過的 hook，所以 `--require` 之後和 `--unrequire` 之後，
+整個 Codex guard 都是關的，直到你在 Codex 裡開 `/hooks` 並信任它。在那之前 `--check --codex` 會回報
+`UNTRUSTED`。
+
+開關打開時，identity 沒有套用（或紀錄失效）的 runtime 寫入 GitHub 會被拒絕，讀取仍然允許。拒絕的訊息會
+說明該怎麼做：
+
+```text
+Codex guard: gh pr create writes to GitHub; GitHub writes need this machine's agent
+identity, and it has none (...). The agent-identity switch (--require-identity in the
+Codex hook's command) caused this refusal. Fix: run `bash ~/.Jarvis/scripts/apply-agent-identity.sh
+--check --codex` and do what it lists (on a new machine start with `... --setup --codex`).
+Roll back: `bash ~/.Jarvis/scripts/apply-agent-identity.sh --unrequire` turns the switch
+off for Claude Code and Codex.
+```
 
 ## Bridge 狀態與限制
 
