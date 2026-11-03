@@ -74,6 +74,10 @@ models and collaboration tools.
 A repository's own rules decide which of its work needs independent
 verification. Which model does the work follows this section.
 
+Before you ask the owner to review a pull request you opened, read
+[`~/.Jarvis/docs/dispatch/review-loop.md`](../docs/dispatch/review-loop.md):
+a fresh reviewer agent reviews it first, and you answer every finding.
+
 ## Coding
 
 <!-- Responsibility: how to change code and files, from reading first to
