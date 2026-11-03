@@ -31,6 +31,11 @@ A PATCH release: documentation only.
   and SSH identity of `!` commands, what can replace the identity policy, the switch in
   a live session, and (after #56) arming auto-merge. `docs/dispatch/codex.md` points at it
   and records that the owner's Approve was confirmed on #53.
+- **Keeping a machine current** has its own guide, in English and Traditional Chinese:
+  [`docs/keep-machine-current.md`](./docs/keep-machine-current.md). It lists the situations (a routine
+  update, a release that asks for a step, a check that fails afterwards, a Skill added or
+  removed, and how to tell whether a machine is current) and the steps for each. Both READMEs
+  link it, and CI checks the pair for parity.
 
 ## v1.2.1 (2026-11-02)
 

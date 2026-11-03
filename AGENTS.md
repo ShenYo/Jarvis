@@ -75,8 +75,8 @@ already loads. These five are this repository's own:
 1. **Scratch files go under `docs/temp/<purpose>/`**, which `.gitignore`
    ignores. Never stage one, and never reach for a blanket `git add -A` across
    a mixed tree to find out what is there.
-2. Both READMEs, and both versions of `docs/setup-new-machine`, are checked
-   for parity by [`scripts/check-readme-parity.py`](./scripts/check-readme-parity.py).
+2. Both READMEs, and both versions of `docs/setup-new-machine` and of
+   `docs/keep-machine-current`, are checked for parity by [`scripts/check-readme-parity.py`](./scripts/check-readme-parity.py).
    An edit to one needs the matching edit to the other.
 3. Never write to `~/.Jarvis` from inside a consumer project's workflow. This
    repository is optional for every project; a project that writes here has
