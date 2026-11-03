@@ -21,6 +21,17 @@ How an entry is written:
 - Nothing here is a dependency of any project, so no entry has an upgrade path
   for a consumer.
 
+## Unreleased
+
+A PATCH release: documentation only.
+
+- **What only Codex can verify** is listed in
+  [`docs/dispatch/codex-pending-action-items.md`](./docs/dispatch/codex-pending-action-items.md),
+  for Codex to read and work through: whether Codex loads Jarvis Skills, the GitHub
+  and SSH identity of `!` commands, what can replace the identity policy, the switch in
+  a live session, and (after #56) arming auto-merge. `docs/dispatch/codex.md` points at it
+  and records that the owner's Approve was confirmed on #53.
+
 ## v1.2.1 (2026-11-02)
 
 A PATCH release: documentation only ([#59](https://github.com/ShenYo/Jarvis/issues/59)). Nothing to do on this machine.
