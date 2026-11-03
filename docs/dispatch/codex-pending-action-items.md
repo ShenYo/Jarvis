@@ -14,19 +14,20 @@ reason; never infer one. Read [`codex.md`](./codex.md) first, and
 
 ## How to work
 
-1. Start from an up-to-date `main` on a new branch, `docs/codex-verify-<date>`.
-2. Record each result in [`codex.md`](./codex.md), under a dated section
-   `## Verification (<date>, codex-cli <version>)`. Give each item one row:
+1. Start from an up-to-date `main` on a new branch, `docs/codex-verify-<YYYYMMDD-HHMM>`.
+2. Record each result in [`codex.md`](./codex.md), under a section
+   `## Verification (<YYYYMMDD-HHMM>, codex-cli <version>)`. Give each item one row:
    the command, the observed output, and PASS, FAIL or UNVERIFIED. Follow the
    style of the existing "Agent identity" section.
-3. Update this file. Set the item's **Status** to the result, with the date,
-   your `codex --version` and the PR link. When an item passes, move it to
-   [Done](#done). If a result contradicts a document, for example
+3. Update this file. Set the item's **Status** to the result, with the date
+   and your `codex --version`. When an item passes, move it to [Done](#done). If a result contradicts a document, for example
    [`../agent-identity.md`](../agent-identity.md) or
    [`../architecture.md`](../architecture.md), correct that document in the same
    PR and say so.
 4. Commit following [`../git.md`](../git.md), push, and open one pull request
-   for the whole run. Ask the owner to **Approve as ShenYo** before it merges.
+   for the whole run. Then add the PR's link to each Status you set, in a
+   second commit on the same branch. Ask the owner to **Approve as ShenYo**
+   before it merges.
 5. A step marked **owner** needs the owner to type something in the Codex TUI
    or in an external terminal. Ask for it, wait, and record what they paste.
 
@@ -41,16 +42,20 @@ Stop and report instead of working around anything the guard refuses.
   there was not ("Codex Skill Phase B" is UNVERIFIED in the README status, and
   [`../architecture.md`](../architecture.md) says the runtime loader is unverified).
 - **Steps:**
-  1. List the Skills this Codex session knows about. Use whatever Codex
-     offers: a skills listing in the TUI, or your own description of the
-     Skills available to you.
+  1. **Owner:** in the Codex TUI, open Codex's own listing of available Skills,
+     if it has one, and paste it to you. Your own description of the Skills you
+     know of is not evidence that the runtime loaded them.
   2. Pick one Jarvis Skill that is not built into Codex, for example
-     `writing-for-agents` or `grilling`. Have it trigger on a small task, then
-     name the `SKILL.md` path you actually read.
-  3. Run `readlink -f ~/.codex/skills/<that name>`.
-- **Done when:** the Skill is listed and used, and the path you read resolves
-  to `~/.Jarvis/.agents/skills/<name>`. If Codex does not list it, record the
-  exact listing and mark the item FAIL.
+     `writing-for-agents` or `grilling`. Give a small task that should trigger
+     it. Record the runtime's own signal that it was activated, such as the
+     Skill's name in the transcript or tool log, and the `SKILL.md` path it
+     read.
+  3. Resolve the link in a way that works on macOS and honours `CODEX_HOME`:
+     `python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "${CODEX_HOME:-$HOME/.codex}/skills/<that name>"`.
+- **Done when:** Codex's own listing or activation signal names the Skill, and
+  its path resolves to `~/.Jarvis/.agents/skills/<name>`. If Codex lists Skills
+  and this one is missing, mark the item FAIL with the listing. If Codex offers
+  no observable listing or signal, mark it UNVERIFIED and say so.
 - **Status:** open.
 
 ### C2. The GitHub and SSH identity of commands typed with `!`
@@ -103,8 +108,11 @@ Stop and report instead of working around anything the guard refuses.
      should print `agent-identity switch: Claude Code on, Codex on` and
      `state: applied`.
   3. Run `GH_TOKEN=x gh issue create --repo ShenYo/Jarvis --title probe --body probe`.
-     It must be denied with "overrides the agent's identity". If it runs and
-     creates an issue, stop and report at once.
+     It must be denied by the hook, with "overrides the agent's identity". The
+     token is fake, so even a guard that failed would leave `gh` unable to
+     authenticate and nothing would be created. That is also why an
+     authentication error from `gh` does **not** count as a pass: only the
+     hook's refusal does.
   4. A read, `gh pr list --repo ShenYo/Jarvis --limit 1`, is allowed.
   5. The pull request you open for this run is the normal-write case. Its
      author must be `agent-claude-code`, and its commit author `Codex`.
@@ -116,9 +124,12 @@ Stop and report instead of working around anything the guard refuses.
 - **Blocked by:** [#56](https://github.com/ShenYo/Jarvis/issues/56). Wait until
   its pull request has merged and the owner has applied the GitHub settings in
   [`../git.md`](../git.md).
-- **Why:** The guard allows `gh pr merge <n> --auto -R owner/repo` only after it
-  has checked the repository's rules. The Codex mode has its own `gh` login and
-  its own deadline.
+- **Why:** Once #56 lands, [`../git.md`](../git.md) makes arming auto-merge with
+  `gh pr merge <n> --auto -R owner/repo` the agent's own call, but only where the
+  base branch requires the code owner's approval. The guard checks that before
+  it allows the command. The owner's Approve still decides the merge. Until #56
+  lands the guard denies the command, which is why this item is blocked. The
+  Codex mode has its own `gh` login and its own deadline.
 - **Steps:**
   1. On the pull request of this run, run
      `gh pr merge <n> --auto --squash -R ShenYo/Jarvis` as a single command.
