@@ -21,7 +21,7 @@ How an entry is written:
 - Nothing here is a dependency of any project, so no entry has an upgrade path
   for a consumer.
 
-## Unreleased
+## v1.2.2 (2026-11-03)
 
 A PATCH release: documentation only.
 
