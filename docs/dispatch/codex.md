@@ -3,11 +3,13 @@
 > **中文摘要**：Codex 派工與協作：Commander 用 `gpt-6.1-sol`，Worker 用 `gpt-6-luna`。
 > 2026-11-02 實測 `!` 的兩個 identity 變數與 Git author Codex；
 > `!` 的 GitHub API／SSH identity 未測。外部終端機仍使用 owner 身分；
-> owner 的 PR Approve 仍待確認。
+> owner 已在 #53 以 ShenYo Approve agent 的 PR。尚待 Codex 自己驗證的項目見
+> [`codex-pending-action-items.md`](./codex-pending-action-items.md)。
 
 This adapter makes [`policy.md`](./policy.md) executable in Codex. The policy
 owns the roles, the brief, the report contract and escalation; this file only
-says which Codex model and tool carries each.
+says which Codex model and tool carries each. What only Codex can still verify is
+listed in [`codex-pending-action-items.md`](./codex-pending-action-items.md).
 
 ## Role routing
 
@@ -186,5 +188,6 @@ Check 10: [PR #51](https://github.com/ShenYo/Jarvis/pull/51) was created by
 confirmed that author and commit `bffd4c29aebf93ce454e6e2e8fb4ef0c72fd9c98`
 with author `Codex` and the machine-account email. A direct commit API lookup
 also confirmed committer `Codex`. These identity checks passed and were
-recorded on issue #15. The owner must Approve the PR before
-merging; until that happens, the approval acceptance item remains unverified.
+recorded on issue #15. The owner's Approve was confirmed later, on #53: ShenYo APPROVED
+(2026-11-01T20:01:49Z) a pull request authored by `agent-claude-code`, and #15 is
+closed.

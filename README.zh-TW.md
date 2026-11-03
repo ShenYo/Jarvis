@@ -121,6 +121,7 @@ Codex。接下來是 guard 與 agent identity；[在新機器上設定](./docs/s
 | 文件 | 何時閱讀 |
 | --- | --- |
 | [在新機器上設定](./docs/setup-new-machine.zh-TW.md) | 第一次在一台機器上安裝 Jarvis：每一步依序進行，並附檢查。 |
+| [讓機器保持最新](./docs/keep-machine-current.zh-TW.md) | Jarvis 有變動，已經導入的機器要跟上：列出各種情境，以及每個情境的步驟。 |
 | [Architecture](./docs/architecture.md) | 想了解版面配置與 symlink 鏈如何運作、哪些內容由 CLI 管理，以及 bridge 不能證明什麼。 |
 | [Guard](./docs/guard.md) | 想知道 Claude Code 與 Codex 的 guard 拒絕什麼，或要打開 agent-identity 開關。 |
 | [Agent identity](./docs/agent-identity.md) | 需要 agent 的 GitHub 帳號的參考資料：建立、設定檔、檢查、Codex 與已知限制。 |
