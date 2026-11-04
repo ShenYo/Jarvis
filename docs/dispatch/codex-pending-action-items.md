@@ -35,67 +35,6 @@ Stop and report instead of working around anything the guard refuses.
 
 ## Items
 
-### C1. Codex loads Jarvis Skills from `~/.codex/skills`
-
-- **Why:** The bridge links each Skill into `${CODEX_HOME:-~/.codex}/skills/<name>`.
-  Only the links were checked; whether the Codex runtime loads Skills from
-  there was not ("Codex Skill Phase B" is UNVERIFIED in the README status, and
-  [`../architecture.md`](../architecture.md) says the runtime loader is unverified).
-- **Steps:**
-  1. **Owner:** in the Codex TUI, open Codex's own listing of available Skills,
-     if it has one, and paste it to you. Your own description of the Skills you
-     know of is not evidence that the runtime loaded them.
-  2. Pick one Jarvis Skill that is not built into Codex, for example
-     `writing-for-agents` or `grilling`. Give a small task that should trigger
-     it. Record the runtime's own signal that it was activated, such as the
-     Skill's name in the transcript or tool log, and the `SKILL.md` path it
-     read.
-  3. Resolve the link in a way that works on macOS and honours `CODEX_HOME`:
-     `python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "${CODEX_HOME:-$HOME/.codex}/skills/<that name>"`.
-- **Done when:** Codex's own listing or activation signal names the Skill, and
-  its path resolves to `~/.Jarvis/.agents/skills/<name>`. If Codex lists Skills
-  and this one is missing, mark the item FAIL with the listing. If Codex offers
-  no observable listing or signal, mark it UNVERIFIED and say so.
-- **Status:** open.
-
-### C2. The GitHub and SSH identity of commands typed with `!`
-
-- **Why:** On 2026-11-02, `!` commands kept `JARVIS_AGENT_IDENTITY`,
-  `GIT_CONFIG_GLOBAL` and the Git author `Codex`. Which GitHub account and
-  which SSH key they actually use was not measured.
-- **Steps (owner):** in this Codex TUI, the owner types:
-  1. `!gh api user -q .login`
-  2. `!sh -c '$GIT_SSH_COMMAND -T git@github.com'`
-- **Done when:** the first prints `agent-claude-code`, and the second answers
-  `Hi agent-claude-code!` using Codex's own key (`id_ed25519_agent_codex_<host>`
-  in `GIT_SSH_COMMAND`). Update the sentence in
-  [`../agent-identity.md`](../agent-identity.md) that calls this unverified.
-- **Status:** open.
-
-### C3. What can replace the identity policy
-
-- **Why:** The identity is a `[shell_environment_policy] set` block in
-  `~/.codex/config.toml`. Three things could override it, and none was
-  researched:
-  - a `.codex/config.toml` nested below a project root;
-  - managed configuration (`/etc/codex/managed_config.toml`, or an MDM profile);
-  - the order in which `include_only` and `set` apply. If `include_only`
-    applies after `set`, it would drop `GIT_CONFIG_GLOBAL` and `GH_CONFIG_DIR`.
-- **Steps:**
-  1. Find the answer in Codex's official documentation, or in its source for
-     your installed version. Cite the URL, or the file and commit.
-  2. Where it is safe, confirm `include_only` by measurement, without editing
-     any config file. Run
-     `codex exec -c 'shell_environment_policy.include_only=["PATH","HOME"]' "Run: env | grep -E '^(GIT_CONFIG_GLOBAL|GH_CONFIG_DIR|JARVIS_AGENT_IDENTITY)='" </dev/null`
-     and record whether the three variables survive.
-  3. Do not create or trust a new project to test nested configs. Trusting one
-     writes to the owner's `config.toml`. Report what the source says instead.
-- **Done when:** each of the three has a cited answer, and the `include_only`
-  case also has a measurement. If anything can drop the identity, propose the
-  check that `apply-agent-identity.sh --check --codex` should add, and record it
-  as a follow-up issue rather than code.
-- **Status:** open.
-
 ### C4. With the switch on, a live Codex session behaves as designed
 
 - **Why:** The agent-identity switch has been on since 2026-11-02, and so has the
@@ -117,7 +56,7 @@ Stop and report instead of working around anything the guard refuses.
   5. The pull request you open for this run is the normal-write case. Its
      author must be `agent-claude-code`, and its commit author `Codex`.
 - **Done when:** all five hold.
-- **Status:** open.
+- **Status:** FAIL (2026-11-04, codex-cli 0.166.0); fake-token probe reached `gh` without hook refusal and then hit a sandbox connection error. Cause and fresh-session behavior are unverified; no retry. Normal-write PR pending. See [verification](./codex.md#verification-20261104-2324-codex-cli-01660).
 
 ### C5. Arming auto-merge from Codex
 
@@ -141,7 +80,68 @@ Stop and report instead of working around anything the guard refuses.
 
 ## Done
 
-Nothing yet.
+### C1. Codex loads Jarvis Skills from `~/.codex/skills`
+
+- **Why:** The bridge links each Skill into `${CODEX_HOME:-~/.codex}/skills/<name>`.
+  Only the links were checked; whether the Codex runtime loads Skills from
+  there was not ("Codex Skill Phase B" is UNVERIFIED in the README status, and
+  [`../architecture.md`](../architecture.md) says the runtime loader is unverified).
+- **Steps:**
+  1. **Owner:** in the Codex TUI, open Codex's own listing of available Skills,
+     if it has one, and paste it to you. Your own description of the Skills you
+     know of is not evidence that the runtime loaded them.
+  2. Pick one Jarvis Skill that is not built into Codex, for example
+     `writing-for-agents` or `grilling`. Give a small task that should trigger
+     it. Record the runtime's own signal that it was activated, such as the
+     Skill's name in the transcript or tool log, and the `SKILL.md` path it
+     read.
+  3. Resolve the link in a way that works on macOS and honours `CODEX_HOME`:
+     `python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "${CODEX_HOME:-$HOME/.codex}/skills/<that name>"`.
+- **Done when:** Codex's own listing or activation signal names the Skill, and
+  its path resolves to `~/.Jarvis/.agents/skills/<name>`. If Codex lists Skills
+  and this one is missing, mark the item FAIL with the listing. If Codex offers
+  no observable listing or signal, mark it UNVERIFIED and say so.
+- **Status:** PASS (2026-11-04, codex-cli 0.166.0); see [verification](./codex.md#verification-20261104-2324-codex-cli-01660). Runtime API confirms separate repo/user discovery scopes in this worktree and only user scope outside it; symlink bridge preserved. Precedence and full Skill Phase B are unverified.
+
+### C2. The GitHub and SSH identity of commands typed with `!`
+
+- **Why:** On 2026-11-02, `!` commands kept `JARVIS_AGENT_IDENTITY`,
+  `GIT_CONFIG_GLOBAL` and the Git author `Codex`. Which GitHub account and
+  which SSH key they actually use was not measured.
+- **Steps (owner):** in this Codex TUI, the owner types:
+  1. `!gh api user -q .login`
+  2. `!sh -c '$GIT_SSH_COMMAND -T git@github.com'`
+- **Done when:** the first prints `agent-claude-code`, and the second answers
+  `Hi agent-claude-code!` using Codex's own key (`id_ed25519_agent_codex_<host>`
+  in `GIT_SSH_COMMAND`). Update the sentence in
+  [`../agent-identity.md`](../agent-identity.md) that calls this unverified.
+- **Status:** PASS (2026-11-04, codex-cli 0.166.0); API identity returned `agent-claude-code` twice and SSH authenticated as `agent-claude-code`. The offered key path was not separately printed; see [verification](./codex.md#verification-20261104-2324-codex-cli-01660).
+
+### C3. What can replace the identity policy
+
+- **Why:** The identity is a `[shell_environment_policy] set` block in
+  `~/.codex/config.toml`. Three things could override it, and none was
+  researched:
+  - a `.codex/config.toml` nested below a project root;
+  - managed configuration (`/etc/codex/managed_config.toml`, or an MDM profile);
+  - the order in which `include_only` and `set` apply. If `include_only`
+    applies after `set`, it would drop `GIT_CONFIG_GLOBAL` and `GH_CONFIG_DIR`.
+- **Steps:**
+  1. Find the answer in Codex's official documentation, or in its source for
+     your installed version. Cite the URL, or the file and commit.
+  2. Where it is safe, confirm `include_only` by measurement, without editing
+     any config file. Run
+     `codex exec -c 'shell_environment_policy.include_only=["PATH","HOME"]' "Run: env | grep -E '^(GIT_CONFIG_GLOBAL|GH_CONFIG_DIR|JARVIS_AGENT_IDENTITY)='" </dev/null`
+     and record whether the three variables survive.
+  3. Do not create or trust a new project to test nested configs. Trusting one
+     writes to the owner's `config.toml`. Report what the source says instead.
+- **Done when:** each of the three has a cited answer, and the `include_only`
+  case also has a measurement. If anything can drop the identity, propose the
+  check that `apply-agent-identity.sh --check --codex` should add, and record it
+  as a follow-up issue rather than code.
+- **Status:** PASS (2026-11-04, codex-cli 0.166.0); see [verification](./codex.md#verification-20261104-2324-codex-cli-01660). Modern managed-requirements interaction remains NOT FOUND; follow-up [#64](https://github.com/ShenYo/Jarvis/issues/64).
+
+See the dated results in [`codex.md`](./codex.md#verification-20261104-2324-codex-cli-01660).
 
 ## Friday
 

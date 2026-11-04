@@ -181,7 +181,16 @@ shown, so after `--require` and after `--unrequire` the whole Codex guard is off
 open `/hooks` in Codex and trust it. `--check --codex` reports `UNTRUSTED` until you do.
 
 With the switch on, a GitHub write from a runtime whose identity is not applied (or whose
-record fails) is refused, and reads stay allowed. The refusal says what to do:
+record fails) is refused, and reads stay allowed. A live Codex check on 2026-11-04
+confirmed the trust check and identity check, and a normal read command exited
+successfully. In that continuing session, a fake-token `gh issue create` probe
+reached `gh` without a PreToolUse refusal, then failed with a sandbox connection
+error; no issue was created and the probe was not retried. This observed run did not
+establish why the hook refusal was absent, and says nothing about fresh-session
+behavior. The normal-write PR check remains pending. See [Codex
+verification](./dispatch/codex.md#verification-20261104-2324-codex-cli-01660).
+
+The refusal says what to do:
 
 ```text
 Codex guard: gh pr create writes to GitHub; GitHub writes need this machine's agent

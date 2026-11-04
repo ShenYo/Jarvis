@@ -157,11 +157,18 @@ it must fail (a URL-specific `credential.<url>.helper` shows up only here, not i
 helper list), and with the same `env`, `git remote get-url --all` and `git remote get-url --push --all`
 for each remote must print every github.com URL (judged by its host, in any case) as SSH with the
 user `git`: `git@github.com:…`, `ssh://git@github.com/…` or `ssh://git@github.com:22/…`. Another
-user or port, or `https://` or `http://`, fails, and a remote whose URLs cannot be read fails too. Not checked
-either: a nested `.codex/` directory below a project root and managed configuration
-(`/etc/codex/managed_config.toml`, or an MDM profile), neither of which has been verified
-to matter here, and `codex -c` or `--profile` on the command line, which are your own
-overrides.
+user or port, or `https://` or `http://`, fails, and a remote whose URLs cannot be
+read fails too. Codex 0.166.0 source inspection on 2026-11-04 confirmed that
+discovered nested trusted project configuration loads, and legacy
+`/etc/codex/managed_config.toml` or MDM managed configuration can override the full
+config layer. The same source shows `include_only` filters after `set`; a runtime
+check confirmed all three identity variables absent when excluded. Modern
+managed-requirements interaction with this policy was not found. Follow-up issue
+[#64](https://github.com/ShenYo/Jarvis/issues/64) tracks checks for effective policy
+overrides. The measured `include_only` case was an explicit `codex -c` override, not
+a failure of the default installed policy; arbitrary other `-c` and `--profile`
+overrides remain caller-controlled. See the [dated verification and source
+citations](./dispatch/codex.md#verification-20261104-2324-codex-cli-01660).
 
 Two more config keys, used only by `--codex`: `codex_ssh_key`, required, Codex's own
 private key, which must not be `ssh_key`; and `codex_author_name`, optional, default
@@ -169,9 +176,11 @@ private key, which must not be `ssh_key`; and `codex_author_name`, optional, def
 
 Verified 2026-11-02 with codex-cli 0.166.0: approved escalated commands retained
 all four identity variables; commands entered with `!` retained the two tested
-variables and Git author `Codex`. GitHub API identity and SSH identity for `!`
-commands remain unverified. Use an external terminal for personal commits; owner
-identity was confirmed there. See [Codex identity verification](./dispatch/codex.md#agent-identity-verified-2026-11-02-codex-cli-01660).
+variables and Git author `Codex`. On 2026-11-04, `!gh api user -q .login` returned
+`agent-claude-code` twice, and `sh -c '$GIT_SSH_COMMAND -T git@github.com'`
+authenticated as `agent-claude-code`. The dedicated key path was not separately
+printed. Use an external terminal for personal commits; owner identity was
+confirmed there. See [Codex identity verification](./dispatch/codex.md#verification-20261104-2324-codex-cli-01660).
 
 ## A separate Codex account
 

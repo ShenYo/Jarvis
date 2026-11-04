@@ -1,10 +1,9 @@
 # Codex adapter
 
 > **中文摘要**：Codex 派工與協作：Commander 用 `gpt-6.1-sol`，Worker 用 `gpt-6-luna`。
-> 2026-11-02 實測 `!` 的兩個 identity 變數與 Git author Codex；
-> `!` 的 GitHub API／SSH identity 未測。外部終端機仍使用 owner 身分；
-> owner 已在 #53 以 ShenYo Approve agent 的 PR。尚待 Codex 自己驗證的項目見
-> [`codex-pending-action-items.md`](./codex-pending-action-items.md)。
+> 2026-11-04 已確認 `!` 的 GitHub API／SSH 為 agent 身分；外部終端機仍使用 owner 身分。
+> owner 已在 #53 以 ShenYo Approve agent 的 PR；本次另記錄 config 風險與 live guard 未攔截的結果。
+> 尚待驗證的項目見 [`codex-pending-action-items.md`](./codex-pending-action-items.md)。
 
 This adapter makes [`policy.md`](./policy.md) executable in Codex. The policy
 owns the roles, the brief, the report contract and escalation; this file only
@@ -191,3 +190,40 @@ also confirmed committer `Codex`. These identity checks passed and were
 recorded on issue #15. The owner's Approve was confirmed later, on #53: ShenYo APPROVED
 (2026-11-01T20:01:49Z) a pull request authored by `agent-claude-code`, and #15 is
 closed.
+
+## Verification (20261104-2324, codex-cli 0.166.0)
+
+| Item | Command / evidence | Observed output | Status |
+| --- | --- | --- | --- |
+| C1. Skill discovery | Owner's `/skills` listing screenshot; root read `~/.codex/skills/writing-for-agents/SKILL.md`; `python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "${CODEX_HOME:-$HOME/.codex}/skills/writing-for-agents"` | Listing showed “Writing for Agents [Skill] Write documents agents consume” twice. Root announced and read the Skill; its path resolved to `~/.Jarvis/.agents/skills/writing-for-agents`. Runtime listing shows separate repo and user entries; the symlink bridge is preserved (details below). | PASS for this sample only; precedence and full Skill Phase B remain unverified |
+| C2. `!` GitHub and SSH identity | Owner ran `!gh api user -q .login` twice and `sh -c '$GIT_SSH_COMMAND -T git@github.com'` | API returned `agent-claude-code` twice (exit 0). SSH returned `Hi agent-claude-code! You've successfully authenticated, but GitHub does not provide shell access.` (exit 1, expected SSH test result). The dedicated `GIT_SSH_COMMAND` policy is configured; the offered key path was not separately printed. | PASS for account identity; no separate key-offer trace |
+| C3. Identity policy overrides | Codex 0.166.0 source at [loader/mod.rs](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/config/src/loader/mod.rs#L123-L135), [managed config loader](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/config/src/loader/mod.rs#L425-L482), [managed requirements](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/config/src/loader/managed_requirements.rs#L80-L120), [shell_environment.rs](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/protocol/src/shell_environment.rs#L153-L163); runtime `codex exec -c 'shell_environment_policy.include_only=["PATH","HOME"]' "Run: env \| grep -E '^(GIT_CONFIG_GLOBAL\|GH_CONFIG_DIR\|JARVIS_AGENT_IDENTITY)='" </dev/null` | Source says discovered nested trusted project config loads; legacy file and MDM managed config can override the full config layer. `include_only` filters after `set`. Child shell: exit 1, no output; all three identity variables absent. CLI exit 0. Source inspection is not runtime measurement. Modern managed-requirements interaction with this policy: NOT FOUND. Follow-up: [issue #64](https://github.com/ShenYo/Jarvis/issues/64). | PASS for the three required checks; modern managed-requirements interaction remains NOT FOUND |
+| C4. Live guard behavior | `bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust`; `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex`; fake-token `gh issue create` probe; `gh pr list --limit 1` | Trust: `trust: OK`. Identity check exit 0: `agent-identity switch: Claude Code on, Codex on`; `state: applied`; two warnings because private-repository ruleset API checks returned 403. Probe exit 1 reached `gh`, which returned `error connecting to api.github.com` / `check your internet connection or https://githubstatus.com`; no hook refusal and no issue created. No retry. Read command exit 0, no output. Normal-write PR pending. | FAIL: probe was not hook-denied; cause not established. Fresh-session behavior remains unverified |
+
+C4 command details:
+
+```sh
+GH_TOKEN=x gh issue create --repo ShenYo/Jarvis --title probe --body probe
+gh pr list --repo ShenYo/Jarvis --limit 1
+```
+
+### Skill duplicate investigation
+
+Codex's app-server `skills/list` API (`forceReload: true`) confirmed that the
+same four writing Skills each have separate `repo` and `user` entries in this
+Jarvis worktree:
+
+| Sample Skill | Repo source | User source |
+| --- | --- | --- |
+| `writing-for-agents` | `<WORKTREE>/.agents/skills/writing-for-agents/SKILL.md` | `<HOME>/.Jarvis/.agents/skills/writing-for-agents/SKILL.md` |
+
+From this worktree, four sampled Skills produced eight entries and zero runtime
+errors. From `/private/tmp`, outside Jarvis, the same API returned only the four
+`user` entries, with zero runtime errors. This isolates the displayed duplicate
+to project and personal discovery scopes, not two copies under the Codex home.
+It does not establish which wins on activation.
+
+Bridge verification confirmed all 35 Codex symlinks resolve to their original
+canonical personal targets. Canonical Skills, Codex-owned directories, and the
+bridge script remain unchanged; no vendored Skill was edited. The canonical
+personal tree remains the source of truth.
