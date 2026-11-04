@@ -180,14 +180,20 @@ the argument changes the hook's hash, and Codex skips a hook whose hash it has n
 shown, so after `--require` and after `--unrequire` the whole Codex guard is off until you
 open `/hooks` in Codex and trust it. `--check --codex` reports `UNTRUSTED` until you do.
 
-With the switch on, a GitHub write from a runtime whose identity is not applied (or whose
-record fails) is refused, and reads stay allowed. A live Codex check on 2026-11-04
-confirmed the trust check and identity check, and a normal read command exited
-successfully. In that continuing session, a fake-token `gh issue create` probe
-reached `gh` without a PreToolUse refusal, then failed with a sandbox connection
-error; no issue was created and the probe was not retried. This observed run did not
-establish why the hook refusal was absent, and says nothing about fresh-session
-behavior. The normal-write identity check passed on [PR #65](https://github.com/ShenYo/Jarvis/pull/65). See [Codex
+With the switch on, the guard is designed to refuse GitHub writes from a runtime
+whose identity is not applied or whose record fails, while allowing reads. That
+requires the running session to deliver the hook callback; a passing static
+identity or trust check does not prove live enforcement.
+
+A live Codex check on 2026-11-04 confirmed the trust and identity checks, and a
+normal read command exited successfully. In that continuing session, a fake-token
+`gh issue create` probe reached `gh` without a PreToolUse refusal, then failed
+with a sandbox connection error; no issue was created and the probe was not
+retried. The cause remains unknown. A separate fresh CLI run captured a
+router-level PreToolUse refusal before the tool ran. These differing session
+results do not establish why the continuing session missed the refusal, and a
+successful static trust or identity check alone does not assure live hook
+delivery. The normal-write identity check passed on [PR #65](https://github.com/ShenYo/Jarvis/pull/65). See [Codex
 verification](./dispatch/codex.md#verification-20261104-2324-codex-cli-01660).
 
 The refusal says what to do:

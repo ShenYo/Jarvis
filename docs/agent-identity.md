@@ -178,8 +178,8 @@ Verified 2026-11-02 with codex-cli 0.166.0: approved escalated commands retained
 all four identity variables; commands entered with `!` retained the two tested
 variables and Git author `Codex`. On 2026-11-04, `!gh api user -q .login` returned
 `agent-claude-code` twice, and `sh -c '$GIT_SSH_COMMAND -T git@github.com'`
-authenticated as `agent-claude-code`. The dedicated key path was not separately
-printed. Use an external terminal for personal commits; owner identity was
+authenticated as `agent-claude-code`. The owner also printed `GIT_SSH_COMMAND`, confirming the dedicated
+`id_ed25519_agent_codex_<HOST>` key with `IdentitiesOnly=yes`. Use an external terminal for personal commits; owner identity was
 confirmed there. See [Codex identity verification](./dispatch/codex.md#verification-20261104-2324-codex-cli-01660).
 
 ## A separate Codex account

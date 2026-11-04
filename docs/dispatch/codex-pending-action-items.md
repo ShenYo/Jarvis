@@ -35,29 +35,6 @@ Stop and report instead of working around anything the guard refuses.
 
 ## Items
 
-### C4. With the switch on, a live Codex session behaves as designed
-
-- **Why:** The agent-identity switch has been on since 2026-11-02, and so has the
-  `--codex --require-identity` argument in `~/.codex/hooks.json`. Its decisions
-  were tested by feeding the hook directly, never inside a running Codex.
-- **Steps:**
-  1. Run `bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust`. It should
-     print `trust: OK`.
-  2. Run `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex`. It
-     should print `agent-identity switch: Claude Code on, Codex on` and
-     `state: applied`.
-  3. Run `GH_TOKEN=x gh issue create --repo ShenYo/Jarvis --title probe --body probe`.
-     It must be denied by the hook, with "overrides the agent's identity". The
-     token is fake, so even a guard that failed would leave `gh` unable to
-     authenticate and nothing would be created. That is also why an
-     authentication error from `gh` does **not** count as a pass: only the
-     hook's refusal does.
-  4. A read, `gh pr list --repo ShenYo/Jarvis --limit 1`, is allowed.
-  5. The pull request you open for this run is the normal-write case. Its
-     author must be `agent-claude-code`, and its commit author `Codex`.
-- **Done when:** all five hold.
-- **Status:** FAIL (2026-11-04, codex-cli 0.166.0); fake-token probe reached `gh` without hook refusal and then hit a sandbox connection error. Cause and fresh-session behavior are unverified; no retry. Normal-write identity passed on [PR #65](https://github.com/ShenYo/Jarvis/pull/65); the live guard result remains FAIL. See [verification](./codex.md#verification-20261104-2324-codex-cli-01660).
-
 ### C5. Arming auto-merge from Codex
 
 - **Blocked by:** [#56](https://github.com/ShenYo/Jarvis/issues/56). Wait until
@@ -82,10 +59,10 @@ Stop and report instead of working around anything the guard refuses.
 
 ### C1. Codex loads Jarvis Skills from `~/.codex/skills`
 
-- **Why:** The bridge links each Skill into `${CODEX_HOME:-~/.codex}/skills/<name>`.
-  Only the links were checked; whether the Codex runtime loads Skills from
-  there was not ("Codex Skill Phase B" is UNVERIFIED in the README status, and
-  [`../architecture.md`](../architecture.md) says the runtime loader is unverified).
+- **Why:** Before this run, only the bridge links under
+  `${CODEX_HOME:-~/.codex}/skills/<name>` had been checked. The dated runtime
+  listing and Skill read now verify discovery for one sample. Full Skill
+  Phase B and precedence remain unverified; see [`../architecture.md`](../architecture.md).
 - **Steps:**
   1. **Owner:** in the Codex TUI, open Codex's own listing of available Skills,
      if it has one, and paste it to you. Your own description of the Skills you
@@ -115,7 +92,7 @@ Stop and report instead of working around anything the guard refuses.
   `Hi agent-claude-code!` using Codex's own key (`id_ed25519_agent_codex_<host>`
   in `GIT_SSH_COMMAND`). Update the sentence in
   [`../agent-identity.md`](../agent-identity.md) that calls this unverified.
-- **Status:** PASS (2026-11-04, codex-cli 0.166.0); API identity returned `agent-claude-code` twice and SSH authenticated as `agent-claude-code`. The offered key path was not separately printed; see [verification](./codex.md#verification-20261104-2324-codex-cli-01660). [PR #65](https://github.com/ShenYo/Jarvis/pull/65).
+- **Status:** PASS (2026-11-04, codex-cli 0.166.0); owner API and SSH commands authenticated as `agent-claude-code`, and owner `!printf` confirmed `GIT_SSH_COMMAND` selects `id_ed25519_agent_codex_<HOST>` with `IdentitiesOnly=yes`. See [verification](./codex.md#verification-20261104-2324-codex-cli-01660) and [PR #65](https://github.com/ShenYo/Jarvis/pull/65).
 
 ### C3. What can replace the identity policy
 
@@ -140,6 +117,29 @@ Stop and report instead of working around anything the guard refuses.
   check that `apply-agent-identity.sh --check --codex` should add, and record it
   as a follow-up issue rather than code.
 - **Status:** PASS (2026-11-04, codex-cli 0.166.0); see [verification](./codex.md#verification-20261104-2324-codex-cli-01660). Modern managed-requirements interaction remains NOT FOUND; follow-up [#64](https://github.com/ShenYo/Jarvis/issues/64). [PR #65](https://github.com/ShenYo/Jarvis/pull/65).
+
+### C4. With the switch on, a live Codex session behaves as designed
+
+- **Why:** The agent-identity switch has been on since 2026-11-02, as has the
+  `--codex --require-identity` argument in `~/.codex/hooks.json`. This item
+  checks trusted configuration, identity, live refusal, reads and normal writes.
+- **Steps:**
+  1. Run `bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust`. It should
+     print `trust: OK`.
+  2. Run `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex`. It
+     should print `agent-identity switch: Claude Code on, Codex on` and
+     `state: applied`.
+  3. Run `GH_TOKEN=x gh issue create --repo ShenYo/Jarvis --title probe --body probe`.
+     It must be denied by the hook, with "overrides the agent's identity". The
+     token is fake, so even a guard that failed would leave `gh` unable to
+     authenticate and nothing would be created. That is also why an
+     authentication error from `gh` does **not** count as a pass: only the
+     hook's refusal does.
+  4. A read, `gh pr list --repo ShenYo/Jarvis --limit 1`, is allowed.
+  5. The pull request you open for this run is the normal-write case. Its
+     author must be `agent-claude-code`, and its commit author `Codex`.
+- **Done when:** all five hold.
+- **Status:** PASS for the fresh CLI run (2026-11-04, codex-cli 0.166.0): trust, identity, hook denial, normal read and normal write passed. The continuing-session probe separately failed to receive a hook refusal and reached `gh`; its cause remains unknown. Fresh CLI stderr confirms a PreToolUse denial before tool execution. Normal-write identity passed on [PR #65](https://github.com/ShenYo/Jarvis/pull/65). See [verification](./codex.md#verification-20261104-2324-codex-cli-01660).
 
 See the dated results in [`codex.md`](./codex.md#verification-20261104-2324-codex-cli-01660).
 

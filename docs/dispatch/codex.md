@@ -196,9 +196,19 @@ closed.
 | Item | Command / evidence | Observed output | Status |
 | --- | --- | --- | --- |
 | C1. Skill discovery | Owner's `/skills` listing screenshot; root read `~/.codex/skills/writing-for-agents/SKILL.md`; `python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "${CODEX_HOME:-$HOME/.codex}/skills/writing-for-agents"` | Listing showed “Writing for Agents [Skill] Write documents agents consume” twice. Root announced and read the Skill; its path resolved to `~/.Jarvis/.agents/skills/writing-for-agents`. Runtime listing shows separate repo and user entries; the symlink bridge is preserved (details below). | PASS for this sample only; precedence and full Skill Phase B remain unverified |
-| C2. `!` GitHub and SSH identity | Owner ran `!gh api user -q .login` twice and `sh -c '$GIT_SSH_COMMAND -T git@github.com'` | API returned `agent-claude-code` twice (exit 0). SSH returned `Hi agent-claude-code! You've successfully authenticated, but GitHub does not provide shell access.` (exit 1, expected SSH test result). The dedicated `GIT_SSH_COMMAND` policy is configured; the offered key path was not separately printed. | PASS for account identity; no separate key-offer trace |
-| C3. Identity policy overrides | Codex 0.166.0 source at [loader/mod.rs](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/config/src/loader/mod.rs#L123-L135), [managed config loader](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/config/src/loader/mod.rs#L425-L482), [managed requirements](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/config/src/loader/managed_requirements.rs#L80-L120), [shell_environment.rs](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/protocol/src/shell_environment.rs#L153-L163); runtime `codex exec -c 'shell_environment_policy.include_only=["PATH","HOME"]' "Run: env \| grep -E '^(GIT_CONFIG_GLOBAL\|GH_CONFIG_DIR\|JARVIS_AGENT_IDENTITY)='" </dev/null` | Source says discovered nested trusted project config loads; legacy file and MDM managed config can override the full config layer. `include_only` filters after `set`. Child shell: exit 1, no output; all three identity variables absent. CLI exit 0. Source inspection is not runtime measurement. Modern managed-requirements interaction with this policy: NOT FOUND. Follow-up: [issue #64](https://github.com/ShenYo/Jarvis/issues/64). | PASS for the three required checks; modern managed-requirements interaction remains NOT FOUND |
-| C4. Live guard behavior | `bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust`; `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex`; fake-token `gh issue create` probe; `gh pr list --limit 1` | Trust: `trust: OK`. Identity check exit 0: `agent-identity switch: Claude Code on, Codex on`; `state: applied`; two warnings because private-repository ruleset API checks returned 403. Probe exit 1 reached `gh`, which returned `error connecting to api.github.com` / `check your internet connection or https://githubstatus.com`; no hook refusal and no issue created. No retry. Read command exit 0, no output. Normal-write [PR #65](https://github.com/ShenYo/Jarvis/pull/65) author `agent-claude-code`, commit author `Codex` verified through the GitHub API. | FAIL: probe was not hook-denied; cause not established. Fresh-session behavior remains unverified |
+| C2. `!` GitHub and SSH identity | Owner ran `!gh api user -q .login` twice and `sh -c '$GIT_SSH_COMMAND -T git@github.com'` | API returned `agent-claude-code` twice (exit 0). SSH returned `Hi agent-claude-code! You've successfully authenticated, but GitHub does not provide shell access.` (exit 1, expected SSH test result). Owner `!printf` subsequently confirmed the command selects `id_ed25519_agent_codex_<HOST>` with `IdentitiesOnly=yes` (output below). | PASS: account authentication and dedicated Codex key selection confirmed |
+| C3. Identity policy overrides | Codex 0.166.0 source at [loader/mod.rs](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/config/src/loader/mod.rs#L123-L135), [managed config loader](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/config/src/loader/mod.rs#L425-L482), [managed requirements](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/config/src/loader/managed_requirements.rs#L80-L120), [shell_environment.rs](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/codex-rs/protocol/src/shell_environment.rs#L153-L163); runtime command shown in the C3 code block below | Source says discovered nested trusted project config loads; legacy file and MDM managed config can override the full config layer. `include_only` filters after `set`. Child shell: exit 1, no output; all three identity variables absent. CLI exit 0. Source inspection is not runtime measurement. Modern managed-requirements interaction with this policy: NOT FOUND. Follow-up: [issue #64](https://github.com/ShenYo/Jarvis/issues/64). | PASS for the three required checks; modern managed-requirements interaction remains NOT FOUND |
+| C4. Live guard behavior | Trust and identity checks; continuing-session fake-token probe; fresh CLI probe via `codex exec --ephemeral -m gpt-6-luna --json`; read command; normal-write [PR #65](https://github.com/ShenYo/Jarvis/pull/65) | Trust exit 0: `trust: OK`. Identity check exit 0: `agent-identity switch: Claude Code on, Codex on`; `state: applied`; two private-repository ruleset API checks warned 403. Continuing-session probe reached `gh`, which returned `error connecting to api.github.com` / `check your internet connection or https://githubstatus.com`; no hook refusal and no issue created. Fresh CLI stderr recorded the router-level PreToolUse denial; CLI exit 0 and tool did not run. No retry after that denial. Read exit 0, no output. PR #65 author `agent-claude-code`, commit author `Codex`, verified through GitHub API. | PASS for fresh CLI and the five C4 subchecks; continuing-session probe FAIL remains unexplained |
+
+C3 exact runtime command (the pipeline and ERE alternation below have no backslashes):
+
+```sh
+codex exec -c 'shell_environment_policy.include_only=["PATH","HOME"]' "Run: env | grep -E '^(GIT_CONFIG_GLOBAL|GH_CONFIG_DIR|JARVIS_AGENT_IDENTITY)='" </dev/null
+```
+
+The original invocation used this unescaped command. The child ran the shell
+pipeline, exited 1 with no output, and reported that no matching environment
+variables were set. The CLI itself exited 0. The executed command used a real pipeline and unescaped ERE alternation.
 
 C4 command details:
 
@@ -206,6 +216,17 @@ C4 command details:
 GH_TOKEN=x gh issue create --repo ShenYo/Jarvis --title probe --body probe
 gh pr list --repo ShenYo/Jarvis --limit 1
 ```
+
+The continuing Codex session ran the fake-token command above directly; it
+reached `gh` and returned the sandbox connection error recorded in the table.
+A fresh CLI probe used `codex exec --ephemeral -m gpt-6-luna --json` with that
+single command. The CLI exited 0; its captured router stderr was:
+
+```text
+ERROR codex_core::tools::router: error=Command blocked by PreToolUse hook: Codex guard: gh issue create writes to GitHub; the command overrides the agent's identity (sets GH_TOKEN). The command would not act as the agent's own account. Do not retry it or work around it: remove the override, or tell the user.. Command: GH_TOKEN=x gh issue create --repo ShenYo/Jarvis --title probe --body probe
+```
+
+The child stopped before tool execution. No retry or configuration edit followed.
 
 ### Skill duplicate investigation
 
@@ -231,5 +252,17 @@ personal tree remains the source of truth.
 C4 normal-write evidence: `gh pr view 65 --repo ShenYo/Jarvis --json author,commits`
 returned author login `agent-claude-code` and commit
 `96ccdfe87dc40f7a84881c1bb71d46931f7ff4df` author `Codex`, with the
-machine-account noreply email. This passes the normal-write subcheck; it does not
-change the failed live guard probe result.
+machine-account noreply email. This passes the normal-write subcheck independently of the session-specific
+guard results recorded above.
+
+C2 dedicated-key evidence supplied by the owner through the TUI:
+
+```sh
+printf '%s\n' "$GIT_SSH_COMMAND"
+```
+
+Exit 0, output (home prefix and hostname redacted):
+
+```text
+ssh -F /dev/null -i <HOME>/.ssh/id_ed25519_agent_codex_<HOST> -o IdentitiesOnly=yes
+```
