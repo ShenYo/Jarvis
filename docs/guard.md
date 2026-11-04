@@ -187,7 +187,7 @@ successfully. In that continuing session, a fake-token `gh issue create` probe
 reached `gh` without a PreToolUse refusal, then failed with a sandbox connection
 error; no issue was created and the probe was not retried. This observed run did not
 establish why the hook refusal was absent, and says nothing about fresh-session
-behavior. The normal-write PR check remains pending. See [Codex
+behavior. The normal-write identity check passed on [PR #65](https://github.com/ShenYo/Jarvis/pull/65). See [Codex
 verification](./dispatch/codex.md#verification-20261104-2324-codex-cli-01660).
 
 The refusal says what to do:

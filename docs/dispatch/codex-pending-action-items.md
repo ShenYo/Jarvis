@@ -56,7 +56,7 @@ Stop and report instead of working around anything the guard refuses.
   5. The pull request you open for this run is the normal-write case. Its
      author must be `agent-claude-code`, and its commit author `Codex`.
 - **Done when:** all five hold.
-- **Status:** FAIL (2026-11-04, codex-cli 0.166.0); fake-token probe reached `gh` without hook refusal and then hit a sandbox connection error. Cause and fresh-session behavior are unverified; no retry. Normal-write PR pending. See [verification](./codex.md#verification-20261104-2324-codex-cli-01660).
+- **Status:** FAIL (2026-11-04, codex-cli 0.166.0); fake-token probe reached `gh` without hook refusal and then hit a sandbox connection error. Cause and fresh-session behavior are unverified; no retry. Normal-write identity passed on [PR #65](https://github.com/ShenYo/Jarvis/pull/65); the live guard result remains FAIL. See [verification](./codex.md#verification-20261104-2324-codex-cli-01660).
 
 ### C5. Arming auto-merge from Codex
 
@@ -101,7 +101,7 @@ Stop and report instead of working around anything the guard refuses.
   its path resolves to `~/.Jarvis/.agents/skills/<name>`. If Codex lists Skills
   and this one is missing, mark the item FAIL with the listing. If Codex offers
   no observable listing or signal, mark it UNVERIFIED and say so.
-- **Status:** PASS (2026-11-04, codex-cli 0.166.0); see [verification](./codex.md#verification-20261104-2324-codex-cli-01660). Runtime API confirms separate repo/user discovery scopes in this worktree and only user scope outside it; symlink bridge preserved. Precedence and full Skill Phase B are unverified.
+- **Status:** PASS (2026-11-04, codex-cli 0.166.0); see [verification](./codex.md#verification-20261104-2324-codex-cli-01660). Runtime API confirms separate repo/user discovery scopes in this worktree and only user scope outside it; symlink bridge preserved. Precedence and full Skill Phase B are unverified. [PR #65](https://github.com/ShenYo/Jarvis/pull/65).
 
 ### C2. The GitHub and SSH identity of commands typed with `!`
 
@@ -115,7 +115,7 @@ Stop and report instead of working around anything the guard refuses.
   `Hi agent-claude-code!` using Codex's own key (`id_ed25519_agent_codex_<host>`
   in `GIT_SSH_COMMAND`). Update the sentence in
   [`../agent-identity.md`](../agent-identity.md) that calls this unverified.
-- **Status:** PASS (2026-11-04, codex-cli 0.166.0); API identity returned `agent-claude-code` twice and SSH authenticated as `agent-claude-code`. The offered key path was not separately printed; see [verification](./codex.md#verification-20261104-2324-codex-cli-01660).
+- **Status:** PASS (2026-11-04, codex-cli 0.166.0); API identity returned `agent-claude-code` twice and SSH authenticated as `agent-claude-code`. The offered key path was not separately printed; see [verification](./codex.md#verification-20261104-2324-codex-cli-01660). [PR #65](https://github.com/ShenYo/Jarvis/pull/65).
 
 ### C3. What can replace the identity policy
 
@@ -139,7 +139,7 @@ Stop and report instead of working around anything the guard refuses.
   case also has a measurement. If anything can drop the identity, propose the
   check that `apply-agent-identity.sh --check --codex` should add, and record it
   as a follow-up issue rather than code.
-- **Status:** PASS (2026-11-04, codex-cli 0.166.0); see [verification](./codex.md#verification-20261104-2324-codex-cli-01660). Modern managed-requirements interaction remains NOT FOUND; follow-up [#64](https://github.com/ShenYo/Jarvis/issues/64).
+- **Status:** PASS (2026-11-04, codex-cli 0.166.0); see [verification](./codex.md#verification-20261104-2324-codex-cli-01660). Modern managed-requirements interaction remains NOT FOUND; follow-up [#64](https://github.com/ShenYo/Jarvis/issues/64). [PR #65](https://github.com/ShenYo/Jarvis/pull/65).
 
 See the dated results in [`codex.md`](./codex.md#verification-20261104-2324-codex-cli-01660).
 
