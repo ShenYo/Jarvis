@@ -791,13 +791,16 @@ case "$2" in
   repos/*/rulesets/*) cat "$STUB_DIR/ruleset.json" ;;
   repos/*/contents/.github/CODEOWNERS*) cat "$STUB_DIR/contents.json" ;;
   repos/*/codeowners/errors*) cat "$STUB_DIR/errors.json" ;;
+  user) cat "$STUB_DIR/user.json" ;;
   *) exit 1 ;;
 esac
 EOF
 chmod +x "$am/bin/gh"
 echo '{"number":12,"base":{"ref":"main"}}' >"$am/pull.json"
-echo '{"id":1,"current_user_can_bypass":"never"}' >"$am/ruleset.json"
-echo '{"type":"file"}' >"$am/contents.json"
+echo '{"id":1,"enforcement":"active","current_user_can_bypass":"never"}' >"$am/ruleset.json"
+codeowners() { jq -n --arg c "$(printf '%s\n' "$1" | base64)" '{type: "file", encoding: "base64", content: $c}' >"$am/contents.json"; }
+codeowners '* @ShenYo'
+echo '{"login":"agent-codex"}' >"$am/user.json"
 echo '{"errors":[]}' >"$am/errors.json"
 rules() { # extra parameters for the pull_request rule
   jq -nc --argjson p "$1" '[{type:"deletion"},{type:"pull_request",ruleset_source_type:"Repository",ruleset_id:1,parameters:({required_approving_review_count:1,dismiss_stale_reviews_on_push:true,require_code_owner_review:true,require_last_push_approval:true} + $p)}]'
@@ -819,12 +822,20 @@ am_probe deny 'cd /tmp && gh pr merge 12 --auto -R example/shared' "$feat" 'Code
 am_probe deny 'echo --delete-branch | xargs gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *not the only command*'
 am_probe deny 'gh pr edit 12 --base release' "$feat" 'Codex guard: *base branch*armed auto-merge*Codex cannot ask*'
 am_probe deny 'gh api -X PATCH repos/o/r/pulls/12 -f base=release' "$feat" 'Codex guard: *base branch*armed auto-merge*'
-echo '{"id":1,"current_user_can_bypass":"exempt"}' >"$am/ruleset.json"
+echo '{"id":1,"enforcement":"active","current_user_can_bypass":"exempt"}' >"$am/ruleset.json"
 am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *current_user_can_bypass*exempt*docs/git.md*Codex cannot ask*'
-echo '{"id":1,"current_user_can_bypass":"never"}' >"$am/ruleset.json"
+echo '{"id":1,"enforcement":"evaluate","current_user_can_bypass":"never"}' >"$am/ruleset.json"
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *enforcement = '"'"'evaluate'"'"'*docs/git.md*'
+echo '{"id":1,"enforcement":"active","current_user_can_bypass":"never"}' >"$am/ruleset.json"
+codeowners '* @ShenYo @agent-codex'
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *@agent-codex is the agent'"'"'s own login*docs/git.md*'
+codeowners '/docs/ @ShenYo'
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *line 1*not the `*` rule*docs/git.md*'
+codeowners '* @ShenYo'
 echo '{"message":"Not Found"}' >"$am/contents.json"
 am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *no CODEOWNERS file*docs/git.md*'
-echo '{"type":"file"}' >"$am/contents.json"
+codeowners '* @ShenYo'
+GH_TOKEN=secret am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *GH_TOKEN is set*docs/git.md*'
 rules '{"require_code_owner_review":false}' >"$am/rules.json"
 am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *gh pr merge --auto/--disable-auto is refused*require_code_owner_review*docs/git.md*Codex cannot ask*'
 rules '{}' >"$am/rules.json"

@@ -55,8 +55,10 @@ alone or with `--squash`, `--merge` or `--rebase`, and `gh pr merge <n> --disabl
 whole command with nothing around it. The hook leaves `--disable-auto` alone. For `--auto` it
 first asks GitHub, with the agent's own login, whether the base branch's rules require the code
 owner's approval (at least one approval, code-owner review, stale approvals dismissed on push,
-last-push approval), whether the agent's login can bypass that rule, and whether the branch has a
-CODEOWNERS file without errors. If not, if the answer does not come, or if the command is anything
+last-push approval), whether the rule's ruleset is active and the agent's login cannot bypass it,
+and whether the branch's CODEOWNERS file is a single `*` rule naming only the owner, without
+errors. It refuses while a token variable such as `GH_TOKEN` is set, since the merge would inherit it.
+If not, if the answer does not come, or if the command is anything
 but that single command, it asks as for any merge. Retargeting a pull request with `gh pr edit
 --base` or the API asks too, because an armed auto-merge would follow it. The owner's settings
 for this are in [`docs/git.md`](./git.md).

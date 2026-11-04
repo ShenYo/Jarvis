@@ -33,14 +33,18 @@ A MINOR release: the guard now lets an agent arm auto-merge where GitHub require
   quoting, or any other flag is the usual checkpoint (ask in Claude Code, deny in Codex), and the
   refusal names which one. `--auto` always names its repository (`-R` or the URL); nothing is read
   from the working directory, `GH_REPO`, `GIT_DIR` or `gh repo set-default`, and it is refused while
-  `GH_REPO` or `GH_HOST` is set. At hook time the guard asks GitHub, with the agent's own login
-  (`GH_CONFIG_DIR` from the Claude record or the Codex record; `GH_TOKEN`, `GITHUB_TOKEN` and
-  `GH_HOST` stripped), for the pull request's base branch and then for `rules/branches/{base}`, and
+  `GH_REPO`, `GH_HOST`, `GH_TOKEN` or `GITHUB_TOKEN` (or an enterprise token) is set, since the
+  merge would inherit it. At hook time the guard asks GitHub, with the agent's own login (the
+  `GH_CONFIG_DIR` of the identity record, used only when the identity is applied and verified,
+  else the process's own; tokens and `GH_HOST` stripped), for the pull request's base branch and then for `rules/branches/{base}`, and
   allows it only if (1) a `pull_request` rule there has `required_approving_review_count` of at
   least one, `require_code_owner_review`, `dismiss_stale_reviews_on_push` and
-  `require_last_push_approval`; (2) that rule's ruleset says `current_user_can_bypass` is `never`
-  for the agent's login; and (3) the base branch has a CODEOWNERS file (`.github/CODEOWNERS`,
-  `CODEOWNERS` or `docs/CODEOWNERS`) that `codeowners/errors` reports no errors for. Any error,
+  `require_last_push_approval`; (2) that rule's ruleset says `enforcement` is `active` and
+  `current_user_can_bypass` is `never` for the agent's login; and (3) the base branch has a CODEOWNERS
+  file (`.github/CODEOWNERS`, `CODEOWNERS` or `docs/CODEOWNERS`) that `codeowners/errors` reports no
+  errors for and whose content is exactly one rule, `*` and GitHub users other than the agent's own
+  login (`gh api user`); a path rule, a second rule, a team, an email or no owner is refused, naming
+  the line. Any error,
   timeout (inside the guard's existing 6 s budget), unreadable answer or missing piece is a
   refusal that names the failing condition and points at `docs/git.md`. Until the pull request
   that adds `.github/CODEOWNERS` has merged, `--auto` is refused on Jarvis, which is the intended
@@ -49,7 +53,8 @@ A MINOR release: the guard now lets an agent arm auto-merge where GitHub require
   which is the case today on Jarvis (zero required approvals) and on a repository with no ruleset.
   The agent-identity switch still applies first.
 - **Retargeting a pull request is a merge checkpoint.** `gh pr edit --base`/`-B`, a `gh api`
-  write to `pulls/{n}` with a `base` field, and the GraphQL `updatePullRequest` with
+  write to `pulls/{n}` with a `base` field (an `--input` JSON body is decoded, so `"b\u0061se"`
+  counts, and a body that is not JSON counts too), and the GraphQL `updatePullRequest` with
   `baseRefName` now ask (deny in Codex): GitHub keeps auto-merge enabled for a writer, so an armed
   auto-merge would follow the pull request to a branch whose rules were never checked. Every other
   answer is byte-identical to before.

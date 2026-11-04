@@ -877,6 +877,7 @@ case "$2" in
   repos/*/rulesets/*) f=ruleset-${2##*/}.json ;;
   repos/*/contents/*) k=${2#*/contents/}; k=${k%%\?*}; k=${k//\//_}; f=contents/${k#.}.json ;;
   repos/*/codeowners/errors*) f=errors.json ;;
+  user) f=user.json ;;
   *) exit 1 ;;
 esac
 [ -f "$STUB_DIR/$f" ] || exit 1
@@ -896,11 +897,14 @@ rules_json() { # jq filter, [ruleset id]
 }
 set_rules() { rules_json "$1" "${2:-1}" >"$stub/rules.json"; }
 set_pull() { printf '{"number":12,"state":"open","base":{"ref":"%s"}}' "$1" >"$stub/pull.json"; }
-set_bypass() { printf '{"id":%s,"name":"main","current_user_can_bypass":"%s"}' "$1" "$2" >"$stub/ruleset-$1.json"; }
-set_codeowners() { rm -f "$stub"/contents/*; for p in "$@"; do p=${p//\//_}; echo '{"type":"file","name":"CODEOWNERS"}' >"$stub/contents/${p#.}.json"; done; }
+set_bypass() { printf '{"id":%s,"name":"main","enforcement":"%s","current_user_can_bypass":"%s"}' "$1" "${3:-active}" "$2" >"$stub/ruleset-$1.json"; }
+# a CODEOWNERS file the way the contents API answers: base64 in "content", with the line breaks it adds
+codeowners_body() { jq -n --arg c "$(printf '%s\n' "$1" | base64 | fold -w 60)" '{type: "file", name: "CODEOWNERS", encoding: "base64", content: $c}'; }
+set_codeowners() { rm -f "$stub"/contents/*; for p in "$@"; do p=${p//\//_}; codeowners_body '* @ShenYo' >"$stub/contents/${p#.}.json"; done; }
+set_codeowners_text() { rm -f "$stub"/contents/*; codeowners_body "$1" >"$stub/contents/github_CODEOWNERS.json"; }
 reset_stub() {
   : >"$stub/log"; set_pull main; set_rules .; set_bypass 1 never; set_codeowners .github/CODEOWNERS
-  echo '{"errors":[]}' >"$stub/errors.json"; rm -f "$stub/ruleset-2.json"
+  echo '{"errors":[]}' >"$stub/errors.json"; echo '{"login":"agent-claude-code"}' >"$stub/user.json"; rm -f "$stub/ruleset-2.json"
 }
 gh_stub() { STUB_DIR="$stub" PATH="$stub/bin:$PATH" "$@"; }
 assert() { local name=$1; shift; total=$((total + 1)); if "$@"; then echo "ok   $name"; else echo "FAIL $name"; fails=$((fails + 1)); fi; }
@@ -1011,10 +1015,58 @@ echo '{"message":"Not Found"}' >"$stub/errors.json"; gh_stub probe ask "gh pr me
 echo 'not json' >"$stub/errors.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
 rm -f "$stub/errors.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
 reset_stub
+echo "-- the CODEOWNERS file itself: one rule, * and the owner, never the agent"
+for t in '* @ShenYo' $'# the owner\n\n* @ShenYo   # approves everything\n' '* @ShenYo @other-user' '*   @ShenYo' '* @Shen-Yo2'; do
+  set_codeowners_text "$t"; gh_stub probe allow "gh pr merge 12 --auto -R $R"
+done
+set_codeowners_text $'# nothing\n# at all'
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reason_is "no rule: the reason says so" "*CODEOWNERS*it has no rule*docs/git.md*" "gh pr merge 12 --auto -R $R"
+set_codeowners_text '/docs/ @ShenYo'
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reason_is "a path rule: the reason names the line" "*line 1 (/docs/ @ShenYo) is not the \`*\` rule*" "gh pr merge 12 --auto -R $R"
+set_codeowners_text $'* @ShenYo\n*.md @someone-else'
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reason_is "a second rule: the reason names the line" "*line 2 (*.md @someone-else) is a second rule*" "gh pr merge 12 --auto -R $R"
+set_codeowners_text $'# header\n* @ShenYo\n/docs/ @ShenYo'
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+set_codeowners_text $'[Section]\n* @ShenYo'
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+set_codeowners_text '*'
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reason_is "no owner: the reason names the line" "*line 1 (*) names no owner*" "gh pr merge 12 --auto -R $R"
+set_codeowners_text '* @some-org/some-team'
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reason_is "a team: the reason names it" "*@some-org/some-team is not a GitHub user*" "gh pr merge 12 --auto -R $R"
+set_codeowners_text '* owner@example.com'
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+set_codeowners_text '* ShenYo'
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+set_codeowners_text '* @ShenYo @agent-claude-code'
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reason_is "the agent among the owners: the reason says so" "*@agent-claude-code is the agent's own login*" "gh pr merge 12 --auto -R $R"
+set_codeowners_text '* @Agent-Claude-Code'
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reset_stub; echo '{"type":"file","encoding":"base64","content":"!!!"}' >"$stub/contents/github_CODEOWNERS.json"
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+echo '{"type":"file","encoding":"none","content":""}' >"$stub/contents/github_CODEOWNERS.json"
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+echo '{"type":"file"}' >"$stub/contents/github_CODEOWNERS.json"
+gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reset_stub; echo '{"message":"Not Found"}' >"$stub/user.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reason_is "no login: the reason says the owners cannot be checked" "*login could not be read*" "gh pr merge 12 --auto -R $R"
+rm -f "$stub/user.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reset_stub
+echo "-- the ruleset must be active"
+for e in evaluate disabled bogus; do set_bypass 1 never "$e"; gh_stub probe ask "gh pr merge 12 --auto -R $R"; done
+reason_is "a ruleset not active: the reason names enforcement" "*enforcement = 'bogus'*docs/git.md*" "gh pr merge 12 --auto -R $R"
+printf '{"id":1,"current_user_can_bypass":"never"}' >"$stub/ruleset-1.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+reset_stub
 echo "-- refused: gh fails, hangs or is not there"
 STUB_FAIL=1 gh_stub probe ask "gh pr merge 12 --auto -R $R"
 STUB_SLEEP=31 gh_stub probe ask "gh pr merge 12 --auto -R $R"
-assert "a hung gh is killed and leaves no process behind" bash -c '! pgrep -f "sleep 31" >/dev/null'
+# the pattern's bracket keeps this checker's own command line from matching it
+assert "a hung gh is killed and leaves no process behind" bash -c '! pgrep -f "sleep 3[1]" >/dev/null'
 empty_path="$root/no-gh-bin"; mkdir -p "$empty_path"
 total=$((total + 1))
 if [ "$(jq -n --arg d "$feat" --arg c "gh pr merge 12 --auto -R $R" '{tool_name: "Bash", tool_input: {command: $c}, cwd: $d}' | PATH="$empty_path" "$py" -I "$hook" | jq -r '.hookSpecificOutput.permissionDecision // empty')" = ask ]; then
@@ -1121,6 +1173,20 @@ for c in 'gh pr edit 12 --base release' 'gh pr edit 12 -B release' 'gh pr edit 1
 done
 printf '{"base": "release"}' >"$root/sandbox/b.json"
 gh_stub probe ask 'gh api -X PATCH repos/o/r/pulls/12 --input b.json' "$root/sandbox"
+printf '{"b\\u0061se": "release"}' >"$root/sandbox/b-esc.json"
+printf '{"title": "x", "\\u0062ase": "release"}' >"$root/sandbox/b-esc2.json"
+printf '{"title": "x"}' >"$root/sandbox/b-title.json"
+printf '{"title": "x" ' >"$root/sandbox/b-broken.json"
+printf 'base=release' >"$root/sandbox/b-form.txt"
+gh_stub probe ask 'gh api -X PATCH repos/o/r/pulls/12 --input b-esc.json' "$root/sandbox"
+reason_is "an escaped base key is a retarget" "$base_pat" 'gh api -X PATCH repos/o/r/pulls/12 --input b-esc.json' "$root/sandbox"
+gh_stub probe ask 'gh api -X PATCH repos/o/r/pulls/12 --input b-esc2.json' "$root/sandbox"
+gh_stub probe ask 'gh api -X PATCH repos/o/r/pulls/12 --input b-broken.json' "$root/sandbox"
+reason_is "a body that is not JSON is a retarget" "*not JSON*armed auto-merge*" 'gh api -X PATCH repos/o/r/pulls/12 --input b-broken.json' "$root/sandbox"
+gh_stub probe ask 'gh api -X PATCH repos/o/r/pulls/12 --input b-form.txt' "$root/sandbox"
+gh_stub probe ask 'gh api -X PATCH repos/o/r/pulls/12 --input=b-esc.json' "$root/sandbox"
+gh_stub probe allow 'gh api -X PATCH repos/o/r/pulls/12 --input b-title.json' "$root/sandbox"
+gh_stub probe allow 'gh api -X GET repos/o/r/pulls/12 --input b-broken.json' "$root/sandbox"
 gh_stub probe allow 'gh pr edit 12 --title x'
 gh_stub probe allow 'gh pr edit 12 --body "the base is fine"'
 gh_stub probe allow 'gh pr edit 12 --add-label bug'
@@ -1133,21 +1199,46 @@ gh_stub probe ask "gh pr merge 12 --auto -R $R && gh pr merge 13 --auto -R $R"
 reset_stub
 
 echo "-- the login gh runs with: the agent's own, and nobody's token"
-export GH_TOKEN=secret GITHUB_TOKEN=secret2 GH_CONFIG_DIR=/proc/gh
+export GH_CONFIG_DIR=/proc/gh
 : >"$stub/log"
 gh_stub probe allow "gh pr merge 12 --auto -R $R"
-assert "no record: the process GH_CONFIG_DIR, and no GH_TOKEN or GITHUB_TOKEN" asked "GH_CONFIG_DIR=/proc/gh"$'\t'"GH_TOKEN=unset"$'\t'"GITHUB_TOKEN=unset"
-unset GH_TOKEN GITHUB_TOKEN
+assert "no identity: gh runs with the process's own GH_CONFIG_DIR" asked "GH_CONFIG_DIR=/proc/gh"$'\t'
+# a token the merge would inherit is one the checks must not hide
+: >"$stub/log"
+for v in GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN; do
+  env "$v=secret" STUB_DIR="$stub" PATH="$stub/bin:$PATH" "$py" -I "$hook" <<<"$(jq -n --arg d "$feat" --arg c "gh pr merge 12 --auto -R $R" '{tool_name: "Bash", tool_input: {command: $c}, cwd: $d}')" >"$root/out.json"
+  total=$((total + 1))
+  if [ "$(jq -r '.hookSpecificOutput.permissionDecision // empty' "$root/out.json")" = ask ] && jq -r .hookSpecificOutput.permissionDecisionReason "$root/out.json" | grep -qF "$v is set"; then
+    echo "ok   $v set: refused, and the reason names it"
+  else
+    echo "FAIL $v set: refused, and the reason names it"; fails=$((fails + 1))
+  fi
+done
+GH_TOKEN=secret gh_stub probe ask "gh pr merge 12 --auto -R $R"
+GITHUB_TOKEN=secret gh_stub probe allow 'gh pr merge 12 --disable-auto'
+assert "a token in the environment: GitHub is not asked" none_asked
+# what gh is asked with has no token or host, whatever the environment holds
+total=$((total + 1))
+if [ "$(GH_TOKEN=a GITHUB_TOKEN=b GH_HOST=h GH_ENTERPRISE_TOKEN=c GH_CONFIG_DIR=/proc/gh "$py" -I -c '
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("guard", sys.argv[1]); g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
+env = g.gh_env(); print(sorted(k for k in ("GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_ENTERPRISE_TOKEN") if k in env), env["GH_CONFIG_DIR"])' "$hook")" = "[] /proc/gh" ]; then
+  echo "ok   gh_env strips the token and host variables"
+else
+  echo "FAIL gh_env strips the token and host variables"; fails=$((fails + 1))
+fi
+# the identity record is used only when the identity is applied
 export CLAUDE_CONFIG_DIR="$applied_home"
 : >"$stub/log"
 gh_stub probe allow "gh pr merge 12 --auto -R $R"
-assert "the Claude record's GH_CONFIG_DIR wins over the process's" asked "GH_CONFIG_DIR=/agent/gh"$'\t'
-assert "...for every call, the bypass check included" bash -c "[ \"\$(grep -c 'GH_CONFIG_DIR=/agent/gh' '$stub/log')\" = \"\$(wc -l <'$stub/log' | tr -d ' ')\" ]"
+assert "a record but no marker: the process's GH_CONFIG_DIR, which is what the merge will use" asked "GH_CONFIG_DIR=/proc/gh"$'\t'
+assert "...for every call" bash -c "[ \"\$(grep -c 'GH_CONFIG_DIR=/proc/gh' '$stub/log')\" = \"\$(wc -l <'$stub/log' | tr -d ' ')\" ]"
 unset GH_CONFIG_DIR; export CLAUDE_CONFIG_DIR="$no_claude"
 apply_identity
 : >"$stub/log"
 gh_stub probe allow "gh pr merge 12 --auto -R $R"
 assert "identity applied: gh runs with the applied GH_CONFIG_DIR and no token or host" asked "GH_CONFIG_DIR=/agent/gh"$'\t'"GH_TOKEN=unset"$'\t'"GITHUB_TOKEN=unset"$'\t'"GH_HOST=unset"
+assert "...for every call, the bypass and CODEOWNERS checks included" bash -c "[ \"\$(grep -c 'GH_CONFIG_DIR=/agent/gh' '$stub/log')\" = \"\$(wc -l <'$stub/log' | tr -d ' ')\" ]"
 gh_stub probe allow 'gh pr merge 12 --disable-auto'
 set_rules 'del(.require_last_push_approval)'
 gh_stub probe ask "gh pr merge 12 --auto -R $R"
@@ -1197,6 +1288,17 @@ STUB_FAIL=1 gh_stub probe deny "gh pr merge 12 --auto -R $R"
 STUB_SLEEP=31 gh_stub probe deny "gh pr merge 12 --auto -R $R"
 hook_args="--codex --require-identity"
 gh_stub probe allow "gh pr merge 12 --auto -R $R"
+hook_args="--codex"
+export CODEX_HOME="$no_codex" GH_CONFIG_DIR=/proc/gh
+: >"$stub/log"
+gh_stub probe allow "gh pr merge 12 --auto -R $R"
+assert "Codex, no record: gh runs with the process's own GH_CONFIG_DIR" asked "GH_CONFIG_DIR=/proc/gh"$'\t'
+export CODEX_HOME="$root/cx-gitconfig-gone"
+: >"$stub/log"
+gh_stub probe deny "gh pr merge 12 --auto -R $R"
+assert "Codex, an unsound record: refused before GitHub is asked" none_asked
+GH_TOKEN=secret gh_stub probe deny "gh pr merge 12 --auto -R $R"
+export CODEX_HOME="$no_codex"
 hook_args=""
 unset GH_CONFIG_DIR
 export CODEX_HOME="$no_codex"

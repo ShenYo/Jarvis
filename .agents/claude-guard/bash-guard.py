@@ -35,6 +35,7 @@ branch, and fails closed on anything else (see auto_merge_problem).
 
 Compatible with Python 3.9, the version macOS ships at /usr/bin/python3.
 """
+import base64
 import hashlib
 import json
 import os
@@ -1512,6 +1513,7 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
     method = None
     fields = []
     unread = []
+    inputs = []     # the --input bodies, which are the request's JSON as sent
     k = 0
     while k < len(args):
         a = args[k]
@@ -1535,6 +1537,7 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
             if body is None or (path == "-" and not stdin):
                 unread.append(path)
             fields.append(body or "")
+            inputs.append(body or "")
         k += 1
     for k, f in enumerate(fields):
         name, eq, value = f.partition("=")
@@ -1575,8 +1578,18 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
         res.check("the API call approves a pull request")
     if re.search(r"(pulls|issues)/\d+$", endpoint) and re.search(r"state=(closed|open)", body):
         res.check("the API call closes or reopens a pull request")
-    if re.search(r"pulls/\d+$", endpoint) and (re.search(r"(^|\n)base=", body) or re.search(r'"base"\s*:', body)):
-        res.check(BASE_CHANGE % "the API call to a pull request with a base field")
+    if re.search(r"pulls/\d+$", endpoint):
+        if re.search(r"(^|\n)base=", body) or re.search(r'"base"\s*:', body):
+            res.check(BASE_CHANGE % "the API call to a pull request with a base field")
+        for text in inputs:
+            # GitHub decodes the JSON, so "b\u0061se" is base; a body that is not JSON cannot be read here.
+            try:
+                decoded = json.loads(text)
+            except Exception:
+                res.check(BASE_CHANGE % "the API call to a pull request with a body that is not JSON")
+                continue
+            if isinstance(decoded, dict) and "base" in decoded:
+                res.check(BASE_CHANGE % "the API call to a pull request with a base field")
     if re.search(r"git/refs/", endpoint) and re.search(r"force=true", body):
         res.no("the API call force-updates a ref")
     if re.search(r"git/refs/heads/(main|master)$", endpoint):
@@ -1602,6 +1615,9 @@ AUTO_MERGE_RULES = (
     ("require_last_push_approval", lambda v: v is True, "true"),
 )
 CODEOWNERS_PATHS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
+# Variables that make the merge command act on another repository, host or account than the checks.
+REDIRECT_ENV = ("GH_REPO", "GH_HOST", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+CODEOWNER_USER = re.compile(r"^@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$")
 
 # The only text an auto-merge may be: `gh pr merge` and words of plain characters, nothing else. Any
 # quote, `$`, `;`, `&`, `|`, parenthesis, redirection, newline or glob character would let the shell
@@ -1705,22 +1721,34 @@ def auto_merge_refusal(why):
             "requires the owner's approval, and the rules for that are in %s" % (why, AUTO_MERGE_DOC))
 
 
-def gh_env():
-    """The environment `gh` is asked in: the agent's own login, nobody's token.
-    Claude mode takes GH_CONFIG_DIR from the Claude record, then from this process;
-    Codex mode from the Codex record, which lists it (a Codex hook does not see
-    the policy env), then from this process."""
-    env = {k: v for k, v in os.environ.items() if k not in HIJACK_ENV}
-    config = None
+def applied_identity():
+    """The identity record's variables when the identity is applied and verified, else None: in
+    Claude mode the marker plus a record the environment matches, in Codex mode a record whose
+    block, config and gitconfig are all still there. Otherwise nothing says which login the merge
+    command will use but the environment it inherits."""
     try:
         if CODEX:
+            if not identity_applied() or codex_record_problems():
+                return None
             with open(codex_record_path(), encoding="utf-8") as fh:
-                config = json.load(fh).get("set", {}).get("GH_CONFIG_DIR")
+                rec = json.load(fh).get("set")
         else:
+            if not identity_applied() or applied_env_problems():
+                return None
             with open(applied_record_path(), encoding="utf-8") as fh:
-                config = json.load(fh).get("env", {}).get("GH_CONFIG_DIR")
+                rec = json.load(fh).get("env")
+        return rec if isinstance(rec, dict) else None
     except Exception:
-        pass
+        return None
+
+
+def gh_env():
+    """The environment `gh` is asked in, which is the one the merge command runs in: the applied
+    identity's GH_CONFIG_DIR (from its record, which a Codex hook needs because it does not see
+    the policy env), else this process's own environment; nobody's token."""
+    env = {k: v for k, v in os.environ.items() if k not in HIJACK_ENV}
+    rec = applied_identity()
+    config = rec.get("GH_CONFIG_DIR") if rec else None
     if isinstance(config, str) and config:
         env["GH_CONFIG_DIR"] = os.path.expanduser(config)
     env.update(GH_PROMPT_DISABLED="1", GH_NO_UPDATE_NOTIFIER="1", NO_COLOR="1")
@@ -1761,19 +1789,50 @@ def gh_answer(env, *args):
         return None
 
 
+def codeowners_problem(text, login):
+    """None when the file is one rule, `*` and one or more owners that are GitHub users other than
+    `login`, with comments and blank lines allowed; else what is wrong, naming the line. A path rule,
+    a second rule, a team, an email, no owner, or the agent among the owners lets an approval count
+    that is not the owner's, or leaves paths without one."""
+    rules = []
+    for number, line in enumerate(text.splitlines(), 1):
+        words = line.split("#", 1)[0].split()
+        if words:
+            rules.append((number, line.strip(), words))
+    if not rules:
+        return "it has no rule"
+    if len(rules) > 1:
+        return "line %d (%s) is a second rule" % (rules[1][0], rules[1][1])
+    number, line, words = rules[0]
+    if words[0] != "*":
+        return "line %d (%s) is not the `*` rule" % (number, line)
+    if len(words) < 2:
+        return "line %d (%s) names no owner" % (number, line)
+    for owner in words[1:]:
+        if not CODEOWNER_USER.match(owner):
+            return "line %d (%s): %s is not a GitHub user (a team, an email or something else)" % (number, line, owner)
+        if owner[1:].lower() == login.lower():
+            return "line %d (%s): %s is the agent's own login, so the agent's approval would count" % (number, line, owner)
+    return None
+
+
 def auto_merge_problem(form):
     """None when everything below holds for the pull request's base branch, else the first thing
     that does not. Everything unknown is a problem: an answer that does not come, a rule or a file
     that is not there.
       - a pull_request rule asks for an approval, the code owner's, dropped when stale, and for the
         last push to be approved;
-      - the ruleset it belongs to cannot be bypassed by the agent's login (current_user_can_bypass
-        is "never"), or the rule would not bind the agent;
-      - the branch has a CODEOWNERS file without errors, or the code-owner review asks nobody."""
+      - the ruleset it belongs to is active and cannot be bypassed by the agent's login
+        (enforcement is "active", current_user_can_bypass is "never"), or the rule would not bind
+        the agent;
+      - the branch has a CODEOWNERS file without errors that is one `*` rule naming users other
+        than the agent, or the code-owner review asks nobody, or the wrong one;
+      - nothing in the environment makes the merge act on another repository, host or account."""
     try:
-        if os.environ.get("GH_REPO") or os.environ.get("GH_HOST"):
-            return ("GH_REPO or GH_HOST is set in this environment, so gh may act on a repository other "
-                    "than the one checked; unset it")
+        if any(os.environ.get(v) for v in REDIRECT_ENV):
+            return ("%s is set in this environment, so the merge may act on another repository or "
+                    "account than the one checked; unset it"
+                    % ", ".join(v for v in REDIRECT_ENV if os.environ.get(v)))
         repo, number, env = form["repo"], form["number"], gh_env()
         pull = gh_answer(env, "api", "repos/%s/pulls/%s" % (repo, number))
         base = (pull.get("base") or {}).get("ref") if isinstance(pull, dict) and isinstance(pull.get("base"), dict) else None
@@ -1808,23 +1867,37 @@ def auto_merge_problem(form):
                 continue
             ruleset = gh_answer(env, "api", "repos/%s/rulesets/%s" % (repo, rid))
             can = ruleset.get("current_user_can_bypass") if isinstance(ruleset, dict) else None
-            if can == "never":
+            enforced = ruleset.get("enforcement") if isinstance(ruleset, dict) else None
+            if can == "never" and enforced == "active":
                 seen = []
                 break
-            seen.append("ruleset %s says current_user_can_bypass = %s for the agent's login"
-                        % (rid, "nothing" if can is None else repr(can)))
+            seen.append("ruleset %s says enforcement = %s and current_user_can_bypass = %s for the agent's login"
+                        % (rid, "nothing" if enforced is None else repr(enforced), "nothing" if can is None else repr(can)))
         if seen:
-            return ("the rule that requires the approval can be bypassed or not checked: %s; the agent's "
-                    "login must be bound by it" % "; ".join(seen))
-        found = False
+            return ("the rule that requires the approval can be bypassed, is not active, or is not checked: "
+                    "%s; it must be active and bind the agent's login" % "; ".join(seen))
+        entry = None
         for path in CODEOWNERS_PATHS:
             entry = gh_answer(env, "api", "repos/%s/contents/%s?ref=%s" % (repo, path, ref))
             if isinstance(entry, dict) and entry.get("type") == "file":
-                found = True
                 break
-        if not found:
+            entry = None
+        if entry is None:
             return ("branch %s of %s has no CODEOWNERS file (%s), so require_code_owner_review asks nobody"
                     % (base, repo, ", ".join(CODEOWNERS_PATHS)))
+        try:
+            if entry.get("encoding") != "base64":
+                raise ValueError("not base64")
+            text = base64.b64decode(entry["content"]).decode("utf-8")
+        except Exception:
+            return "the CODEOWNERS file on branch %s of %s could not be read" % (base, repo)
+        user = gh_answer(env, "api", "user")
+        login = user.get("login") if isinstance(user, dict) else None
+        if not isinstance(login, str) or not login:
+            return "the agent's own login could not be read, so the CODEOWNERS owners cannot be checked against it"
+        problem = codeowners_problem(text, login)
+        if problem:
+            return "the CODEOWNERS file on branch %s of %s is not one rule `* @owner` for the owner: %s" % (base, repo, problem)
         errors = gh_answer(env, "api", "repos/%s/codeowners/errors?ref=%s" % (repo, ref))
         if not (isinstance(errors, dict) and isinstance(errors.get("errors"), list) and not errors["errors"]):
             return "the CODEOWNERS file on branch %s of %s has errors, or its errors could not be read" % (base, repo)
