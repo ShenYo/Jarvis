@@ -87,7 +87,9 @@ ruleset settings in `docs/git.md`, the guard simply keeps refusing `--auto`.
   pull request: a reviewer that did not write the change reviews it, sized to what it changes, and
   its result is posted as a labelled comment, never an approval; the coding agent answers every
   finding; after at most three rounds the PR goes to the owner with a summary or with the open
-  disagreements. The personal instructions point at it. #66 was its first run.
+  disagreements. Nothing is posted as the owner (`gh api user` is checked first), the reviewer's
+  report is posted verbatim, and auto-merge is armed only after the Ready comment and only where
+  the repository's Git rules allow it. The personal instructions point at it. #66 was its first run.
 
 ## v1.2.2 (2026-11-03)
 

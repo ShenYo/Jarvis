@@ -19,15 +19,16 @@ the obvious problems are already found and either fixed or argued.
 ## Never as the owner
 
 Every comment in this loop is posted through the machine account, never the
-owner's. Before you post anything, run `gh api user -q .login`. If it prints the
-owner's login (for example because this machine's agent identity is not
-applied), stop. Post nothing, and tell the owner. Comments posted under the
+owner's. Before you post anything, run `gh api user -q .login`. If it prints
+anything but the machine account's login, or fails (a Codex sandbox has no
+network, for example), stop. Post nothing, and tell the owner. Comments posted under the
 owner's account would be indistinguishable from the owner's own words.
 
 ## When it runs
 
 Run it for every pull request an agent opens, and whenever the owner asks for
-a review. Two kinds of PR are exempt:
+a review. When the owner asks, the session dispatches a fresh reviewer, even for
+a PR it did not write; it does not review the PR itself. Two kinds of PR are exempt:
 
 - **A release PR** that only renames `## Unreleased` to a version.
 - **A PR the owner asks to skip.** The owner names the PR.
@@ -68,9 +69,12 @@ nothing, and leaves no process running.
 
 ## How it reports
 
-The reviewer never approves and never requests changes. The coding agent
-posts the reviewer's result as **one PR comment** per round, through the machine
-account:
+The reviewer never approves and never requests changes. That holds even where a
+repository's own rules would let a reviewing agent approve, because only the
+owner's approval counts here. The coding agent posts the reviewer's report
+**verbatim**, as one PR comment per round, through the machine account. It
+puts its own replies in a separate comment, never under the reviewer's label.
+The report looks like this:
 
 ```markdown
 **Reviewer: fresh <runtime and model> (did not write this change)**: round <n> of 3
@@ -113,9 +117,12 @@ posts:
 - Not verified, and why: <list>.
 ```
 
-Then, where [`docs/git.md`](../git.md) allows it, the coding agent arms
+Then, where the repository's own Git rules allow it, or
+[`docs/git.md`](../git.md) where the repository has none, the coding agent arms
 auto-merge with `gh pr merge <n> --auto --squash -R <owner/repo>`. That is only
-where the base branch requires the code owner's approval; the guard verifies it.
+where the base branch requires the code owner's approval; the guard verifies
+it. In a Friday consumer, whose installed safety boundary keeps enabling
+auto-merge a person's checkpoint, it never does.
 Finally the coding agent tells the owner that the PR is ready for their review.
 
 **If round 3 still leaves a blocking or should-fix finding open,** stop the loop.
