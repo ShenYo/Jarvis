@@ -82,6 +82,12 @@ On this machine: run `bash ~/.Jarvis/scripts/apply-claude-guard.sh` and
 `bash ~/.Jarvis/scripts/apply-codex-guard.sh` to copy the new hook. Codex needs no new trust: the hook's
 definition in `hooks.json` is unchanged, and trust follows the definition, not the script it runs. Nothing is required on GitHub for this release to be safe: until the owner applies the
 ruleset settings in `docs/git.md`, the guard simply keeps refusing `--auto`.
+- **A fresh reviewer before the owner's final check (#58).**
+  [`docs/dispatch/review-loop.md`](./docs/dispatch/review-loop.md) sets out what follows an agent's
+  pull request: a reviewer that did not write the change reviews it, sized to what it changes, and
+  its result is posted as a labelled comment, never an approval; the coding agent answers every
+  finding; after at most three rounds the PR goes to the owner with a summary or with the open
+  disagreements. The personal instructions point at it. #66 was its first run.
 
 ## v1.2.2 (2026-11-03)
 
