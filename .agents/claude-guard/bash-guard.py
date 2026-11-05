@@ -1448,11 +1448,16 @@ def gh_is_read(o, words):
     return False
 
 
+# Long options that take a value, for every gh command the guard reads (`gh api --help` lists
+# --cache, --field, --header, --hostname, --input, --jq, --method, --preview, --raw-field and
+# --template). The value follows as the next argument, so it is never an option or the endpoint.
+GH_VALUE_LONG = ("--repo", "--method", "--field", "--raw-field", "--header", "--input", "--jq",
+                 "--template", "--hostname", "--body", "--body-file", "--subject",
+                 "--match-head-commit", "--author-email", "--cache", "--preview")
+
+
 def analyze_gh(args, ctx, res, stdin=()):
-    o = parse(args, "RXfFHqtpb", ("--repo", "--method", "--field", "--raw-field",
-                                    "--header", "--input", "--jq", "--template",
-                                    "--hostname", "--body", "--body-file", "--subject",
-                                    "--match-head-commit", "--author-email", "--cache"))
+    o = parse(args, "RXfFHqtpb", GH_VALUE_LONG)
     words = o.pos
     if not words:
         return
@@ -1513,7 +1518,7 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
     method = None
     fields = []
     unread = []
-    inputs = []     # (slot in fields, text) of each --input body
+    inputs = []     # (slot in fields, text, was it read) of each --input body
     k = 0
     while k < len(args):
         a = args[k]
@@ -1551,12 +1556,16 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
             if body is None or (path == "-" and not stdin):
                 unread.append(path)
             fields.append(body or "")
-            inputs.append((len(fields) - 1, body or ""))
+            inputs.append((len(fields) - 1, body or "", body is not None and not (path == "-" and not stdin)))
+        elif a in GH_VALUE_LONG:
+            k += 1      # --jq, --template, --header, --hostname, --cache, --preview: the next argument is theirs
         k += 1
     # An --input body is the request's JSON as sent, and GitHub decodes it: "b\u0061se" is base. So
     # the regexes below see the decoded text; a body that is not JSON cannot be read at all.
     not_json = False
-    for slot, text in inputs:
+    for slot, text, readable in inputs:
+        if not readable:
+            continue    # already reported as unread
         try:
             fields[slot] = json.dumps(json.loads(text), ensure_ascii=False)
         except Exception:

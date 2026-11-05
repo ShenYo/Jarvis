@@ -1264,6 +1264,36 @@ gh_stub probe allow 'gh api graphql -fquery="query { viewer { login } }"'
 gh_stub probe allow 'gh api graphql --input q-read.json' "$root/sandbox"
 gh_stub probe allow 'gh api -H "Accept: application/vnd.github+json" repos/o/r/pulls/12'
 gh_stub probe allow 'gh api -X POST repos/o/r/issues/12/comments -fbody=thanks'
+echo "-- an option's value is not an option or the endpoint"
+for c in 'gh api --preview nebula repos/o/r/pulls/12 -X PATCH -f base=dev' 'gh api --preview nebula -X PUT repos/o/r/pulls/12/merge' \
+         'gh api -p nebula -X PUT repos/o/r/pulls/12/merge' \
+         'gh api -X PATCH repos/o/r/pulls/12 --template -f -F base=dev' \
+         'gh api graphql --template -f -f query="mutation{mergePullRequest(input:{pullRequestId:1}){clientMutationId}}"' \
+         'gh api -X PATCH repos/o/r/pulls/12 --jq -f -F base=dev' 'gh api -X PATCH repos/o/r/pulls/12 --header -f -F base=dev' \
+         'gh api -X PATCH repos/o/r/pulls/12 --hostname -f -F base=dev' 'gh api -X PATCH repos/o/r/pulls/12 --cache -f -F base=dev' \
+         'gh api -X PATCH repos/o/r/pulls/12 --preview -f -F base=dev' \
+         'gh api -X PATCH repos/o/r/pulls/12 -q -f -F base=dev' 'gh api -X PATCH repos/o/r/pulls/12 -H -f -F base=dev' \
+         'gh api -X PATCH repos/o/r/pulls/12 -t -f -F base=dev' 'gh api -X PATCH repos/o/r/pulls/12 -p -f -F base=dev' \
+         'gh api -X PATCH repos/o/r/pulls/12 --jq=.x -f base=dev'; do
+  gh_stub probe ask "$c"
+done
+gh_stub probe deny 'gh api -X PATCH repos/o/r/git/refs/heads/x -fsha=abc -fforce=true'
+gh_stub probe deny 'gh api -XDELETE repos/o/r/git/refs/heads/x'
+gh_stub probe deny 'gh api -iXDELETE repos/o/r/git/refs/heads/x'
+gh_stub probe deny 'gh api -iX DELETE repos/o/r/git/refs/heads/x'
+gh_stub probe deny 'gh api -X=DELETE repos/o/r/git/refs/heads/x'
+gh_stub probe allow 'gh api --jq .title repos/o/r/pulls/12'
+gh_stub probe allow "gh api --template '{{.title}}' repos/o/r/pulls/12"
+gh_stub probe allow 'gh api --preview nebula repos/o/r/pulls/12'
+gh_stub probe allow 'gh api -X PATCH repos/o/r/pulls/12 --jq .x -f title=x'
+gh_stub probe allow 'gh api -H "Accept: x" -q .title repos/o/r/pulls/12'
+echo "-- a body that was never read is not also called not JSON"
+r=$(reason_of 'gh api -X PATCH repos/o/r/pulls/12 --input missing.json' "$root/sandbox"); total=$((total + 1))
+if [[ "$r" == *"could not be read"* && "$r" != *"not JSON"* ]]; then echo "ok   an unreadable --input: only the could-not-be-read clause"; else echo "FAIL an unreadable --input: only the could-not-be-read clause: $r"; fails=$((fails + 1)); fi
+r=$(reason_of 'gh api graphql --input missing.json' "$root/sandbox"); total=$((total + 1))
+if [[ "$r" == *"could not be read"* && "$r" != *"not JSON"* ]]; then echo "ok   an unreadable graphql --input: only the could-not-be-read clause"; else echo "FAIL an unreadable graphql --input: only the could-not-be-read clause: $r"; fails=$((fails + 1)); fi
+r=$(reason_of 'gh api -X PATCH repos/o/r/pulls/12 --input not.json' "$root/sandbox"); total=$((total + 1))
+if [[ "$r" == *"not JSON"* && "$r" != *"could not be read"* ]]; then echo "ok   a readable body that is not JSON: only the not-JSON clause"; else echo "FAIL a readable body that is not JSON: only the not-JSON clause: $r"; fails=$((fails + 1)); fi
 echo "-- every armed pull request in a compound is refused with it"
 reset_stub
 gh_stub probe ask "gh pr merge 12 --auto -R $R && gh pr merge 13 --auto -R $R"

@@ -60,8 +60,12 @@ A MINOR release: the guard now lets an agent arm auto-merge where GitHub require
   `gh` does: short options with an attached value (`-fbase=dev`, `-fquery=…`, which also closes an
   old gap for `mergePullRequest`), `--input` bodies decoded as JSON (`"b\u0061se"` counts; a body
   that is not JSON asks on `graphql` and on `pulls/{n}` and `issues/{n}` writes) and percent-encoded
-  paths (`pulls/%31%32`). A JSON `{"state": "closed"}` body on a pull request now asks, as the form
-  field did. Every other answer is byte-identical to before.
+  paths (`pulls/%31%32`), and an option's value (`--preview nebula`, `--template -f`, `-q -f`) is no
+  longer read as the endpoint or as an option. A JSON `{"state": "closed"}` body on a pull request now
+  asks, as the form field did. These readings also tighten the existing `gh api` checks outside
+  auto-merge: with `-f`/`-F` values attached or an `--input` body decoded, a force update of a ref is
+  denied, and a release, a tag, an approval or an API merge or close is asked, where an attached value
+  or an escaped body slipped past before. Every other answer is byte-identical to before.
 - **`.github/CODEOWNERS`** with `* @ShenYo`, so that the code-owner review the rule requires is
   the owner's, not that of an App that approves.
 - **`docs/git.md`** splits the merge row: merging, closing and reopening stay a person's;

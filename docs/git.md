@@ -119,7 +119,8 @@ its value attached (`-fbase=dev`, `-fquery=…`), an `--input` body (read as JSO
 decoded, so `"b\u0061se"` and `\u006dergePullRequest` count; a body that is not JSON, or
 cannot be read, is a checkpoint on `graphql` and on `pulls/{n}` and `issues/{n}`
 writes), or a percent-encoded path (`pulls/%31%32` is `pulls/12`). That applies to the
-API merge, close, approve and release checkpoints as well.
+API merge, close, approve and release checkpoints as well, and an option's value
+(`--preview nebula`, `--template -f`) is never taken for the endpoint or for an option.
 
 The owner applies these settings, from their own terminal with their own login,
 not from an agent session:
