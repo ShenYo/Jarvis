@@ -1,18 +1,33 @@
 # Review loop: a fresh reviewer before the owner's final check
 
-> **中文摘要**：coding agent 開出 PR 之後，先派一個沒參與實作的 fresh reviewer agent 做初步 review，結果以機器帳號留成 PR comment，不能 Approve。coding agent 逐條處理意見，最多來回 3 輪。雙方有共識後，coding agent 留言「可以進行 final check」並通知 owner；如果 3 輪後仍有分歧，就列出分歧交給 owner 決定。最後由 owner 以 ShenYo 做 final check 並 Approve。
+> **中文摘要**：coding agent 開出 PR，或 owner 要求 review 時，先派一個沒參與實作、也沒繼承作者對話的 fresh reviewer agent 做初步 review。結果以機器帳號留成 PR comment，從不 Approve，也絕不以 owner 的帳號張貼。
+>
+> coding agent 逐條回應，最多來回 3 輪。之後留言交給 owner 做 final check，有未解決的分歧就一併列出。這套流程是最低要求：repository 自己的規則可以再多要求，但不能取消它。
 
-This loop runs after an agent opens a pull request and before the owner is asked
-to review it. It applies in every repository, Claude Code and Codex alike. The
-design is in [ShenYo/Jarvis#58](https://github.com/ShenYo/Jarvis/issues/58).
+This loop runs when an agent opens a pull request, and when the owner asks an
+agent to review one ("review #N"). It applies in every repository, in Claude
+Code and in Codex. The design is in
+[ShenYo/Jarvis#58](https://github.com/ShenYo/Jarvis/issues/58).
 
-The owner's Approve stays the decision. The reviewer's job is to make sure that,
-by the time the owner looks, the obvious problems are already found and either
-fixed or argued.
+It is a floor. A repository's own rules may ask for more review, for example
+an independent review before the PR opens, but they cannot remove this one.
+
+The owner's approval stays the decision. Only the owner approves, as the code
+owner. The reviewer's job is to make sure that, by the time the owner looks,
+the obvious problems are already found and either fixed or argued.
+
+## Never as the owner
+
+Every comment in this loop is posted through the machine account, never the
+owner's. Before you post anything, run `gh api user -q .login`. If it prints the
+owner's login (for example because this machine's agent identity is not
+applied), stop. Post nothing, and tell the owner. Comments posted under the
+owner's account would be indistinguishable from the owner's own words.
 
 ## When it runs
 
-Run it on every pull request an agent opens. Two kinds of PR are exempt:
+Run it for every pull request an agent opens, and whenever the owner asks for
+a review. Two kinds of PR are exempt:
 
 - **A release PR** that only renames `## Unreleased` to a version.
 - **A PR the owner asks to skip.** The owner names the PR.
@@ -23,38 +38,50 @@ Size the review to what the PR changes:
 | --- | --- |
 | Code that runs: a guard, a hook, a script | Run the tests. Write mutants of the new code and report the ones that survive. Reproduce each risky scenario in a sandbox. |
 | Only documentation | Every command and flag checked against its source. Every link and anchor resolved. Both language versions in parity where the repository has pairs. Nothing lost from moved text. |
-| Configuration or rules | Check the change against the repository's own rules (`AGENTS.md`, `docs/git.md` or the payload's safety boundary), and check every rule that change touches. |
+| Configuration or rules | The change checked against every rule it touches. |
+
+Whatever the row, check the PR against the repository's own rules: its
+`AGENTS.md` and `docs/git.md`, and in a Friday consumer also the rules Friday
+installs (`.agents/docs/`, among them the Git safety boundary).
 
 ## Who reviews
 
-The reviewer must be a fresh agent that did not write the change and is not
-given the author's reasoning, beyond the PR description and the issue.
+The reviewer must be a fresh agent. It must not have written the change, and it
+must not inherit the author's conversation.
 
-- **A PR opened from Claude Code:** dispatch an `opus` subagent with the review
-  brief in [`prompt-templates.md`](./prompt-templates.md#5-review-a-fresh-verifier-never-the-author).
-- **A PR opened from Codex:** spawn a fresh Codex subagent
-  ([`codex.md`](./codex.md)), or ask the owner to have Claude Code review it.
+- **A PR opened from Claude Code:** dispatch an `opus` subagent that is not a
+  fork, with the review brief in
+  [`prompt-templates.md`](./prompt-templates.md#5-review-a-fresh-verifier-never-the-author).
+- **A PR opened from Codex:** spawn a subagent with `fork_turns: "none"` and a
+  self-contained brief, or run `codex exec --ephemeral`, using the model
+  [`codex.md`](./codex.md) names for review. You can also ask the owner to have
+  Claude Code review it.
 
-The reviewer works read-only. It runs tests and probes only in sandboxes,
-restores every mutation, and leaves no process running.
+In round 1 the reviewer gets the PR, its description and the issue, and nothing
+of the author's reasoning. From round 2 on it also gets the previous round's
+findings and the author's replies, as claims to check, not as evidence.
+
+The reviewer never writes to the shared working tree. It runs tests, mutants
+and probes in a throwaway copy that the brief names, for example a
+`git archive` of the PR's head commit. It restores nothing because it changed
+nothing, and leaves no process running.
 
 ## How it reports
 
-The reviewer never approves and never requests changes. The PR author and the
-reviewer act through the same machine account, and the owner's Approve is the
-only one that counts. The coding agent posts the reviewer's result as **one PR
-comment** per round:
+The reviewer never approves and never requests changes. The coding agent
+posts the reviewer's result as **one PR comment** per round, through the machine
+account:
 
 ```markdown
 **Reviewer: fresh <runtime and model> (did not write this change)**: round <n> of 3
 
-Verdict: APPROVE | NEEDS WORK
+Verdict: NO OPEN FINDINGS | NEEDS WORK
 
 | Severity | Where | Scenario → wrong outcome | Fix |
 | --- | --- | --- | --- |
 | blocking / should-fix / nit | `path:line` | … | … |
 
-Surviving mutants: …
+Surviving mutants: … (code changes only)
 Not checked: … (why)
 ```
 
@@ -62,16 +89,15 @@ Not checked: … (why)
 
 For every finding, before the next round, reply in the PR with one of these:
 
-- **Fixed in `<commit>`**, with what changed and the test that now fails
-  without it.
+- **Fixed in `<commit>`**, with what changed, and the test or check that now
+  fails without the fix.
 - **Not taking this**, with the reason.
 
-Push the fixes, and then run the next round. Hand the next reviewer the
-findings and replies of the previous round, so it checks that each one is
-closed, rather than starting over.
+Push the fixes, then run the next round, giving the reviewer what
+[Who reviews](#who-reviews) says.
 
-Comments from other bots, such as Sourcery, go through the same treatment:
-reply to each, then resolve the thread.
+Findings from other review bots, such as Sourcery, go through the same
+treatment. Answer each finding in a review thread, then resolve the thread.
 
 ## How it ends
 
@@ -87,14 +113,20 @@ posts:
 - Not verified, and why: <list>.
 ```
 
-It then tells the owner the PR is ready for their review.
+Then, where [`docs/git.md`](../git.md) allows it, the coding agent arms
+auto-merge with `gh pr merge <n> --auto --squash -R <owner/repo>`. That is only
+where the base branch requires the code owner's approval; the guard verifies it.
+Finally the coding agent tells the owner that the PR is ready for their review.
 
 **If round 3 still leaves a blocking or should-fix finding open,** stop the loop.
-Post the same comment, with the disagreements listed, and give the decision to
-the owner. Do not run a fourth round unasked.
+Post the same comment with the disagreements listed, and give the decision to
+the owner. Do not arm auto-merge, and do not run a fourth round unasked.
 
 ## What the owner does
 
 The owner reads the "Ready" comment and the PR, then approves as **ShenYo** in a
-browser signed in as ShenYo. Where auto-merge is enforced (#56), that approval
-merges the PR. Everywhere else, the owner also merges.
+browser signed in as ShenYo.
+
+- If the coding agent armed auto-merge, the approval merges the PR once its
+  checks pass ([ShenYo/Jarvis#56](https://github.com/ShenYo/Jarvis/issues/56)).
+- Otherwise, the owner merges too.
