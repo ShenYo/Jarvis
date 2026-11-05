@@ -154,8 +154,14 @@ prove Git-operation enforcement or each runtime's native skill-loader behavior.
 Claude Code receives links in `~/.claude/skills/`. Codex receives links in
 `${CODEX_HOME:-$HOME/.codex}/skills`; `.system` and `codex-primary-runtime`
 remain tool-owned and the script skips them. Codex's installer documentation
-and a Python listing tool support the destination and symlink convention, but
-the compiled Codex runtime loader remains unverified.
+and a Python listing tool support the destination and symlink convention. On
+2026-11-04 one native `/skills` listing showed the Jarvis Writing for Agents
+Skill twice, and a session read its linked `SKILL.md`; this confirms runtime
+discovery for that sample. The app-server `skills/list` API showed separate worktree
+`repo` and canonical `user` entries here, and only `user` entries outside Jarvis.
+The duplicate menu entries are discovery scopes; the symlink bridge is preserved. This
+does not verify precedence among personal, project and built-in Skills or the
+full Skill Phase B.
 
 Jarvis makes no claim about Claude's or Codex's runtime precedence between
 personal, project, and built-in Skills. An owner's preference for a same-name

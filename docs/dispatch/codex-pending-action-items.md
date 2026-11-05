@@ -35,12 +35,34 @@ Stop and report instead of working around anything the guard refuses.
 
 ## Items
 
+### C5. Arming auto-merge from Codex
+
+- **Blocked by:** [#56](https://github.com/ShenYo/Jarvis/issues/56). Wait until
+  its pull request has merged and the owner has applied the GitHub settings in
+  [`../git.md`](../git.md).
+- **Why:** Once #56 lands, [`../git.md`](../git.md) makes arming auto-merge with
+  `gh pr merge <n> --auto -R owner/repo` the agent's own call, but only where the
+  base branch requires the code owner's approval. The guard checks that before
+  it allows the command. The owner's Approve still decides the merge. Until #56
+  lands the guard denies the command, which is why this item is blocked. The
+  Codex mode has its own `gh` login and its own deadline.
+- **Steps:**
+  1. On the pull request of this run, run
+     `gh pr merge <n> --auto --squash -R ShenYo/Jarvis` as a single command.
+  2. Confirm that the PR does not merge before the owner approves it, and that
+     it merges by itself after the approval.
+- **Done when:** both hold, and `gh pr merge <n> -R ShenYo/Jarvis` without
+  `--auto` is denied.
+- **Status:** blocked.
+
+## Done
+
 ### C1. Codex loads Jarvis Skills from `~/.codex/skills`
 
-- **Why:** The bridge links each Skill into `${CODEX_HOME:-~/.codex}/skills/<name>`.
-  Only the links were checked; whether the Codex runtime loads Skills from
-  there was not ("Codex Skill Phase B" is UNVERIFIED in the README status, and
-  [`../architecture.md`](../architecture.md) says the runtime loader is unverified).
+- **Why:** Before this run, only the bridge links under
+  `${CODEX_HOME:-~/.codex}/skills/<name>` had been checked. The dated runtime
+  listing and Skill read now verify discovery for one sample. Full Skill
+  Phase B and precedence remain unverified; see [`../architecture.md`](../architecture.md).
 - **Steps:**
   1. **Owner:** in the Codex TUI, open Codex's own listing of available Skills,
      if it has one, and paste it to you. Your own description of the Skills you
@@ -56,7 +78,7 @@ Stop and report instead of working around anything the guard refuses.
   its path resolves to `~/.Jarvis/.agents/skills/<name>`. If Codex lists Skills
   and this one is missing, mark the item FAIL with the listing. If Codex offers
   no observable listing or signal, mark it UNVERIFIED and say so.
-- **Status:** open.
+- **Status:** PASS (2026-11-04, codex-cli 0.166.0); see [verification](./codex.md#verification-20261104-2324-codex-cli-01660). Runtime API confirms separate repo/user discovery scopes in this worktree and only user scope outside it; symlink bridge preserved. Precedence and full Skill Phase B are unverified. [PR #65](https://github.com/ShenYo/Jarvis/pull/65).
 
 ### C2. The GitHub and SSH identity of commands typed with `!`
 
@@ -70,7 +92,7 @@ Stop and report instead of working around anything the guard refuses.
   `Hi agent-claude-code!` using Codex's own key (`id_ed25519_agent_codex_<host>`
   in `GIT_SSH_COMMAND`). Update the sentence in
   [`../agent-identity.md`](../agent-identity.md) that calls this unverified.
-- **Status:** open.
+- **Status:** PASS (2026-11-04, codex-cli 0.166.0); owner API and SSH commands authenticated as `agent-claude-code`, and owner `!printf` confirmed `GIT_SSH_COMMAND` selects `id_ed25519_agent_codex_<HOST>` with `IdentitiesOnly=yes`. See [verification](./codex.md#verification-20261104-2324-codex-cli-01660) and [PR #65](https://github.com/ShenYo/Jarvis/pull/65).
 
 ### C3. What can replace the identity policy
 
@@ -94,13 +116,13 @@ Stop and report instead of working around anything the guard refuses.
   case also has a measurement. If anything can drop the identity, propose the
   check that `apply-agent-identity.sh --check --codex` should add, and record it
   as a follow-up issue rather than code.
-- **Status:** open.
+- **Status:** PASS (2026-11-04, codex-cli 0.166.0); see [verification](./codex.md#verification-20261104-2324-codex-cli-01660). Modern managed-requirements interaction remains NOT FOUND; follow-up [#64](https://github.com/ShenYo/Jarvis/issues/64). [PR #65](https://github.com/ShenYo/Jarvis/pull/65).
 
 ### C4. With the switch on, a live Codex session behaves as designed
 
-- **Why:** The agent-identity switch has been on since 2026-11-02, and so has the
-  `--codex --require-identity` argument in `~/.codex/hooks.json`. Its decisions
-  were tested by feeding the hook directly, never inside a running Codex.
+- **Why:** The agent-identity switch has been on since 2026-11-02, as has the
+  `--codex --require-identity` argument in `~/.codex/hooks.json`. This item
+  checks trusted configuration, identity, live refusal, reads and normal writes.
 - **Steps:**
   1. Run `bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust`. It should
      print `trust: OK`.
@@ -117,31 +139,9 @@ Stop and report instead of working around anything the guard refuses.
   5. The pull request you open for this run is the normal-write case. Its
      author must be `agent-claude-code`, and its commit author `Codex`.
 - **Done when:** all five hold.
-- **Status:** open.
+- **Status:** PASS for the fresh CLI run (2026-11-04, codex-cli 0.166.0): trust, identity, hook denial, normal read and normal write passed. The continuing-session probe separately failed to receive a hook refusal and reached `gh`; its cause remains unknown. Fresh CLI stderr confirms a PreToolUse denial before tool execution. Normal-write identity passed on [PR #65](https://github.com/ShenYo/Jarvis/pull/65). See [verification](./codex.md#verification-20261104-2324-codex-cli-01660).
 
-### C5. Arming auto-merge from Codex
-
-- **Blocked by:** [#56](https://github.com/ShenYo/Jarvis/issues/56). Wait until
-  its pull request has merged and the owner has applied the GitHub settings in
-  [`../git.md`](../git.md).
-- **Why:** Once #56 lands, [`../git.md`](../git.md) makes arming auto-merge with
-  `gh pr merge <n> --auto -R owner/repo` the agent's own call, but only where the
-  base branch requires the code owner's approval. The guard checks that before
-  it allows the command. The owner's Approve still decides the merge. Until #56
-  lands the guard denies the command, which is why this item is blocked. The
-  Codex mode has its own `gh` login and its own deadline.
-- **Steps:**
-  1. On the pull request of this run, run
-     `gh pr merge <n> --auto --squash -R ShenYo/Jarvis` as a single command.
-  2. Confirm that the PR does not merge before the owner approves it, and that
-     it merges by itself after the approval.
-- **Done when:** both hold, and `gh pr merge <n> -R ShenYo/Jarvis` without
-  `--auto` is denied.
-- **Status:** blocked.
-
-## Done
-
-Nothing yet.
+See the dated results in [`codex.md`](./codex.md#verification-20261104-2324-codex-cli-01660).
 
 ## Friday
 
