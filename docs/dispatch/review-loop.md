@@ -20,7 +20,8 @@ the obvious problems are already found and either fixed or argued.
 
 Every comment in this loop is posted through the machine account, never the
 owner's. Before you post anything, run `gh api user -q .login`. If it prints
-anything but the machine account's login, or fails (a Codex sandbox has no
+anything but the machine account's login, which is `$JARVIS_AGENT_IDENTITY` in
+the agent's environment (for example `agent-claude-code`), or if it fails (a Codex sandbox has no
 network, for example), stop. Post nothing, and tell the owner. Comments posted under the
 owner's account would be indistinguishable from the owner's own words.
 
