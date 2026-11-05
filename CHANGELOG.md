@@ -21,6 +21,68 @@ How an entry is written:
 - Nothing here is a dependency of any project, so no entry has an upgrade path
   for a consumer.
 
+## Unreleased
+
+A MINOR release: the guard now lets an agent arm auto-merge where GitHub requires the owner's approval (#56, step 1).
+
+- **`gh pr merge <n> --auto` where the owner's approval is enforced.** The guard no longer
+  treats `gh pr merge <n> --auto -R owner/repo` (or a pull request URL; with at most one of
+  `--squash`, `--merge`, `--rebase`) or `gh pr merge <n> --disable-auto` as a merge checkpoint, in
+  Claude Code and in Codex, but only as the whole command: any other segment, an assignment, a
+  wrapper (`env`, `xargs`, `command`, `find -exec`), a path to `gh`, a function or alias,
+  quoting, or any other flag is the usual checkpoint (ask in Claude Code, deny in Codex), and the
+  refusal names which one. `--auto` always names its repository (`-R` or the URL); nothing is read
+  from the working directory, `GH_REPO`, `GIT_DIR` or `gh repo set-default`, and it is refused while
+  `GH_REPO`, `GH_HOST`, `GH_TOKEN` or `GITHUB_TOKEN` (or an enterprise token) is set, since the
+  merge would inherit it. At hook time the guard asks GitHub, with the agent's own login (the
+  `GH_CONFIG_DIR` of the identity record, used only when the identity is applied and verified,
+  else the process's own; tokens and `GH_HOST` stripped), for the pull request's base branch and then for `rules/branches/{base}`, and
+  allows it only if (1) a `pull_request` rule there has `required_approving_review_count` of at
+  least one, `require_code_owner_review`, `dismiss_stale_reviews_on_push` and
+  `require_last_push_approval`; (2) that rule's ruleset says `enforcement` is `active` and
+  `current_user_can_bypass` is `never` for the agent's login; and (3) the base branch has a CODEOWNERS
+  file (`.github/CODEOWNERS`, `CODEOWNERS` or `docs/CODEOWNERS`) that `codeowners/errors` reports no
+  errors for and whose content is exactly one rule, `*` and GitHub users other than the agent's own
+  login (`gh api user`); a path rule, a second rule, a team, an email or no owner is refused, naming
+  the line. Any error,
+  timeout (inside the guard's existing 6 s budget), unreadable answer or missing piece is a
+  refusal that names the failing condition and points at `docs/git.md`. Until the pull request
+  that adds `.github/CODEOWNERS` has merged, `--auto` is refused on Jarvis, which is the intended
+  order. A direct merge, `--admin`, `--delete-branch` and the GraphQL merge mutations are refused as
+  before. Why: auto-merge merges as soon as the checks pass unless an approval is a requirement,
+  which is the case today on Jarvis (zero required approvals) and on a repository with no ruleset.
+  The agent-identity switch still applies first.
+- **Retargeting a pull request is a merge checkpoint.** `gh pr edit --base`/`-B`, a `gh api`
+  write to `pulls/{n}` with a `base` field, and the GraphQL `updatePullRequest` with
+  `baseRefName` now ask (deny in Codex): GitHub keeps auto-merge enabled for a writer, so an armed
+  auto-merge would follow the pull request to a branch whose rules were never checked. The `gh api`
+  checks (these and the existing merge, close, approve and release ones) now read the request the way
+  `gh` does: short options with an attached value (`-fbase=dev`, `-fquery=…`, which also closes an
+  old gap for `mergePullRequest`), `--input` bodies decoded as JSON (`"b\u0061se"` counts; a body
+  that is not JSON asks on `graphql` and on `pulls/{n}` and `issues/{n}` writes) and percent-encoded
+  paths (`pulls/%31%32`), and an option's value (`--preview nebula`, `--template -f`, `-q -f`) is no
+  longer read as the endpoint or as an option. A JSON `{"state": "closed"}` body on a pull request now
+  asks, as the form field did. These readings also tighten the existing `gh api` checks outside
+  auto-merge: with `-f`/`-F` values attached or an `--input` body decoded, a force update of a ref is
+  denied, and a release, a tag, an approval or an API merge or close is asked, where an attached value
+  or an escaped body slipped past before. Every other answer is byte-identical to before.
+- **`.github/CODEOWNERS`** with `* @ShenYo`, so that the code-owner review the rule requires is
+  the owner's, not that of an App that approves.
+- **`docs/git.md`** splits the merge row: merging, closing and reopening stay a person's;
+  arming auto-merge is the agent's where the rules require the owner's approval. A new section
+  lists the settings the owner applies.
+- **`guard.json`** drops the `Bash(gh pr merge*)` permission ask, and the auto-mode
+  checkpoint text makes an exception for a `gh pr merge <n> --auto` or `--disable-auto` with an
+  explicit `-R owner/repo` or pull request URL, run as a single command, which the Bash guard
+  also verifies. Otherwise every armed auto-merge would still stop for a prompt. A direct merge
+  is still asked by the guard, whose hook is `"onFailure": "block"`, so a guard failure blocks
+  rather than lets it through. The `gh api` merge and GraphQL auto-merge asks are kept.
+
+On this machine: run `bash ~/.Jarvis/scripts/apply-claude-guard.sh` and
+`bash ~/.Jarvis/scripts/apply-codex-guard.sh` to copy the new hook. Codex needs no new trust: the hook's
+definition in `hooks.json` is unchanged, and trust follows the definition, not the script it runs. Nothing is required on GitHub for this release to be safe: until the owner applies the
+ruleset settings in `docs/git.md`, the guard simply keeps refusing `--auto`.
+
 ## v1.2.2 (2026-11-03)
 
 A PATCH release: documentation only.

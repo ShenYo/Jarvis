@@ -775,6 +775,74 @@ codex_fixture "$root/cx-table"; printf '\n# note\n[other]\nextra = 1\n' >>"$root
 probe none 'gh pr create --title t' "$feat"
 hookhome=$hookhome_orig
 
+echo "== gh pr merge --auto: the Codex record's login asks GitHub (a stub gh), and a refusal is a deny"
+amhome="$root/am-home"; mkdir -p "$amhome/hooks"
+cp "$hookhome/hooks/jarvis-guard.py" "$amhome/hooks/jarvis-guard.py"
+codex_fixture "$amhome"
+jq '.set.GH_CONFIG_DIR = "/codex/gh"' "$amhome/agent-identity.applied.json" >"$amhome/r.json" && mv "$amhome/r.json" "$amhome/agent-identity.applied.json"
+am="$root/am-stub"; mkdir -p "$am/bin"
+cat >"$am/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\tGH_CONFIG_DIR=%s\tGH_TOKEN=%s\n' "$*" "${GH_CONFIG_DIR-unset}" "${GH_TOKEN-unset}" >>"$STUB_DIR/log"
+[ -n "${STUB_SLEEP:-}" ] && sleep "$STUB_SLEEP"
+case "$2" in
+  repos/*/pulls/*) cat "$STUB_DIR/pull.json" ;;
+  repos/*/rules/branches/*) cat "$STUB_DIR/rules.json" ;;
+  repos/*/rulesets/*) cat "$STUB_DIR/ruleset.json" ;;
+  repos/*/contents/.github/CODEOWNERS*) cat "$STUB_DIR/contents.json" ;;
+  repos/*/codeowners/errors*) cat "$STUB_DIR/errors.json" ;;
+  user) cat "$STUB_DIR/user.json" ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$am/bin/gh"
+echo '{"number":12,"base":{"ref":"main"}}' >"$am/pull.json"
+echo '{"id":1,"enforcement":"active","current_user_can_bypass":"never"}' >"$am/ruleset.json"
+codeowners() { jq -n --arg c "$(printf '%s\n' "$1" | base64)" '{type: "file", encoding: "base64", content: $c}' >"$am/contents.json"; }
+codeowners '* @ShenYo'
+echo '{"login":"agent-codex"}' >"$am/user.json"
+echo '{"errors":[]}' >"$am/errors.json"
+rules() { # extra parameters for the pull_request rule
+  jq -nc --argjson p "$1" '[{type:"deletion"},{type:"pull_request",ruleset_source_type:"Repository",ruleset_id:1,parameters:({required_approving_review_count:1,dismiss_stale_reviews_on_push:true,require_code_owner_review:true,require_last_push_approval:true} + $p)}]'
+}
+hookhome=$amhome
+export GH_CONFIG_DIR=/proc/gh
+am_probe() { STUB_DIR="$am" PATH="$am/bin:$PATH" probe "$@"; }
+rules '{}' >"$am/rules.json"; : >"$am/log"
+am_probe none 'gh pr merge 12 --auto --squash -R example/shared' "$feat"
+check "the stub saw the Codex record's login and no token, on the first call and the last" bash -c "grep -qF 'api repos/example/shared/rules/branches/main	GH_CONFIG_DIR=/codex/gh	GH_TOKEN=unset' '$am/log' && tail -1 '$am/log' | grep -qF 'codeowners/errors?ref=main	GH_CONFIG_DIR=/codex/gh'"
+am_probe none 'gh pr merge https://github.com/other/repo/pull/12 --auto' "$feat"
+am_probe none 'gh pr merge 12 --disable-auto' "$feat"
+am_probe deny 'gh pr merge 12' "$feat" "$cp_pat"
+am_probe deny 'gh pr merge 12 --auto --admin -R example/shared' "$feat" 'Codex guard: *the flag --admin*docs/git.md*Codex cannot ask*'
+am_probe deny 'gh pr merge 12 --auto --delete-branch -R example/shared' "$feat" "$pro"
+am_probe deny 'gh pr merge 12 --auto' "$feat" 'Codex guard: *-R owner/repo*Codex cannot ask*'
+am_probe deny 'GIT_DIR=/x gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *starts with an assignment*docs/git.md*'
+am_probe deny 'cd /tmp && gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *not the only command*docs/git.md*'
+am_probe deny 'echo --delete-branch | xargs gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *not the only command*'
+am_probe deny 'gh pr edit 12 --base release' "$feat" 'Codex guard: *base branch*armed auto-merge*Codex cannot ask*'
+am_probe deny 'gh api -X PATCH repos/o/r/pulls/12 -f base=release' "$feat" 'Codex guard: *base branch*armed auto-merge*'
+echo '{"id":1,"enforcement":"active","current_user_can_bypass":"exempt"}' >"$am/ruleset.json"
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *current_user_can_bypass*exempt*docs/git.md*Codex cannot ask*'
+echo '{"id":1,"enforcement":"evaluate","current_user_can_bypass":"never"}' >"$am/ruleset.json"
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *enforcement = '"'"'evaluate'"'"'*docs/git.md*'
+echo '{"id":1,"enforcement":"active","current_user_can_bypass":"never"}' >"$am/ruleset.json"
+codeowners '* @ShenYo @agent-codex'
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *@agent-codex is the agent'"'"'s own login*docs/git.md*'
+codeowners '/docs/ @ShenYo'
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *line 1*not the `*` rule*docs/git.md*'
+codeowners '* @ShenYo'
+echo '{"message":"Not Found"}' >"$am/contents.json"
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *no CODEOWNERS file*docs/git.md*'
+codeowners '* @ShenYo'
+GH_TOKEN=secret am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *GH_TOKEN is set*docs/git.md*'
+rules '{"require_code_owner_review":false}' >"$am/rules.json"
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *gh pr merge --auto/--disable-auto is refused*require_code_owner_review*docs/git.md*Codex cannot ask*'
+rules '{}' >"$am/rules.json"
+STUB_SLEEP=31 am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *gh pr merge --auto/--disable-auto is refused*'
+unset GH_CONFIG_DIR
+hookhome=$hookhome_orig
+
 echo "== the guard cannot decide: deny, exit 0"
 raw "non-JSON input" deny 'Codex guard: *not JSON*' 'this is not json'
 raw "empty input" deny 'Codex guard: *not JSON*' ''
