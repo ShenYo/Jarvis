@@ -910,12 +910,12 @@ gh_stub() { STUB_DIR="$stub" PATH="$stub/bin:$PATH" "$@"; }
 assert() { local name=$1; shift; total=$((total + 1)); if "$@"; then echo "ok   $name"; else echo "FAIL $name"; fails=$((fails + 1)); fi; }
 asked() { grep -qF -- "$1" "$stub/log"; }
 none_asked() { [ ! -s "$stub/log" ]; }
-reason_of() { # command: the reason the hook gives
-  jq -n --arg c "$1" --arg d "$feat" '{tool_name: "Bash", tool_input: {command: $c}, cwd: $d}' >"$root/in.json"
+reason_of() { # command, [cwd]: the reason the hook gives
+  jq -n --arg c "$1" --arg d "${2:-$feat}" '{tool_name: "Bash", tool_input: {command: $c}, cwd: $d}' >"$root/in.json"
   STUB_DIR="$stub" PATH="$stub/bin:$PATH" "$py" -I "$hook" $hook_args <"$root/in.json" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty'
 }
 reason_is() { # name, glob, command
-  local r; r=$(reason_of "$3"); total=$((total + 1))
+  local r; r=$(reason_of "$3" "${4:-}"); total=$((total + 1))
   if [[ "$r" == $2 ]]; then echo "ok   $1"; else echo "FAIL $1: $r"; fails=$((fails + 1)); fi
 }
 R=example/shared
@@ -1009,6 +1009,13 @@ echo "-- refused: no CODEOWNERS file on the base branch, or one with errors"
 reset_stub; set_codeowners; gh_stub probe ask "gh pr merge 12 --auto -R $R"
 reason_is "no CODEOWNERS: the reason names it and docs/git.md" "*no CODEOWNERS file*docs/git.md*" "gh pr merge 12 --auto -R $R"
 echo '[{"type":"dir"}]' >"$stub/contents/CODEOWNERS.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
+# only a file counts, whatever else the entry says: a symlink or a directory is not a CODEOWNERS file
+reset_stub
+for t in symlink dir submodule; do
+  codeowners_body '* @ShenYo' | jq --arg t "$t" '.type = $t' >"$stub/contents/github_CODEOWNERS.json"
+  gh_stub probe ask "gh pr merge 12 --auto -R $R"
+done
+reason_is "a symlink is not a CODEOWNERS file" "*no CODEOWNERS file*docs/git.md*" "gh pr merge 12 --auto -R $R"
 reset_stub; echo '{"errors":[{"line":1,"kind":"Invalid owner"}]}' >"$stub/errors.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
 reason_is "CODEOWNERS errors: the reason names them" "*CODEOWNERS*errors*docs/git.md*" "gh pr merge 12 --auto -R $R"
 echo '{"message":"Not Found"}' >"$stub/errors.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
@@ -1075,20 +1082,27 @@ else
   echo "FAIL no gh on PATH: refused"; fails=$((fails + 1))
 fi
 echo "-- the deadline: no gh is started once the guard's budget is spent"
-# Loaded as a module with DEADLINE already past: gh_answer must not start gh. With the budget still open it does.
-deadline_probe() { # seconds from now the deadline falls
-  : >"$stub/log"
-  STUB_DIR="$stub" PATH="$stub/bin:$PATH" "$py" -I - "$hook" "$1" <<'PY'
+# Loaded as a module with Popen replaced by a counter: with the budget spent gh_answer must not reach Popen
+# at all (a timeout of zero or less would only hide that it did); with the budget open it must.
+deadline_probe() { # seconds from now the deadline falls: prints the answer and the number of Popen calls
+  "$py" -I - "$hook" "$1" <<'PY'
 import importlib.util, sys, time
 spec = importlib.util.spec_from_file_location("guard", sys.argv[1])
 guard = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(guard)
+calls = []
+def fake(*args, **kwargs):
+    calls.append(args)
+    raise OSError("no gh in this test")
+guard.subprocess.Popen = fake
 guard.DEADLINE = time.monotonic() + float(sys.argv[2])
-print(guard.gh_answer(dict(__import__("os").environ), "api", "repos/x/y/pulls/1"))
+print(guard.gh_answer({}, "api", "repos/x/y/pulls/1"), len(calls))
 PY
 }
-assert "budget open: gh is asked" bash -c "$(declare -f deadline_probe); stub='$stub' py='$py' hook='$hook'; deadline_probe 5 >/dev/null; [ -s '$stub/log' ]"
-assert "budget spent: gh is not started" bash -c "$(declare -f deadline_probe); stub='$stub' py='$py' hook='$hook'; r=\$(deadline_probe -1); [ \"\$r\" = None ] && [ ! -s '$stub/log' ]"
+total=$((total + 1))
+if [ "$(deadline_probe 5)" = "None 1" ]; then echo "ok   budget open: gh is started"; else echo "FAIL budget open: gh is started"; fails=$((fails + 1)); fi
+total=$((total + 1))
+if [ "$(deadline_probe -1)" = "None 0" ]; then echo "ok   budget spent: gh is not started"; else echo "FAIL budget spent: gh is not started"; fails=$((fails + 1)); fi
 echo "-- refused: the repository is not named, or is named two ways, or the environment redirects gh"
 gh_stub probe ask 'gh pr merge 12 --auto'
 reason_is "no -R: the reason asks for an explicit repository" "*--auto needs an explicit -R owner/repo*docs/git.md*" 'gh pr merge 12 --auto'
@@ -1107,6 +1121,14 @@ more "export GIT_DIR=/other/.git; gh pr merge 12 --auto -R $R" '*not the only co
 more ". ./env.sh; gh pr merge 12 --auto -R $R" '*not the only command*`;`*'
 more "gh repo set-default other/x && gh pr merge 12 --auto -R $R" '*not the only command*`&`*'
 more "gh pr merge 12 --auto -R $R || true" '*not the only command*'
+more "gh pr merge 12 --auto -R $R;true" '*not the only command*`;`*'
+more "gh pr merge 12 --auto -R $R&&true" '*not the only command*`&`*'
+more "gh pr merge 12 --auto -R $R|cat" '*not the only command*`|`*'
+gh_stub probe ask 'gh pr merge 12 --auto -R example/sh$x'
+gh_stub probe ask 'gh pr merge 12 --auto -R example/shared$HOME'
+gh_stub probe ask "gh pr merge 12 --auto -R example/*"
+gh_stub probe ask "gh pr merge 12 --auto -R ~/x"
+gh_stub probe ask "gh pr merge 12 --auto -R example/sh{a,b}red"
 more "gh pr merge 12 --auto -R $R | cat" '*not the only command*`|`*'
 more "echo -R other/x | xargs gh pr merge 12 --auto" '*needs an explicit -R*'
 more "echo --delete-branch | xargs gh pr merge 12 --auto -R $R" '*not the only command*'
@@ -1182,7 +1204,7 @@ gh_stub probe ask 'gh api -X PATCH repos/o/r/pulls/12 --input b-esc.json' "$root
 reason_is "an escaped base key is a retarget" "$base_pat" 'gh api -X PATCH repos/o/r/pulls/12 --input b-esc.json' "$root/sandbox"
 gh_stub probe ask 'gh api -X PATCH repos/o/r/pulls/12 --input b-esc2.json' "$root/sandbox"
 gh_stub probe ask 'gh api -X PATCH repos/o/r/pulls/12 --input b-broken.json' "$root/sandbox"
-reason_is "a body that is not JSON is a retarget" "*not JSON*armed auto-merge*" 'gh api -X PATCH repos/o/r/pulls/12 --input b-broken.json' "$root/sandbox"
+reason_is "a body that is not JSON is a retarget" "*not JSON*cannot be ruled out*" 'gh api -X PATCH repos/o/r/pulls/12 --input b-broken.json' "$root/sandbox"
 gh_stub probe ask 'gh api -X PATCH repos/o/r/pulls/12 --input b-form.txt' "$root/sandbox"
 gh_stub probe ask 'gh api -X PATCH repos/o/r/pulls/12 --input=b-esc.json' "$root/sandbox"
 gh_stub probe allow 'gh api -X PATCH repos/o/r/pulls/12 --input b-title.json' "$root/sandbox"
@@ -1193,6 +1215,55 @@ gh_stub probe allow 'gh pr edit 12 --add-label bug'
 gh_stub probe allow 'gh api -X PATCH repos/o/r/pulls/12 -f title=x'
 gh_stub probe allow 'gh api repos/o/r/pulls/12'
 gh_stub probe allow 'gh api graphql -f query="mutation { updatePullRequest(input: {pullRequestId: \"x\", title: \"t\"}) { clientMutationId } }"'
+echo "-- the same checkpoints however gh is given the fields, the body or the path"
+printf '{"b\\u0061se": "release"}' >"$root/sandbox/b-esc.json"
+printf '{"query": "mutation { \\u006dergePullRequest(input: {pullRequestId: \\"x\\"}) { clientMutationId } }"}' >"$root/sandbox/q-merge-esc.json"
+printf '{"query": "mutation { updatePullRequest(input: {pullRequestId: \\"x\\", \\u0062aseRefName: \\"release\\"}) { clientMutationId } }"}' >"$root/sandbox/q-base-esc.json"
+printf '{"query": "query { viewer { login } }"}' >"$root/sandbox/q-read.json"
+printf '{"state": "clos\\u0065d"}' >"$root/sandbox/st-esc.json"
+printf '{"event": "\\u0041PPROVE"}' >"$root/sandbox/ev-esc.json"
+printf 'not json' >"$root/sandbox/not.json"
+printf '{"query": "mutation { delet\\u0065Ref(input: {refId: \\"x\\"}) { clientMutationId } }"}' >"$root/sandbox/q-delete-esc.json"
+for c in 'gh api -X PATCH repos/o/r/pulls/12 -fbase=release' 'gh api -X PATCH repos/o/r/pulls/12 -Fbase=release' \
+         'gh api -X PATCH repos/o/r/pulls/12 -f=base=release' 'gh api -X PATCH repos/o/r/pulls/12 -ifbase=release' \
+         'gh api repos/o/r/pulls/12 -fbase=release' 'gh api -XPATCH repos/o/r/pulls/12 -fbase=release' \
+         'gh api -X PATCH repos/o/r/pulls/12 --field=base=release' 'gh api -X PATCH repos/o/r/pulls/12 --raw-field base=release' \
+         'gh api graphql -fquery="mutation { updatePullRequest(input: {pullRequestId: \"x\", baseRefName: \"release\"}) { clientMutationId } }"' \
+         'gh api graphql -Fquery="mutation { updatePullRequest(input: {pullRequestId: \"x\", baseRefName: \"release\"}) { clientMutationId } }"' \
+         'gh api graphql -fquery="mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }"' \
+         'gh api graphql -fquery="mutation { enablePullRequestAutoMerge(input: {pullRequestId: \"x\"}) { clientMutationId } }"' \
+         'gh api graphql -fquery="mutation { closePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }"' \
+         'gh api -X PUT repos/o/r/pulls/12/merge -fmerge_method=squash' 'gh api -X PATCH repos/o/r/pulls/12 -fstate=closed' \
+         'gh api repos/o/r/pulls/12/reviews -fevent=APPROVE' 'gh api repos/o/r/releases -ftag_name=v1.0.0'; do
+  gh_stub probe ask "$c"
+done
+gh_stub probe deny 'gh api graphql -fquery="mutation { deleteRef(input: {refId: \"x\"}) { clientMutationId } }"'
+for c in 'gh api -X PATCH repos/o/r/pulls/12 --input b-esc.json' 'gh api -X PATCH repos/o/r/pulls/12 --input=b-esc.json' \
+         'gh api graphql --input q-merge-esc.json' 'gh api graphql --input=q-merge-esc.json' 'gh api graphql --input q-base-esc.json' \
+         'gh api -X PATCH repos/o/r/pulls/12 --input st-esc.json' 'gh api repos/o/r/pulls/12/reviews --input ev-esc.json' \
+         'gh api graphql --input not.json' 'gh api -X PATCH repos/o/r/pulls/12 --input not.json' 'gh api -X PUT repos/o/r/pulls/12/merge --input not.json' \
+         'gh api -X PATCH repos/o/r/issues/12 --input not.json' \
+         "echo '{\"b\\u0061se\": \"release\"}' | gh api -X PATCH repos/o/r/pulls/12 --input -" \
+         "echo '{\"query\": \"mutation { \\u006dergePullRequest(input: {pullRequestId: 1}) { clientMutationId } }\"}' | gh api graphql --input -" \
+         'cat q.json | gh api graphql --input -' 'curl -s https://example.invalid/b | gh api -X PATCH repos/o/r/pulls/12 --input -'; do
+  gh_stub probe ask "$c" "$root/sandbox"
+done
+reason_is "an escaped base key in a body: the reason names the risk" "$base_pat" 'gh api -X PATCH repos/o/r/pulls/12 --input b-esc.json' "$root/sandbox"
+reason_is "a body that is not JSON: the reason says it cannot be read" "*not JSON*cannot be ruled out*" 'gh api graphql --input not.json' "$root/sandbox"
+for c in 'gh api -X PUT repos/o/r/pulls/%31%32/merge' 'gh api -X PATCH repos/o/r/pulls/%31%32 -fbase=release' 'gh api -X PATCH repos/o/r/pulls/%31%32 -fstate=closed' \
+         'gh api -X PATCH repos/o/r/issues/%31%32 -fstate=closed' 'gh api repos/o/r/pulls/%31%32/reviews -fevent=APPROVE' \
+         'gh api -X PUT repos/o/r/pulls/12%2Fmerge' 'gh api repos/o/r/%72eleases -ftag_name=v1.0.0' 'gh api -X PATCH repos/%6f/r/branches/main/%70rotection -fenforce_admins=true'; do
+  gh_stub probe ask "$c" "$root/sandbox"
+done
+gh_stub probe deny 'gh api -X DELETE repos/o/r/git/refs/heads/%78'
+gh_stub probe deny 'gh api graphql --input q-delete-esc.json' "$root/sandbox"
+gh_stub probe allow 'gh api -X PATCH repos/o/r/pulls/12 -ftitle=x'
+gh_stub probe allow 'gh api -X PATCH repos/o/r/pulls/%31%32 -ftitle=x'
+gh_stub probe allow 'gh api repos/o/r/pulls/%31%32'
+gh_stub probe allow 'gh api graphql -fquery="query { viewer { login } }"'
+gh_stub probe allow 'gh api graphql --input q-read.json' "$root/sandbox"
+gh_stub probe allow 'gh api -H "Accept: application/vnd.github+json" repos/o/r/pulls/12'
+gh_stub probe allow 'gh api -X POST repos/o/r/issues/12/comments -fbody=thanks'
 echo "-- every armed pull request in a compound is refused with it"
 reset_stub
 gh_stub probe ask "gh pr merge 12 --auto -R $R && gh pr merge 13 --auto -R $R"

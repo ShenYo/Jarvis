@@ -112,11 +112,14 @@ A direct merge, `--admin`, `--delete-branch` and the GraphQL merge mutations
 stay a person's too.
 
 Retargeting a pull request (`gh pr edit --base`/`-B`, a `gh api` write to
-`pulls/{n}` with a `base` field, including an `--input` JSON body whose decoded keys
-contain `base` or that is not JSON at all, or the GraphQL `updatePullRequest` with
-`baseRefName`) is a merge checkpoint as well: GitHub keeps auto-merge enabled for
+`pulls/{n}` with a `base` field, or the GraphQL `updatePullRequest` with `baseRefName`) is a merge checkpoint as well: GitHub keeps auto-merge enabled for
 a writer, so it would follow the pull request to a branch whose rules the guard
-never checked.
+never checked. The same holds however `gh` is given the request: a short option with
+its value attached (`-fbase=dev`, `-fquery=…`), an `--input` body (read as JSON and
+decoded, so `"b\u0061se"` and `\u006dergePullRequest` count; a body that is not JSON, or
+cannot be read, is a checkpoint on `graphql` and on `pulls/{n}` and `issues/{n}`
+writes), or a percent-encoded path (`pulls/%31%32` is `pulls/12`). That applies to the
+API merge, close, approve and release checkpoints as well.
 
 The owner applies these settings, from their own terminal with their own login,
 not from an agent session:

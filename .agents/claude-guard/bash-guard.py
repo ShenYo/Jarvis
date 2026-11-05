@@ -1513,7 +1513,7 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
     method = None
     fields = []
     unread = []
-    inputs = []     # the --input bodies, which are the request's JSON as sent
+    inputs = []     # (slot in fields, text) of each --input body
     k = 0
     while k < len(args):
         a = args[k]
@@ -1521,15 +1521,29 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
         if a in ("-X", "--method"):
             method = nxt
             k += 1
-        elif a.startswith("-X") and len(a) > 2:
-            method = a[2:]
         elif a.startswith("--method="):
             method = a.split("=", 1)[1]
-        elif a in ("-f", "-F", "--field", "--raw-field"):
+        elif a in ("--field", "--raw-field"):
             fields.append(nxt)
             k += 1
         elif a.startswith(("--field=", "--raw-field=")):
             fields.append(a.split("=", 1)[1])
+        elif a.startswith("-") and not a.startswith("--") and len(a) > 1:
+            # Short options, which gh takes attached (-fbase=dev, -f=base=dev), alone (-f base=dev)
+            # or in a cluster (-if base=dev): the first one that takes a value ends the cluster.
+            for j in range(1, len(a)):
+                if a[j] not in "XfFHqtp":
+                    continue
+                value = a[j + 1:]
+                if value.startswith("="):
+                    value = value[1:]
+                elif not value:
+                    value, k = nxt, k + 1
+                if a[j] == "X":
+                    method = value
+                elif a[j] in "fF":
+                    fields.append(value)
+                break
         elif a == "--input" or a.startswith("--input="):
             path = nxt if a == "--input" else a.split("=", 1)[1]
             k += 1 if a == "--input" else 0
@@ -1537,8 +1551,16 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
             if body is None or (path == "-" and not stdin):
                 unread.append(path)
             fields.append(body or "")
-            inputs.append(body or "")
+            inputs.append((len(fields) - 1, body or ""))
         k += 1
+    # An --input body is the request's JSON as sent, and GitHub decodes it: "b\u0061se" is base. So
+    # the regexes below see the decoded text; a body that is not JSON cannot be read at all.
+    not_json = False
+    for slot, text in inputs:
+        try:
+            fields[slot] = json.dumps(json.loads(text), ensure_ascii=False)
+        except Exception:
+            not_json = True
     for k, f in enumerate(fields):
         name, eq, value = f.partition("=")
         if eq and value.startswith("@"):
@@ -1548,7 +1570,7 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
             fields[k] = name + "=" + (body or "")
     method = (method or ("POST" if fields else "GET")).upper()
     endpoint = o.pos[1] if len(o.pos) > 1 else ""
-    endpoint = endpoint.lstrip("/").split("?")[0]
+    endpoint = urllib.parse.unquote(endpoint.lstrip("/").split("?")[0])   # pulls/%31%32 is pulls/12
     body = "\n".join(fields)
     # A GraphQL query is a POST but reads; only a mutation (or a body that
     # could not be read) writes.
@@ -1560,6 +1582,8 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
     if unread and (endpoint == "graphql" or method != "GET"):
         res.check("the request body (%s) could not be read, so it was not checked"
                   % ", ".join(unread))
+    if not_json and (endpoint == "graphql" or method != "GET") and re.search(r"^graphql$|(pulls|issues)/\d+(/|$)", endpoint):
+        res.check("the request body is not JSON, so a merge, a close or a change of base in it cannot be ruled out")
     if endpoint == "graphql":
         if GRAPHQL_DENY.search(body):
             res.no("the GraphQL mutation deletes a ref, repository or protection rule")
@@ -1576,20 +1600,12 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
         res.check("the API call merges a pull request")
     if re.search(r"pulls/\d+/reviews", endpoint) and "APPROVE" in body.upper():
         res.check("the API call approves a pull request")
-    if re.search(r"(pulls|issues)/\d+$", endpoint) and re.search(r"state=(closed|open)", body):
+    if re.search(r"(pulls|issues)/\d+$", endpoint) and (re.search(r"state=(closed|open)", body)
+                                                          or re.search(r'"state"\s*:\s*"(closed|open)"', body)):
         res.check("the API call closes or reopens a pull request")
     if re.search(r"pulls/\d+$", endpoint):
         if re.search(r"(^|\n)base=", body) or re.search(r'"base"\s*:', body):
             res.check(BASE_CHANGE % "the API call to a pull request with a base field")
-        for text in inputs:
-            # GitHub decodes the JSON, so "b\u0061se" is base; a body that is not JSON cannot be read here.
-            try:
-                decoded = json.loads(text)
-            except Exception:
-                res.check(BASE_CHANGE % "the API call to a pull request with a body that is not JSON")
-                continue
-            if isinstance(decoded, dict) and "base" in decoded:
-                res.check(BASE_CHANGE % "the API call to a pull request with a base field")
     if re.search(r"git/refs/", endpoint) and re.search(r"force=true", body):
         res.no("the API call force-updates a ref")
     if re.search(r"git/refs/heads/(main|master)$", endpoint):

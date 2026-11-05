@@ -53,11 +53,15 @@ A MINOR release: the guard now lets an agent arm auto-merge where GitHub require
   which is the case today on Jarvis (zero required approvals) and on a repository with no ruleset.
   The agent-identity switch still applies first.
 - **Retargeting a pull request is a merge checkpoint.** `gh pr edit --base`/`-B`, a `gh api`
-  write to `pulls/{n}` with a `base` field (an `--input` JSON body is decoded, so `"b\u0061se"`
-  counts, and a body that is not JSON counts too), and the GraphQL `updatePullRequest` with
+  write to `pulls/{n}` with a `base` field, and the GraphQL `updatePullRequest` with
   `baseRefName` now ask (deny in Codex): GitHub keeps auto-merge enabled for a writer, so an armed
-  auto-merge would follow the pull request to a branch whose rules were never checked. Every other
-  answer is byte-identical to before.
+  auto-merge would follow the pull request to a branch whose rules were never checked. The `gh api`
+  checks (these and the existing merge, close, approve and release ones) now read the request the way
+  `gh` does: short options with an attached value (`-fbase=dev`, `-fquery=…`, which also closes an
+  old gap for `mergePullRequest`), `--input` bodies decoded as JSON (`"b\u0061se"` counts; a body
+  that is not JSON asks on `graphql` and on `pulls/{n}` and `issues/{n}` writes) and percent-encoded
+  paths (`pulls/%31%32`). A JSON `{"state": "closed"}` body on a pull request now asks, as the form
+  field did. Every other answer is byte-identical to before.
 - **`.github/CODEOWNERS`** with `* @ShenYo`, so that the code-owner review the rule requires is
   the owner's, not that of an App that approves.
 - **`docs/git.md`** splits the merge row: merging, closing and reopening stay a person's;
