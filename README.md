@@ -58,7 +58,8 @@ In place:
   (documents in English with a Chinese summary, Git in a repository without
   its own rules).
 - **Dispatch docs.** [`docs/dispatch/`](./docs/dispatch/policy.md) holds the
-  policy, the prompt templates and the Codex adapter. Codex runs
+  policy, the prompt templates, the Codex adapter and the
+  [review loop](./docs/dispatch/review-loop.md). Codex runs
   `gpt-6.1-sol` as Commander and `gpt-6-luna` as Implementer and Worker,
   verified 2026-10-25 on codex-cli 0.164.0.
 - **Claude Code guard.** The [guard](./docs/guard.md#claude-code-guard) refuses the

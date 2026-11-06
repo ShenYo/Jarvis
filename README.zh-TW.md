@@ -53,7 +53,7 @@ runner 或別人的筆電上沒有這個 repository 的副本。因此專案所�
   驗證、把決定寫在它該在的地方）與 *Contracts*（英文文件加中文摘要、沒有自己規則的
   repository 的 Git 規則）。
 - **派工文件。** [`docs/dispatch/`](./docs/dispatch/policy.md) 收有 policy、prompt
-  templates 與 Codex adapter。Codex 以 `gpt-6.1-sol` 擔任 Commander，以 `gpt-6-luna`
+  templates、Codex adapter 與 [review loop](./docs/dispatch/review-loop.md)。Codex 以 `gpt-6.1-sol` 擔任 Commander，以 `gpt-6-luna`
   擔任 Implementer 與 Worker，已於 2026-10-25 在 codex-cli 0.164.0 上驗證。
 - **Claude Code guard。** [guard](./docs/guard.md#claude-code-guard) 拒絕永久禁止的 Git 與檔案操作，並在
   人工審核的關卡詢問，包括可能帶出 tag 的 push 之前。

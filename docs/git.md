@@ -44,7 +44,7 @@ document.
 | Merging, closing or reopening a pull request | A person's. They name the PR in their own message. |
 | Arming auto-merge (`gh pr merge <n> --auto`) | The agent's, but only where the base branch's rules require the code owner's approval: at least one approval, code-owner review, stale approvals dismissed on push, and last-push approval. The guard checks this at the moment of use, for a single `gh pr merge <n> --auto -R owner/repo` command ([Arming auto-merge](#arming-auto-merge)). The owner's Approve still decides the merge. |
 | Pushing directly to the default branch | A person's. `pre-push` refuses it. |
-| Approving a pull request that contains the agent's own work | Nobody's. Only an independent reviewer approves. |
+| Approving a pull request that contains the agent's own work | Nobody's. Only the owner approves, as the code owner; a reviewer agent comments ([review loop](./dispatch/review-loop.md)). |
 | Changing branch protection, rulesets or repository settings | A person's |
 | Pushing a tag; publishing, editing or uploading to a GitHub Release | A person's. They name the tag and the commit in their own message. |
 | Force push, `reset --hard`, rewriting pushed history | **Never the agent's**, even when asked |
