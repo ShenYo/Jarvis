@@ -90,6 +90,9 @@ ruleset settings in `docs/git.md`, the guard simply keeps refusing `--auto`.
   disagreements. Nothing is posted as the owner (`gh api user` is checked first), the reviewer's
   report is posted verbatim, and auto-merge is armed only after the Ready comment and only where
   the repository's Git rules allow it. The personal instructions point at it. #66 was its first run.
+  Agents resolve each review thread once it is settled, and leave a thread open only for the
+  owner's decision, mentioning the owner in it; before the Ready comment every other thread is
+  resolved, re-listed after the last push.
 
 ## v1.2.2 (2026-11-03)
 

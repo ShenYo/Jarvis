@@ -104,17 +104,29 @@ Push the fixes, then run the next round, giving the reviewer what
 Findings from other review bots, such as Sourcery, go through the same
 treatment. Answer each finding in a review thread, then resolve the thread.
 
+Resolve a thread yourself once the agents have settled it, whether it was fixed
+or declined with a reason. Leave a thread open only when it needs the owner's
+decision, and then mention the owner in it (`@<owner>`) and say what has to be
+decided. The owner reads open threads as "this needs me".
+
 ## How it ends
 
 Consensus is a round with no blocking or should-fix finding left open. Each
-remaining nit is either fixed or explicitly declined. The coding agent then
-posts:
+remaining nit is either fixed or explicitly declined.
+
+Before posting, list the PR's review threads again, after your last push, since
+a bot may have commented since:
+`gh api graphql -f query='query{repository(owner:"<o>",name:"<r>"){pullRequest(number:<n>){reviewThreads(first:100){nodes{isResolved}}}}}'`.
+Every thread must be resolved, except the ones left open for the owner. A ruleset
+that requires conversation resolution blocks the merge, including an armed
+auto-merge, until they are. The coding agent then posts:
 
 ```markdown
 **Ready for the owner's final check**
 
 - Rounds: <n>. Fixed: <list>. Declined, with the reasons in the threads: <list>.
 - Open disagreements: none | <list>.
+- Threads left open for the owner: none | <links>.
 - Not verified, and why: <list>.
 ```
 
