@@ -120,11 +120,12 @@ Before posting, list the PR's review threads again, after your last push, since
 a bot may have commented in the meantime:
 
 ```sh
-gh api graphql -f query='query{repository(owner:"<owner>",name:"<repo>"){pullRequest(number:<pr>){reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved path comments(first:1){nodes{author{login} url body}}}}}}}'
+gh api graphql -f query='query{repository(owner:"<owner>",name:"<repo>"){pullRequest(number:<pr>){reviewThreads(first:100){pageInfo{hasNextPage endCursor} nodes{isResolved path comments(first:1){nodes{author{login} url body}}}}}}}'
 ```
 
 Every thread must be resolved except the owner's own and those left open for
-the owner's decision. If `hasNextPage` is true, page through the rest. A ruleset
+the owner's decision. If `hasNextPage` is true, repeat it with
+`reviewThreads(first:100,after:"<endCursor>")` until it is false. A ruleset
 that requires conversation resolution blocks the merge, and an armed auto-merge
 with it, until every thread is resolved. The coding agent then posts:
 
@@ -132,8 +133,9 @@ with it, until every thread is resolved. The coding agent then posts:
 **Ready for the owner's final check**
 
 - Rounds: <n>. Fixed: <list>. Declined, with the reasons in the threads: <list>.
-- Open disagreements, each also a thread left open below: none | <list>.
-- Threads left open for the owner: none | <comment urls>.
+- Open disagreements: none | <list>. A disagreement from a review thread is also
+  listed below; one from the reviewer's round comment links that comment.
+- Threads left open for the owner, the owner's own included: none | <comment urls>.
 - Not verified, and why: <list>.
 ```
 
