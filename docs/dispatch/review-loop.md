@@ -102,19 +102,40 @@ Push the fixes, then run the next round, giving the reviewer what
 [Who reviews](#who-reviews) says.
 
 Findings from other review bots, such as Sourcery, go through the same
-treatment. Answer each finding in a review thread, then resolve the thread.
+treatment. Answer each finding in a review thread.
+
+Then resolve the thread yourself, whether it was fixed or declined with a
+reason. That covers threads opened by a reviewer agent or a bot. A thread the
+owner opened is the owner's to resolve: answer it, and leave it. Leave any other
+thread open only when it needs the owner's decision, and then mention the
+owner in it (`@<owner>`) and say what has to be decided. The owner reads an open
+thread as "this needs me".
 
 ## How it ends
 
 Consensus is a round with no blocking or should-fix finding left open. Each
-remaining nit is either fixed or explicitly declined. The coding agent then
-posts:
+remaining nit is either fixed or explicitly declined.
+
+Before posting, list the PR's review threads again, after your last push, since
+a bot may have commented in the meantime:
+
+```sh
+gh api graphql -f query='query{repository(owner:"<owner>",name:"<repo>"){pullRequest(number:<pr>){reviewThreads(first:100){pageInfo{hasNextPage endCursor} nodes{isResolved path comments(first:1){nodes{author{login} url body}}}}}}}'
+```
+
+Every thread must be resolved except the owner's own and those left open for
+the owner's decision. If `hasNextPage` is true, repeat it with
+`reviewThreads(first:100,after:"<endCursor>")` until it is false. A ruleset
+that requires conversation resolution blocks the merge, and an armed auto-merge
+with it, until every thread is resolved. The coding agent then posts:
 
 ```markdown
 **Ready for the owner's final check**
 
 - Rounds: <n>. Fixed: <list>. Declined, with the reasons in the threads: <list>.
-- Open disagreements: none | <list>.
+- Open disagreements: none | <list>. A disagreement from a review thread is also
+  listed below; one from the reviewer's round comment links that comment.
+- Threads left open for the owner, the owner's own included: none | <comment urls>.
 - Not verified, and why: <list>.
 ```
 
@@ -124,6 +145,8 @@ auto-merge with `gh pr merge <n> --auto --squash -R <owner/repo>`. That is only
 where the base branch requires the code owner's approval; the guard verifies
 it. In a Friday consumer, whose installed safety boundary keeps enabling
 auto-merge a person's checkpoint, it never does.
+It arms it even when a thread is left open for the owner: the merge then waits
+until the owner resolves that thread, which the owner does when deciding.
 Finally the coding agent tells the owner that the PR is ready for their review.
 
 **If round 3 still leaves a blocking or should-fix finding open,** stop the loop.
