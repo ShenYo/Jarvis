@@ -138,6 +138,29 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py=/usr/bin/python3; [ -x \"$py\" ] || py=python3; exec \"$py\" -I \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/jarvis-session-notes.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py=/usr/bin/python3; [ -x \"$py\" ] || py=python3; exec \"$py\" -I \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/jarvis-session-notes.py\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

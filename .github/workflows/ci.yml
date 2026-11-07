@@ -31,6 +31,8 @@ jobs:
           exit "$fail"
       - name: The guard's apply script keeps the person's rules
         run: bash tests/claude-guard.sh
+      - name: Session-notes hook
+        run: bash tests/session-notes.sh
       - name: The guard hook refuses every probed spelling and passes ordinary work
         run: bash tests/bash-guard.sh
       - name: The Codex guard installs beside other hooks and refuses at the checkpoints

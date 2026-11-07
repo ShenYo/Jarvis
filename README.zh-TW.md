@@ -67,6 +67,10 @@ runner 或別人的筆電上沒有這個 repository 的副本。因此專案所�
 - **Agent 身分。** Claude Code 與 Codex 以各自設定在每台機器上的 machine account 在
   GitHub 上操作，guard 也能拒絕身分沒有套用的 runtime（v1.2.0，
   [#13](https://github.com/ShenYo/Jarvis/issues/13)）。見 [Agent identity](./docs/agent-identity.md)。
+- **Session notes。** 壓縮之前，
+  [`session-notes`](./.agents/skills/session-notes/SKILL.md) Skill 會把 session 的工作狀態
+  存進每個 session 一個的檔案，兩個 Claude Code hook 則告訴 agent 什麼時候更新、什麼時候讀回來
+  （[Session notes](./docs/session-notes.md)）。
 
 待辦：
 
@@ -79,9 +83,10 @@ runner 或別人的筆電上沒有這個 repository 的副本。因此專案所�
 
 ## 目前盤點
 
-這個 checkout 有 35 個 canonical `SKILL.md` 檔案、35 個 Claude bridge links、35 個
-Codex bridge links，以及 35 筆 lock entries。每個 canonical Skill 都是 CLI-managed，
-在兩個工具中都可被存取。
+這個 checkout 有 36 個 canonical `SKILL.md` 檔案、36 個 Claude bridge links、36 個
+Codex bridge links，以及 35 筆 lock entries。除了在這裡撰寫的 `session-notes`，每個
+canonical Skill 都是 CLI-managed，而且全部在兩個工具中都可被存取。下面最後一個指令
+只會印出 `session-notes`。
 
 `skills` CLI 會寫入 canonical 副本與 lock entry，但不會建立 bridge，因此它安裝的
 Skill 在 [`sync-personal-skills.sh`](./sync-personal-skills.sh) 執行之前，對 Claude
@@ -131,6 +136,7 @@ Codex。接下來是 guard 與 agent identity；[在新機器上設定](./docs/s
 | [Git rules](./docs/git.md) | 要在這裡執行 Git 操作之前。 |
 | [History](./docs/history.md) | 想看某條規則背後的來歷與量測。 |
 | [Dispatch policy](./docs/dispatch/policy.md) | 要把工作交給另一個 model。 |
+| [Session notes](./docs/session-notes.md) | 想知道什麼時候該壓縮 session，或 session-notes Skill 和它的 hook 做什麼。 |
 | [Changelog](./CHANGELOG.md) | 想知道某個 release 改了什麼，以及在這台機器上要做什麼。 |
 
 設定指南有[英文](./docs/setup-new-machine.md)與繁體中文兩版；其餘文件只有英文，開頭附中文摘要。
