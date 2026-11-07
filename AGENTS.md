@@ -19,11 +19,13 @@ must build, test, and pass CI on a machine that has no copy of it.
 
 ## Most of this repository is not ours to edit
 
-Every Skill under `.agents/skills/` is installed by a CLI from an upstream
-repository, recorded in
+Every Skill under `.agents/skills/` but one is installed by a CLI from an
+upstream repository, recorded in
 [`.agents/.skill-lock.json`](./.agents/.skill-lock.json) with the upstream tree
 hash. As of 2026-10-24 every one of them is byte-identical to the tree recorded
-at install time; keep it that way.
+at install time; keep it that way. The exception, `session-notes`, is written
+here, has no lock entry, and is named in
+[`scripts/check-skill-lock.sh`](./scripts/check-skill-lock.sh).
 
 - **Do not patch a vendored Skill**, not to fix a bug, not to add a project
   rule, not to adjust a prompt. The edit is invisible to the CLI, survives

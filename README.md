@@ -77,6 +77,11 @@ In place:
   of their own, set up per machine, and the guard can refuse a runtime whose
   identity is not applied (v1.2.0, [#13](https://github.com/ShenYo/Jarvis/issues/13)).
   See [Agent identity](./docs/agent-identity.md).
+- **Session notes.** Before a compaction, the
+  [`session-notes`](./.agents/skills/session-notes/SKILL.md) Skill saves the
+  session's working state to one file per session, and two Claude Code hooks
+  tell the agent when to update it and when to read it back
+  ([Session notes](./docs/session-notes.md)).
 
 Pending:
 
@@ -89,9 +94,11 @@ are in [`docs/history.md`](./docs/history.md).
 
 ## Current inventory
 
-This checkout has 35 canonical `SKILL.md` files, 35 Claude bridge links, 35
-Codex bridge links, and 35 lock entries. Every canonical Skill is CLI-managed
-and reachable from both tools.
+This checkout has 36 canonical `SKILL.md` files, 36 Claude bridge links, 36
+Codex bridge links, and 35 lock entries. Every canonical Skill but
+`session-notes`, which is written here, is CLI-managed, and all are reachable
+from both tools. The last command below prints `session-notes` and nothing
+else.
 
 The `skills` CLI writes the canonical copy and the lock entry but does not
 create the bridge, so a Skill it installs stays invisible to Claude Code and
@@ -144,6 +151,7 @@ step in order, with a check after each.
 | [Git rules](./docs/git.md) | You are about to run a Git operation here. |
 | [History](./docs/history.md) | You want the story and the measurements behind a rule. |
 | [Dispatch policy](./docs/dispatch/policy.md) | You are handing work to another model. |
+| [Session notes](./docs/session-notes.md) | You want to know when to compact a session, or what the session-notes Skill and its hooks do. |
 | [Changelog](./CHANGELOG.md) | You want to know what changed in a release and what to do on this machine. |
 
 The setup guide comes in English and in [Traditional Chinese](./docs/setup-new-machine.zh-TW.md);

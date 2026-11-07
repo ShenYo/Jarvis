@@ -23,7 +23,7 @@ How an entry is written:
 
 ## Unreleased
 
-A MINOR release: the guard now lets an agent arm auto-merge where GitHub requires the owner's approval (#56, step 1).
+A MINOR release: the guard now lets an agent arm auto-merge where GitHub requires the owner's approval (#56, step 1), and session notes keep a compaction from losing the working state.
 
 - **`gh pr merge <n> --auto` where the owner's approval is enforced.** The guard no longer
   treats `gh pr merge <n> --auto -R owner/repo` (or a pull request URL; with at most one of
@@ -94,6 +94,20 @@ ruleset settings in `docs/git.md`, the guard simply keeps refusing `--auto`.
   own threads, and a thread that needs the owner's decision stays open with a mention. Before
   the Ready comment every other thread is resolved, re-listed after the last push; auto-merge is
   armed even with a thread left for the owner, and waits until the owner resolves it.
+- **Session notes before a compaction (#<PR>).** A new Skill,
+  [`session-notes`](./.agents/skills/session-notes/SKILL.md), the first written here rather than
+  installed by a CLI, saves the session's working state to `docs/temp/session-notes/<session id>.md`
+  in the project, revising the same file on every run. `apply-claude-guard.sh` now also installs
+  `~/.claude/hooks/jarvis-session-notes.py` and registers it for `UserPromptSubmit`, which tells the
+  agent once the context passes 300k tokens to update the notes and suggest `/compact` at the next
+  boundary, and for `SessionStart` after a compaction, which points the agent at the notes. The
+  hook only advises and never blocks. Why compacting at a boundary pays, and the Codex side, are in
+  [Session notes](./docs/session-notes.md). `check-skill-lock.sh` names the Skill, which has no
+  lock entry.
+
+  On this machine: run `~/.Jarvis/sync-personal-skills.sh` to link the Skill, then
+  `bash ~/.Jarvis/scripts/apply-claude-guard.sh` to install the hook, and start a new Claude Code
+  session. Codex needs nothing.
 
 ## v1.2.2 (2026-11-03)
 
