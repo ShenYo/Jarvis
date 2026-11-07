@@ -94,7 +94,7 @@ ruleset settings in `docs/git.md`, the guard simply keeps refusing `--auto`.
   own threads, and a thread that needs the owner's decision stays open with a mention. Before
   the Ready comment every other thread is resolved, re-listed after the last push; auto-merge is
   armed even with a thread left for the owner, and waits until the owner resolves it.
-- **Session notes before a compaction (#<PR>).** A new Skill,
+- **Session notes before a compaction (#69).** A new Skill,
   [`session-notes`](./.agents/skills/session-notes/SKILL.md), the first written here rather than
   installed by a CLI, saves the session's working state to `docs/temp/session-notes/<session id>.md`
   in the project, revising the same file on every run. `apply-claude-guard.sh` now also installs
