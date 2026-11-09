@@ -67,13 +67,17 @@ check "fresh: session-notes hooks keep their 10 s timeout" q '.hooks.UserPromptS
 p="$dir/proj"; mkdir -p "$p/docs/temp/session-notes"; p=$(cd "$p" && pwd -P); git -C "$p" init -q
 printf 'docs/temp/\n' >"$p/.gitignore"; : >"$p/docs/temp/session-notes/s1.md"
 printf '{"type":"assistant","isSidechain":false,"message":{"usage":{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":398998}}}\n' >"$dir/t.jsonl"
+names_notes() { # event, notes path; reads $out
+  jq -e --arg ev "$1" --arg f "$2" \
+    '.hookSpecificOutput.hookEventName == $ev and (.hookSpecificOutput.additionalContext | contains($f))' <<<"$out" >/dev/null
+}
 for ev in UserPromptSubmit SessionStart; do
   cmd=$(jq -r --arg ev "$ev" '.hooks[$ev][-1].hooks[0].command' "$s")
   event=$(jq -nc --arg ev "$ev" --arg c "$p" --arg t "$dir/t.jsonl" \
     '{hook_event_name:$ev,session_id:"s1",cwd:$c,transcript_path:$t,source:"compact"}')
   out=$(echo "$event" | CLAUDE_CONFIG_DIR="$dir" CLAUDE_PROJECT_DIR="$p" bash -c "$cmd" 2>/dev/null); rc=$?
-  check "installed $ev command runs the hook" jq -e --arg ev "$ev" --arg f "$p/docs/temp/session-notes/s1.md" \
-    '.hookSpecificOutput.hookEventName == $ev and (.hookSpecificOutput.additionalContext | contains($f))' <<<"$out"
+  check "installed $ev command exits 0" test "$rc" = 0
+  check "installed $ev command runs the hook" names_notes "$ev" "$p/docs/temp/session-notes/s1.md"
 done
 check "fresh: record lists the guard's deny rules as its own" q_file "(.owned[\"permissions.deny\"] | sort) == ($(jq -c '.permissions.deny | sort' "$guard"))" "$r"
 
