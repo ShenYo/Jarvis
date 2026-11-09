@@ -249,7 +249,7 @@ bash ~/.Jarvis/scripts/apply-agent-identity.sh --require
 | --- | --- |
 | `~/.Jarvis/sync-personal-skills.sh` | 最後一行以 `checks passed:` 開頭 |
 | `git -C ~/.Jarvis config --get core.hooksPath` | `.githooks` |
-| `bash ~/.Jarvis/scripts/apply-claude-guard.sh --check` | `already carries the guard` |
+| `bash ~/.Jarvis/scripts/apply-claude-guard.sh --check` | `already carry the guard` |
 | `bash ~/.Jarvis/scripts/apply-codex-guard.sh --check` | `already carry the guard`，接著是 `trust: OK - Codex trusts the Jarvis guard entry` |
 | `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check` | `state: applied`、`Next: nothing — the identity is already applied; a new Claude Code session uses it`、`all checks passed` |
 | `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex` | `state: applied`、`Next: nothing — the identity is already applied; a new Codex session uses it`、`all checks passed` |

@@ -24,6 +24,7 @@ Code session on this machine runs under, whichever repository it starts in:
 | `permissions.ask` | Prompts for the human-review checkpoints: merging, closing or reopening a pull request, approving one, `gh repo edit`, and pushing to `main` or `master`. |
 | `autoMode.hard_deny`, `soft_deny` | The same rules for the auto-mode classifier, in prose, so spellings a pattern cannot see (`bash -c`, `git -C`, a script) are judged too. Both keep the built-in rules through `"$defaults"`. |
 | `hooks.PreToolUse` | Runs [`bash-guard.py`](../.agents/claude-guard/bash-guard.py) on every Bash call. It parses the command rather than matching its text, so it sees through `git -C <dir>`, `-c` options, a path such as `/usr/bin/git`, `bash -c` and `eval`, `$(...)`, a heredoc fed to a shell, `env`, `xargs` and `timeout`, flag clusters such as `-an` and `-vrf`, and git aliases. It denies the same operations and asks at the same checkpoints, including a bare `git push` from the default branch, and it also asks before a push that may carry a tag (`--tags`, `--follow-tags`, `push.followTags`, or a refspec naming a tag), and before publishing a release (`gh release create`, `edit` or `upload`, or the same through `gh api`), because a release tag and a release are checkpoints too. It fails closed: if it cannot start, the Bash call is blocked. |
+| `hooks.UserPromptSubmit`, `hooks.SessionStart` | Run [`session-notes.py`](../.agents/claude-guard/session-notes.py), which is not a guard: it tells the agent when to save its [session notes](./session-notes.md) and, after a compaction, where they are. It only advises, and never blocks. |
 | `disableBypassPermissionsMode` | Turns bypass mode off; in bypass mode no ask rule would prompt. |
 
 Apply it, or check whether the settings already carry it:
@@ -33,8 +34,9 @@ Apply it, or check whether the settings already carry it:
 ~/.Jarvis/scripts/apply-claude-guard.sh --check  # exit 1 when it would change something
 ```
 
-The script copies the rules into the settings file, and the hook to
-`~/.claude/hooks/claude-guard.py`, rather than linking either here, so a
+The script copies the rules into the settings file, and the hooks to
+`~/.claude/hooks/` (`claude-guard.py` and `jarvis-session-notes.py`), rather
+than linking them here, so a
 session keeps its guard on a machine where this repository is missing. It
 keeps every rule the person wrote, including one that equals a guard rule,
 and records in `~/.claude/claude-guard.applied.json` only the entries it

@@ -2,11 +2,12 @@
 # Merge the personal Claude Code guard into ~/.claude/settings.json.
 #
 # The guard is .agents/claude-guard/guard.json: permission deny and ask rules,
-# auto-mode classifier rules, a PreToolUse hook entry, and settings it sets or
-# removes. The hook itself, bash-guard.py, is installed as
-# ~/.claude/hooks/claude-guard.py. Both are copied, never linked, so a Claude
-# session keeps its guard on a machine where this repository is absent or
-# broken.
+# auto-mode classifier rules, hook entries, and settings it sets or removes.
+# The hooks themselves are installed under ~/.claude/hooks/: bash-guard.py as
+# claude-guard.py, and session-notes.py, which tells the agent when to save
+# its session notes, as jarvis-session-notes.py. All are copied, never linked,
+# so a Claude session keeps its guard on a machine where this repository is
+# absent or broken.
 #
 # The settings file belongs to the person, not to this script. Rules the
 # person wrote stay, including one that happens to equal a guard rule. The
@@ -38,11 +39,14 @@ guard="$here/.agents/claude-guard/guard.json"
 claude_home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 settings="$claude_home/settings.json"
 record="$claude_home/claude-guard.applied.json"
-hook_src="$here/.agents/claude-guard/bash-guard.py"
-hook_dst="$claude_home/hooks/claude-guard.py"
+# Each hook file in this repository, and where its copy is installed.
+hook_srcs=("$here/.agents/claude-guard/bash-guard.py" "$here/.agents/claude-guard/session-notes.py")
+hook_dsts=("$claude_home/hooks/claude-guard.py" "$claude_home/hooks/jarvis-session-notes.py")
 
 jq -e 'type == "object"' "$guard" >/dev/null 2>&1 || die "$guard is not a JSON object"
-[ -f "$hook_src" ] || die "$hook_src is missing"
+for src in "${hook_srcs[@]}"; do
+  [ -f "$src" ] || die "$src is missing"
+done
 
 # Write through links, to the end of the chain, so a settings file kept by a
 # dotfiles manager stays where that manager put it.
@@ -87,7 +91,8 @@ result=$(jq -n \
   $g[0] as $new |
   def lists: [["permissions","deny"], ["permissions","ask"],
               ["autoMode","hard_deny"], ["autoMode","soft_deny"],
-              ["hooks","PreToolUse"]];
+              ["hooks","PreToolUse"], ["hooks","UserPromptSubmit"],
+              ["hooks","SessionStart"]];
   def has_e($a; $e): ($a | index([$e])) != null;
   def owned_before($p):
     if ($prev | has("owned")) then ($prev.owned[$p | join(".")] // [])
@@ -139,31 +144,36 @@ write_record() { # [content], default the final record
 
 settings_same=0
 [ "$(jq -S . <<<"$current")" = "$(jq -S . <<<"$merged")" ] && settings_same=1
-hook_same=0
-cmp -s "$hook_src" "$hook_dst" && hook_same=1
+stale_hooks=()
+for i in "${!hook_srcs[@]}"; do
+  cmp -s "${hook_srcs[$i]}" "${hook_dsts[$i]}" || stale_hooks+=("$i")
+done
 
 if [ "$check" = 1 ]; then
-  if [ "$settings_same" = 1 ] && [ "$hook_same" = 1 ]; then
-    echo "apply-claude-guard: $settings and $hook_dst already carry the guard"
+  if [ "$settings_same" = 1 ] && [ "${#stale_hooks[@]}" = 0 ]; then
+    echo "apply-claude-guard: $settings and the hooks in $claude_home/hooks already carry the guard"
     exit 0
   fi
   if [ "$settings_same" = 0 ]; then
     echo "apply-claude-guard: $settings differs from the guard:"
     diff <(jq -S . <<<"$current") <(jq -S . <<<"$merged") || true
   fi
-  [ "$hook_same" = 1 ] || echo "apply-claude-guard: $hook_dst differs from $hook_src"
+  for i in ${stale_hooks[@]+"${stale_hooks[@]}"}; do
+    echo "apply-claude-guard: ${hook_dsts[$i]} differs from ${hook_srcs[$i]}"
+  done
   exit 1
 fi
 
-# The hook goes in before the settings that name it: a hook entry whose file
-# is missing blocks every Bash call, because it fails closed.
-if [ "$hook_same" = 0 ]; then
-  mkdir -p "$(dirname "$hook_dst")"
-  tmp=$(mktemp "$hook_dst.XXXXXX")
-  cp "$hook_src" "$tmp"
-  mv "$tmp" "$hook_dst"
-  echo "apply-claude-guard: wrote $hook_dst"
-fi
+# The hooks go in before the settings that name them: a guard hook entry whose
+# file is missing blocks every Bash call, because it fails closed.
+for i in ${stale_hooks[@]+"${stale_hooks[@]}"}; do
+  dst=${hook_dsts[$i]}
+  mkdir -p "$(dirname "$dst")"
+  tmp=$(mktemp "$dst.XXXXXX")
+  cp "${hook_srcs[$i]}" "$tmp"
+  mv "$tmp" "$dst"
+  echo "apply-claude-guard: wrote $dst"
+done
 
 if [ "$settings_same" = 1 ]; then
   echo "apply-claude-guard: $settings already carries the guard"

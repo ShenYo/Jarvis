@@ -31,7 +31,7 @@ alt_guard() {
   local alt="$root/alt-$n"
   mkdir -p "$alt/scripts" "$alt/.agents/claude-guard"
   cp "$apply" "$alt/scripts/"
-  cp "$repo/.agents/claude-guard/bash-guard.py" "$alt/.agents/claude-guard/"
+  cp "$repo/.agents/claude-guard/bash-guard.py" "$repo/.agents/claude-guard/session-notes.py" "$alt/.agents/claude-guard/"
   jq "$1" "$guard" >"$alt/.agents/claude-guard/guard.json"
   echo "$alt/scripts/apply-claude-guard.sh"
 }
@@ -51,6 +51,34 @@ check "fresh: every deny rule present" q "(.permissions.deny | sort) == ($(jq -c
 check "fresh: bypass mode disabled" q '.permissions.disableBypassPermissionsMode == "disable"'
 check "fresh: hook installed" cmp -s "$repo/.agents/claude-guard/bash-guard.py" "$dir/hooks/claude-guard.py"
 check "fresh: hook entry fails closed" q '.hooks.PreToolUse[-1].matcher == "Bash" and .hooks.PreToolUse[-1].hooks[0].onFailure == "block"'
+check "fresh: session-notes hook installed" cmp -s "$repo/.agents/claude-guard/session-notes.py" "$dir/hooks/jarvis-session-notes.py"
+check "fresh: session-notes hook runs on every prompt" q '.hooks.UserPromptSubmit[-1].hooks[0].command | contains("hooks/jarvis-session-notes.py")'
+check "fresh: session-notes hook runs after a compaction" q '.hooks.SessionStart[-1].matcher == "compact" and (.hooks.SessionStart[-1].hooks[0].command | contains("hooks/jarvis-session-notes.py"))'
+# A UserPromptSubmit hook that exits 2 refuses the prompt, so a missing hook
+# file must be a silent no-op, never Python's "can't open file" exit 2.
+for ev in UserPromptSubmit SessionStart; do
+  cmd=$(jq -r --arg ev "$ev" '.hooks[$ev][-1].hooks[0].command' "$s")
+  out=$(echo '{}' | CLAUDE_CONFIG_DIR="$root/no-such-dir" bash -c "$cmd" 2>&1); rc=$?
+  check "missing session-notes hook file: $ev command exits 0 silently" test "$rc:$out" = "0:"
+done
+check "fresh: session-notes hooks keep their 10 s timeout" q '.hooks.UserPromptSubmit[-1].hooks[0].timeout == 10 and .hooks.SessionStart[-1].hooks[0].timeout == 10'
+# With the hook file in place, each installed command runs it: a broken path
+# would otherwise fail open, and the feature would vanish with CI green.
+p="$dir/proj"; mkdir -p "$p/docs/temp/session-notes"; p=$(cd "$p" && pwd -P); git -C "$p" init -q
+printf 'docs/temp/\n' >"$p/.gitignore"; : >"$p/docs/temp/session-notes/s1.md"
+printf '{"type":"assistant","isSidechain":false,"message":{"usage":{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":398998}}}\n' >"$dir/t.jsonl"
+names_notes() { # event, notes path; reads $out
+  jq -e --arg ev "$1" --arg f "$2" \
+    '.hookSpecificOutput.hookEventName == $ev and (.hookSpecificOutput.additionalContext | contains($f))' <<<"$out" >/dev/null
+}
+for ev in UserPromptSubmit SessionStart; do
+  cmd=$(jq -r --arg ev "$ev" '.hooks[$ev][-1].hooks[0].command' "$s")
+  event=$(jq -nc --arg ev "$ev" --arg c "$p" --arg t "$dir/t.jsonl" \
+    '{hook_event_name:$ev,session_id:"s1",cwd:$c,transcript_path:$t,source:"compact"}')
+  out=$(echo "$event" | CLAUDE_CONFIG_DIR="$dir" CLAUDE_PROJECT_DIR="$p" bash -c "$cmd" 2>/dev/null); rc=$?
+  check "installed $ev command exits 0" test "$rc" = 0
+  check "installed $ev command runs the hook" names_notes "$ev" "$p/docs/temp/session-notes/s1.md"
+done
 check "fresh: record lists the guard's deny rules as its own" q_file "(.owned[\"permissions.deny\"] | sort) == ($(jq -c '.permissions.deny | sort' "$guard"))" "$r"
 
 # 2. Existing settings: everything the person wrote survives.
@@ -60,7 +88,8 @@ cat >"$s" <<'EOF'
   "model": "opus",
   "skipDangerousModePermissionPrompt": true,
   "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "true"}]}],
-            "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "other-tool"}]}]},
+            "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "other-tool"}]}],
+            "SessionStart": [{"hooks": [{"type": "command", "command": "other-start"}]}]},
   "permissions": {"defaultMode": "auto", "deny": ["Bash(user-rule *)"], "allow": ["Bash(npm test)"]},
   "autoMode": {"environment": ["Source control: example"]}
 }
@@ -68,6 +97,7 @@ EOF
 run
 check "keep: unrelated keys untouched" q '.model == "opus" and .hooks.Stop[0].hooks[0].command == "true" and .permissions.defaultMode == "auto"'
 check "keep: another tool's PreToolUse hook stays first" q '.hooks.PreToolUse[0].hooks[0].command == "other-tool" and (.hooks.PreToolUse | length) == 2'
+check "keep: another tool's SessionStart hook stays first" q '.hooks.SessionStart[0].hooks[0].command == "other-start" and (.hooks.SessionStart | length) == 2'
 check "keep: person's deny and allow rules stay" q '(.permissions.deny | index("Bash(user-rule *)")) != null and .permissions.allow == ["Bash(npm test)"]'
 check "keep: person's rule stays ahead of the guard's" q '.permissions.deny[0] == "Bash(user-rule *)"'
 check "keep: autoMode environment untouched" q '.autoMode.environment == ["Source control: example"]'
@@ -101,6 +131,11 @@ check "hook drift: --check exit 1" test "$rc" = 1
 run
 check "hook drift: run restores the hook" cmp -s "$repo/.agents/claude-guard/bash-guard.py" "$dir/hooks/claude-guard.py"
 check "hook drift: settings untouched" cmp -s "$s" "$dir/before"
+echo "# edited" >>"$dir/hooks/jarvis-session-notes.py"
+run --check; rc=$?
+check "session-notes hook drift: --check exit 1" test "$rc" = 1
+run
+check "session-notes hook drift: run restores it" cmp -s "$repo/.agents/claude-guard/session-notes.py" "$dir/hooks/jarvis-session-notes.py"
 
 # 4. A rule the previous guard added, and this one no longer has, is retired.
 #    A person's rule that happens to look similar is not.

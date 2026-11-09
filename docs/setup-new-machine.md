@@ -283,7 +283,7 @@ Run each command; "OK" is what it should show, and every one exits 0.
 | --- | --- |
 | `~/.Jarvis/sync-personal-skills.sh` | the last line starts `checks passed:` |
 | `git -C ~/.Jarvis config --get core.hooksPath` | `.githooks` |
-| `bash ~/.Jarvis/scripts/apply-claude-guard.sh --check` | `already carries the guard` |
+| `bash ~/.Jarvis/scripts/apply-claude-guard.sh --check` | `already carry the guard` |
 | `bash ~/.Jarvis/scripts/apply-codex-guard.sh --check` | `already carry the guard`, then `trust: OK - Codex trusts the Jarvis guard entry` |
 | `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check` | `state: applied`, `Next: nothing — the identity is already applied; a new Claude Code session uses it`, `all checks passed` |
 | `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex` | `state: applied`, `Next: nothing — the identity is already applied; a new Codex session uses it`, `all checks passed` |

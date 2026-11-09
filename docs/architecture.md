@@ -123,8 +123,11 @@ CLI-managed: do not casually patch their contents or rewrite the lock to make
 an installation look different. A missing lock entry means the CLI did not
 record that Skill; it does not make a canonical Skill invalid.
 
-Every Skill here is CLI-managed. What is locally maintained is the bridge
-script, the personal instructions, the Claude Code guard, the Git hooks and
+Every Skill here is CLI-managed except
+[`session-notes`](../.agents/skills/session-notes/SKILL.md), which is written
+here and has no lock entry;
+[`check-skill-lock.sh`](../scripts/check-skill-lock.sh) names it. What else is
+locally maintained is the bridge script, the personal instructions, the Claude Code guard, the Git hooks and
 their rules, and the README and these documents. The settings files themselves are not part of
 this repository, because `~/.claude/settings.json` and `~/.codex/config.toml`
 may contain local paths or secrets. The guard is merged into

@@ -85,7 +85,14 @@ A real run merges `GIT_AUTHOR_NAME`, `GIT_COMMITTER_NAME`, `GIT_AUTHOR_EMAIL`,
 different value is reported as a conflict and is not overwritten, and a
 settings file that changes while the script runs is not written. A running Claude Code session
 may pick the new environment up at once (on this machine one did), and a new one
-does. The agent's git is also forced onto SSH
+does. Removing it is not symmetric: after `--unapply`, a running session keeps
+the old values, and so does the background daemon (the `claude` process that
+hosts background sessions). The daemon applied them to its own environment and
+passes them to every session it starts, `claude respawn` included (seen on
+2026-11-09: `ps eww` on its `bg-pty-host` child still showed the agent's
+`GH_CONFIG_DIR`). So after `--unapply`, act from a new foreground session, and
+expect background sessions to keep the old identity until the daemon restarts.
+The agent's git is also forced onto SSH
 (`GIT_CONFIG_COUNT` and the `url.git@github.com:.insteadOf` and
 `credential.helper` pairs), because an HTTPS remote ignores `GIT_SSH_COMMAND` and
 would push with the credentials in the operator's keychain, as the wrong account.
