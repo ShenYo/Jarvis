@@ -63,6 +63,9 @@ check "above 300k: exit 0" test "$rc" = 0
 check "above 300k: UserPromptSubmit JSON" event_is UserPromptSubmit
 check "above 300k: says no notes yet" ctx_has "no notes yet"
 check "above 300k: says 400k" ctx_has "400k"
+check "above 300k: suggests /compact" ctx_has "/compact"
+check "above 300k: defines the boundary" ctx_has "committed and pushed, no agent or background task running, nothing half-done"
+check "above 300k: mid-task, carry on" ctx_has "Mid-task, carry on"
 
 # 3. Notes exist: the path is named.
 f=$(notes_file s3)
@@ -99,6 +102,7 @@ f=$(notes_file s8)
 run "$(start s8 compact)"
 check "SessionStart compact + notes: SessionStart JSON" event_is SessionStart
 check "SessionStart compact + notes: path in context" ctx_has "$f"
+check "SessionStart compact + notes: read them first" ctx_has "read them before continuing"
 run "$(start s8none compact)"
 check "SessionStart compact, no notes: no output" no_out
 run "$(start s8 startup)"
@@ -180,5 +184,15 @@ aged s18b $((3 * 86400 + 30))
 check "notes 3 days old: updated 3 days ago" ctx_has "updated 3 days ago"
 aged s18c $((5 * 60 + 10))
 check "notes 5 minutes old: updated 5 min ago" ctx_has "updated 5 min ago"
+aged s18d 0
+check "fresh notes: updated just now" ctx_has "updated just now"
+aged s18e $((119 * 60 + 10))
+check "notes 119 minutes old: updated 119 min ago" ctx_has "updated 119 min ago"
+aged s18f $((120 * 60 + 10))
+check "notes 120 minutes old: updated 2 hours ago" ctx_has "updated 2 hours ago"
+aged s18g $((47 * 3600 + 10))
+check "notes 47 hours old: updated 47 hours ago" ctx_has "updated 47 hours ago"
+aged s18h $((48 * 3600 + 10))
+check "notes 48 hours old: updated 2 days ago" ctx_has "updated 2 days ago"
 
 if [ "$fails" = 0 ]; then echo "all passed"; else echo "$fails failure(s)"; exit 1; fi

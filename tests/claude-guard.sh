@@ -61,6 +61,20 @@ for ev in UserPromptSubmit SessionStart; do
   out=$(echo '{}' | CLAUDE_CONFIG_DIR="$root/no-such-dir" bash -c "$cmd" 2>&1); rc=$?
   check "missing session-notes hook file: $ev command exits 0 silently" test "$rc:$out" = "0:"
 done
+check "fresh: session-notes hooks keep their 10 s timeout" q '.hooks.UserPromptSubmit[-1].hooks[0].timeout == 10 and .hooks.SessionStart[-1].hooks[0].timeout == 10'
+# With the hook file in place, each installed command runs it: a broken path
+# would otherwise fail open, and the feature would vanish with CI green.
+p="$dir/proj"; mkdir -p "$p/docs/temp/session-notes"; p=$(cd "$p" && pwd -P); git -C "$p" init -q
+printf 'docs/temp/\n' >"$p/.gitignore"; : >"$p/docs/temp/session-notes/s1.md"
+printf '{"type":"assistant","isSidechain":false,"message":{"usage":{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":398998}}}\n' >"$dir/t.jsonl"
+for ev in UserPromptSubmit SessionStart; do
+  cmd=$(jq -r --arg ev "$ev" '.hooks[$ev][-1].hooks[0].command' "$s")
+  event=$(jq -nc --arg ev "$ev" --arg c "$p" --arg t "$dir/t.jsonl" \
+    '{hook_event_name:$ev,session_id:"s1",cwd:$c,transcript_path:$t,source:"compact"}')
+  out=$(echo "$event" | CLAUDE_CONFIG_DIR="$dir" CLAUDE_PROJECT_DIR="$p" bash -c "$cmd" 2>/dev/null); rc=$?
+  check "installed $ev command runs the hook" jq -e --arg ev "$ev" --arg f "$p/docs/temp/session-notes/s1.md" \
+    '.hookSpecificOutput.hookEventName == $ev and (.hookSpecificOutput.additionalContext | contains($f))' <<<"$out"
+done
 check "fresh: record lists the guard's deny rules as its own" q_file "(.owned[\"permissions.deny\"] | sort) == ($(jq -c '.permissions.deny | sort' "$guard"))" "$r"
 
 # 2. Existing settings: everything the person wrote survives.
