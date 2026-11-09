@@ -129,4 +129,56 @@ check "fixture is over 4 MiB" test "$(wc -c <"$tpath")" -gt $((4 << 20))
 run "$(prompt s12)"
 check "transcript over 4 MiB: tail read hints" ctx_has "400k"
 
+ctx_lacks() { ! jq -e --arg s "$1" '.hookSpecificOutput.additionalContext | contains($s)' <<<"$out" >/dev/null; }
+zero() { printf '{"type":"assistant","isSidechain":false,"model":"<synthetic>","message":{"model":"<synthetic>","usage":{"input_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":0}}}\n'; }
+
+# 13. A zero-usage synthetic entry is skipped.
+transcript < <({ usage 400000; zero; })
+run "$(prompt s13)"
+check "zero synthetic usage after big usage: still hints 400k" ctx_has "400k"
+
+# 14. A compact_boundary reports its own postTokens.
+transcript < <({ usage 100000; compact 350000; })
+run "$(prompt s14)"
+check "compact_boundary postTokens 350000 after small usage: hints 350k" ctx_has "350k"
+
+# 15. A sidechain entry is skipped, not a stop.
+transcript < <({ usage 400000; side 50000; })
+run "$(prompt s15)"
+check "small sidechain after big main usage: still hints 400k" ctx_has "400k"
+
+# 16. cwd or CLAUDE_PROJECT_DIR in a subdirectory resolves to the repo root.
+mkdir -p "$proj/sub/dir"
+f=$(notes_file s16)
+run "$(start s16 compact "$proj/sub/dir")"
+check "cwd in subdirectory: names root notes path" ctx_has "$f"
+out=$(CLAUDE_PROJECT_DIR="$proj/sub/dir" python3 -I "$hook" <<<"$(start s16 compact "$plain")" 2>/dev/null); rc=$?
+check "CLAUDE_PROJECT_DIR in subdirectory: names root notes path" ctx_has "$f"
+
+# 17. Where Git does not ignore docs/temp/, or there is no repo, nothing can be held.
+open="$root/open"; mkdir -p "$open/docs/temp/session-notes"
+git -C "$open" init -q
+: >"$open/docs/temp/session-notes/s17.md"
+transcript < <(usage 400000)
+run "$(prompt s17 "$open")"
+check "non-ignored docs/temp: says cannot hold session notes" ctx_has "cannot hold session notes"
+check "non-ignored docs/temp: does not name the Skill" ctx_lacks "session-notes Skill"
+run "$(start s17 compact "$open")"
+check "non-ignored docs/temp, notes file present, SessionStart compact: no output" no_out
+run "$(prompt s17 "$plain")"
+check "outside any repo: says cannot hold session notes" ctx_has "cannot hold session notes"
+
+# 18. The age wording.
+aged() { # session id, seconds ago
+  local f; f=$(notes_file "$1")
+  python3 -c 'import os,sys,time; t=time.time()-int(sys.argv[2]); os.utime(sys.argv[1],(t,t))' "$f" "$2"
+  run "$(start "$1" compact)"
+}
+aged s18a $((3 * 3600 + 30))
+check "notes 3 hours old: updated 3 hours ago" ctx_has "updated 3 hours ago"
+aged s18b $((3 * 86400 + 30))
+check "notes 3 days old: updated 3 days ago" ctx_has "updated 3 days ago"
+aged s18c $((5 * 60 + 10))
+check "notes 5 minutes old: updated 5 min ago" ctx_has "updated 5 min ago"
+
 if [ "$fails" = 0 ]; then echo "all passed"; else echo "$fails failure(s)"; exit 1; fi

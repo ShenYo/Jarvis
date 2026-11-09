@@ -34,8 +34,9 @@ Apply it, or check whether the settings already carry it:
 ~/.Jarvis/scripts/apply-claude-guard.sh --check  # exit 1 when it would change something
 ```
 
-The script copies the rules into the settings file, and the hook to
-`~/.claude/hooks/claude-guard.py`, rather than linking either here, so a
+The script copies the rules into the settings file, and the hooks to
+`~/.claude/hooks/` (`claude-guard.py` and `jarvis-session-notes.py`), rather
+than linking them here, so a
 session keeps its guard on a machine where this repository is missing. It
 keeps every rule the person wrote, including one that equals a guard rule,
 and records in `~/.claude/claude-guard.applied.json` only the entries it

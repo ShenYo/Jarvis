@@ -13,8 +13,9 @@ update it and when to read it back.
 
 Every request reads the whole context from the prompt cache. A cache read is
 cheap per token, but its cost grows with the context. A context left idle longer
-than the cache's lifetime (one hour for Claude Code) is written again in full,
-at twice the input price. Past about 300k tokens, compacting at a natural
+than the cache's lifetime is written again in full, at more than the input
+price: 1.25 times it for a five-minute cache and twice it for a one-hour cache,
+the lifetime Claude Code sessions here run with. Past about 300k tokens, compacting at a natural
 boundary costs less than carrying on.
 
 Mid-task, a compaction costs more than it saves: the agent has to read files and

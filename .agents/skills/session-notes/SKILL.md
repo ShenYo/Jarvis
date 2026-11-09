@@ -12,13 +12,15 @@ second one.
 
 ## 1. Find the file
 
-The file is `docs/temp/session-notes/<session id>.md`, in the Git repository
-the session started in. The session id is `${CLAUDE_SESSION_ID}`. Where that
-still reads as a placeholder, as in Codex, it is the shell's `$CODEX_THREAD_ID`.
+The file is `docs/temp/session-notes/<session id>.md`, under the root that
+`git rev-parse --show-toplevel` prints in the directory the session started in.
+The session id is `${CLAUDE_SESSION_ID}`. Where that still reads as a
+placeholder, as in Codex, it is the shell's `$CODEX_THREAD_ID`. If neither gives
+an id, write nothing and tell the user.
 
-Run `git check-ignore -q <path>` from the repository root. If the path is not
-ignored, or the session is not in a repository, write nothing and tell the
-user: whether `docs/temp/` is ignored is the repository's decision.
+Run `git check-ignore -q <path>` from that root. If the path is not ignored, or
+the session is not in a repository, write nothing and tell the user: whether
+`docs/temp/` is ignored is the repository's decision.
 
 Done when you have the path and Git ignores it.
 

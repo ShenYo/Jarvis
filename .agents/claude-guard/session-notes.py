@@ -47,12 +47,17 @@ def context_tokens(transcript):
             return (entry.get("compactMetadata") or {}).get("postTokens")
         usage = (entry.get("message") or {}).get("usage") if entry.get("type") == "assistant" else None
         if isinstance(usage, dict):
-            return sum(usage.get(k) or 0 for k in
-                       ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+            tokens = sum(usage.get(k) or 0 for k in
+                         ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+            # A message Claude Code writes itself, such as a usage-limit notice, reports
+            # zero; the request before it holds the real size.
+            if tokens:
+                return tokens
     return None
 
 
 def notes_path(event):
+    """The session's notes file, or None where the Skill would not write one."""
     project = os.environ.get("CLAUDE_PROJECT_DIR") or event.get("cwd") or ""
     session = event.get("session_id") or ""
     if not project or not session or "/" in session:
@@ -61,12 +66,22 @@ def notes_path(event):
                           capture_output=True, text=True, timeout=5)
     if root.returncode != 0:
         return None
-    return os.path.join(root.stdout.strip(), NOTES_DIR, session + ".md")
+    path = os.path.join(root.stdout.strip(), NOTES_DIR, session + ".md")
+    # The Skill writes only where Git ignores the path.
+    ignored = subprocess.run(["git", "-C", root.stdout.strip(), "check-ignore", "-q", path],
+                             timeout=5)
+    return path if ignored.returncode == 0 else None
 
 
 def age(path):
     minutes = int((time.time() - os.path.getmtime(path)) // 60)
-    return "updated just now" if minutes < 1 else f"updated {minutes} min ago"
+    if minutes < 1:
+        return "updated just now"
+    if minutes < 120:
+        return f"updated {minutes} min ago"
+    if minutes < 48 * 60:
+        return f"updated {minutes // 60} hours ago"
+    return f"updated {minutes // (24 * 60)} days ago"
 
 
 def say(event_name, text):
@@ -87,13 +102,18 @@ def main():
         if not tokens or tokens < HINT_TOKENS:
             return
         path = notes_path(event)
-        notes = (f"Session notes: {age(path)}, at {path}." if path and os.path.isfile(path)
-                 else "This session has no notes yet.")
+        if path:
+            notes = (f"Session notes: {age(path)}, at {path}." if os.path.isfile(path)
+                     else "This session has no notes yet.")
+            step = "bring the notes up to date with the session-notes Skill, then suggest"
+        else:
+            notes = ("This project cannot hold session notes: it is not a Git repository, "
+                     "or Git does not ignore docs/temp/ here.")
+            step = "suggest"
         say(name, f"Context is about {tokens // 1000}k tokens, past the {HINT_TOKENS // 1000}k "
                   f"where compacting pays off. {notes} When the work reaches a boundary (committed "
-                  "and pushed, no agent or background task running, nothing half-done), bring the "
-                  "notes up to date with the session-notes Skill, then suggest /compact to the user. "
-                  "Mid-task, carry on.")
+                  f"and pushed, no agent or background task running, nothing half-done), {step} "
+                  "/compact to the user. Mid-task, carry on.")
 
 
 if __name__ == "__main__":

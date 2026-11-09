@@ -52,8 +52,15 @@ check "fresh: bypass mode disabled" q '.permissions.disableBypassPermissionsMode
 check "fresh: hook installed" cmp -s "$repo/.agents/claude-guard/bash-guard.py" "$dir/hooks/claude-guard.py"
 check "fresh: hook entry fails closed" q '.hooks.PreToolUse[-1].matcher == "Bash" and .hooks.PreToolUse[-1].hooks[0].onFailure == "block"'
 check "fresh: session-notes hook installed" cmp -s "$repo/.agents/claude-guard/session-notes.py" "$dir/hooks/jarvis-session-notes.py"
-check "fresh: session-notes hook runs on every prompt" q '.hooks.UserPromptSubmit[-1].hooks[0].command | endswith("hooks/jarvis-session-notes.py\"")'
-check "fresh: session-notes hook runs after a compaction" q '.hooks.SessionStart[-1].matcher == "compact" and (.hooks.SessionStart[-1].hooks[0].command | endswith("hooks/jarvis-session-notes.py\""))'
+check "fresh: session-notes hook runs on every prompt" q '.hooks.UserPromptSubmit[-1].hooks[0].command | contains("hooks/jarvis-session-notes.py")'
+check "fresh: session-notes hook runs after a compaction" q '.hooks.SessionStart[-1].matcher == "compact" and (.hooks.SessionStart[-1].hooks[0].command | contains("hooks/jarvis-session-notes.py"))'
+# A UserPromptSubmit hook that exits 2 refuses the prompt, so a missing hook
+# file must be a silent no-op, never Python's "can't open file" exit 2.
+for ev in UserPromptSubmit SessionStart; do
+  cmd=$(jq -r --arg ev "$ev" '.hooks[$ev][-1].hooks[0].command' "$s")
+  out=$(echo '{}' | CLAUDE_CONFIG_DIR="$root/no-such-dir" bash -c "$cmd" 2>&1); rc=$?
+  check "missing session-notes hook file: $ev command exits 0 silently" test "$rc:$out" = "0:"
+done
 check "fresh: record lists the guard's deny rules as its own" q_file "(.owned[\"permissions.deny\"] | sort) == ($(jq -c '.permissions.deny | sort' "$guard"))" "$r"
 
 # 2. Existing settings: everything the person wrote survives.
