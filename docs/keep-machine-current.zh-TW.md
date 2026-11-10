@@ -56,11 +56,11 @@ Jarvis 的 `main` 有變動後，每台機器都做一次。每一步重複執�
 
    檢查：兩個都顯示 `state: applied`。如果開關是打開的，兩個也都會顯示 `agent-identity switch: Claude Code on, Codex on`。
 5. 開一個新的 Claude Code session，並重新啟動 Codex，讓兩邊都載入新的 guard。
-6. 看這次改了什麼。打開 [`CHANGELOG.md`](../CHANGELOG.md)，讀完比這台機器原本版本更新的每一則條目。如果有條目寫了這台機器要做的事，請前往 [B](#b-release-要求額外步驟)。
+6. 看這次改了什麼。打開 [`CHANGELOG.md`](../CHANGELOG.md)（它連到每個大版號的檔案），讀完比這台機器原本版本更新的每一則條目。如果有條目寫了這台機器要做的事，請前往 [B](#b-release-要求額外步驟)。
 
 ## B. release 要求額外步驟
 
-[`CHANGELOG.md`](../CHANGELOG.md) 裡每一則 MINOR 或 MAJOR 條目的最後，都會寫 owner 在這台機器上要做什麼。先做 [A](#a-例行更新) 的第 1 到 4 步，再依 release 的順序、從最舊的開始，做那則條目自己的步驟。常見的有：
+changelog（由 [`CHANGELOG.md`](../CHANGELOG.md) 連結）裡每一則 MINOR 或 MAJOR 條目的最後，都會寫 owner 在這台機器上要做什麼。先做 [A](#a-例行更新) 的第 1 到 4 步，再依 release 的順序、從最舊的開始，做那則條目自己的步驟。常見的有：
 
 - **重跑 apply 腳本。** A 已經包含這一步。
 - **到 `/hooks` 重新信任 Codex hook。** 只有 hook 的定義改變時才需要。`bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust` 會告訴你它有沒有改變。

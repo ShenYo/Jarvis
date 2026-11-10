@@ -72,13 +72,13 @@ repeat.
    `agent-identity switch: Claude Code on, Codex on`.
 5. Start a new Claude Code session, and restart Codex, so both load the new
    guard.
-6. Read what changed. Open [`CHANGELOG.md`](../CHANGELOG.md) and read every
-   entry newer than the version this machine was on. If any entry says what to
+6. Read what changed. Open [`CHANGELOG.md`](../CHANGELOG.md), which links the file for
+   each major version, and read every entry newer than the version this machine was on. If any entry says what to
    do on this machine, go to [B](#b-a-release-asks-for-a-step).
 
 ## B. A release asks for a step
 
-Each MINOR or MAJOR entry in [`CHANGELOG.md`](../CHANGELOG.md) ends with what
+Each MINOR or MAJOR entry in the changelog (linked from [`CHANGELOG.md`](../CHANGELOG.md)) ends with what
 the owner must do on this machine. Do steps 1–4 of [A](#a-routine-update)
 first, then the entry's own steps, in release order, oldest first. Typical
 ones:

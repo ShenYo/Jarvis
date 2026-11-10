@@ -89,8 +89,9 @@ already loads. These five are this repository's own:
    every turn needs it; reference that only some tasks reach goes in its own
    file under `docs/`, with a pointer that says when to read it. Codex does
    not expand `@` imports, so a rule behind one never reaches Codex.
-5. **A release's pull request updates [`CHANGELOG.md`](./CHANGELOG.md)**, so the
-   note is reviewed with the change; the entry is the tag's message and the
+5. **A release's pull request updates the changelog** (one file per major
+   version under [`docs/changelog/`](./docs/changelog/), linked from
+   [`CHANGELOG.md`](./CHANGELOG.md)), so the note is reviewed with the change; the entry is the tag's message and the
    GitHub Release's notes. Cut a tag or a GitHub Release only with the user's
    go-ahead, naming the tag and the commit
    ([Releases](./docs/releases.md)).
