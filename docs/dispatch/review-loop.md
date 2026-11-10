@@ -3,6 +3,8 @@
 > **中文摘要**：coding agent 開出 PR，或 owner 要求 review 時，先派一個沒參與實作、也沒繼承作者對話的 fresh reviewer agent 做初步 review。結果以機器帳號留成 PR comment，從不 Approve，也絕不以 owner 的帳號張貼。
 >
 > coding agent 逐條回應，最多來回 3 輪。之後留言交給 owner 做 final check，有未解決的分歧就一併列出。這套流程是最低要求：repository 自己的規則可以再多要求，但不能取消它。
+>
+> 機器帳號停權期間：fresh review 改在開 PR 前做，結果只留在對話裡，不貼到 GitHub、不啟用 auto-merge；外部 reviewer（如 Sourcery）的 comment 可以用 owner 帳號逐則回覆。
 
 This loop runs when an agent opens a pull request, and when the owner asks an
 agent to review one ("review #N"). It applies in every repository, in Claude
@@ -15,6 +17,20 @@ an independent review before the PR opens, but they cannot remove this one.
 The owner's approval stays the decision. Only the owner approves, as the code
 owner. The reviewer's job is to make sure that, by the time the owner looks,
 the obvious problems are already found and either fixed or argued.
+
+## While the machine account is suspended
+
+The machine account (`agent-claude-code`, [#13](https://github.com/ShenYo/Jarvis/issues/13)) is
+suspended by GitHub, so nothing in this loop can be posted as it. Until it is restored:
+
+- The fresh reviewer still runs, before the pull request is opened rather than after.
+- Its findings and the coding agent's answers stay in the conversation with the owner. Do not post
+  them to GitHub: under the owner's account they would read as the owner's own review.
+- An external reviewer's comments (a bot such as Sourcery) may be answered as the owner, one reply
+  per comment, saying what was changed or why not. That is a reply, not a review.
+- Do not arm auto-merge; the owner merges.
+
+When the account is restored, remove this section and run the loop as written below.
 
 ## Never as the owner
 
