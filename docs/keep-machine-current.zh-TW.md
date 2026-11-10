@@ -60,7 +60,7 @@ Jarvis 的 `main` 有變動後，每台機器都做一次。每一步重複執�
 
 ## B. release 要求額外步驟
 
-[`CHANGELOG.md`](../CHANGELOG.md) 裡每一則 MINOR 或 MAJOR 條目的最後，都會寫 owner 在這台機器上要做什麼。先做 [A](#a-例行更新) 的第 1 到 4 步，再依 release 的順序、從最舊的開始，做那則條目自己的步驟。常見的有：
+changelog（由 [`CHANGELOG.md`](../CHANGELOG.md) 連結）裡每一則 MINOR 或 MAJOR 條目的最後，都會寫 owner 在這台機器上要做什麼。先做 [A](#a-例行更新) 的第 1 到 4 步，再依 release 的順序、從最舊的開始，做那則條目自己的步驟。常見的有：
 
 - **重跑 apply 腳本。** A 已經包含這一步。
 - **到 `/hooks` 重新信任 Codex hook。** 只有 hook 的定義改變時才需要。`bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust` 會告訴你它有沒有改變。

@@ -11,21 +11,22 @@ release is cut, is in [Releases](./docs/releases.md). Release notes are kept one
 per major version, so no single file grows too long to read. This page holds the rules
 and links to each file.
 
-| Major | File | Releases | About |
-| --- | --- | --- | --- |
-| v1 | [`docs/changelog/v1.md`](./docs/changelog/v1.md) | v1.0.0 (2026-10-26) to v1.2.2 (2026-11-04) | The first major version: the Skill catalog and its bridge, the Git hooks, the guard, agent identity, and session notes. |
+| Major | File | About |
+| --- | --- | --- |
+| v1 | [`docs/changelog/v1.md`](./docs/changelog/v1.md) | The first major version: the Skill catalog and its bridge, the Git hooks, the guard, agent identity, and session notes. |
 
 How an entry is written:
 
 - The pull request that makes a release adds its entry under `## Unreleased`, at the top
   of the newest major's file, and renames that heading to `## vX.Y.Z (YYYY-MM-DD)`, so
   the entry is reviewed with the change. The date is the tag's own date in Taipei time
-  (UTC+8). The same text is the annotated tag's message and the GitHub Release's notes.
+  (UTC+8). Tag on the Taipei day the heading names; if the tag lands on another day, correct the heading in a follow-up pull request. The same text is the annotated tag's message and the GitHub Release's notes.
 - A PATCH entry (documentation only) may be one line.
 - A MINOR or MAJOR entry says what changed, why, and what the owner must do on
   this machine afterwards: for example re-run an apply script, or trust the
   Codex hook again in `/hooks`. A release that needs nothing says so.
 - Nothing here is a dependency of any project, so no entry has an upgrade path
   for a consumer.
-- A release that starts a new major version adds `docs/changelog/vN.md` and a row to the
-  table above in its pull request; the older files are not edited again.
+- A release that starts a new major version moves `## Unreleased` out of the old file to the
+  top of the new `docs/changelog/vN.md`, and adds a row for it to the table above, in the
+  same pull request. That is the last edit to the old file.

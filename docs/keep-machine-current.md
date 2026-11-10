@@ -78,7 +78,7 @@ repeat.
 
 ## B. A release asks for a step
 
-Each MINOR or MAJOR entry in [`CHANGELOG.md`](../CHANGELOG.md) ends with what
+Each MINOR or MAJOR entry in the changelog (linked from [`CHANGELOG.md`](../CHANGELOG.md)) ends with what
 the owner must do on this machine. Do steps 1–4 of [A](#a-routine-update)
 first, then the entry's own steps, in release order, oldest first. Typical
 ones:
