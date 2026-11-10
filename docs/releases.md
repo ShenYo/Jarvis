@@ -26,6 +26,11 @@ moves `## Unreleased` into a new `docs/changelog/vN.md` and adds a row for it in
 `CHANGELOG.md`. After the merge, the entry becomes the tag's message and
 the GitHub Release's notes:
 
+The entry's relative links climb out of `docs/changelog/`; GitHub resolves a release's links
+from the repository root, so in the file passed to `git tag -F` write them as `./docs/...`,
+not `../../docs/...`, and start the file with a title line as earlier tags do
+(`Jarvis vX.Y.Z: <what it brings>`).
+
 ```sh
 git tag -a vX.Y.Z <commit> -F <file holding the entry>
 git push origin vX.Y.Z
