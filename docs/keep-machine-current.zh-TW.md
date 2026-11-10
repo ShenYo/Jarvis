@@ -56,7 +56,7 @@ Jarvis 的 `main` 有變動後，每台機器都做一次。每一步重複執�
 
    檢查：兩個都顯示 `state: applied`。如果開關是打開的，兩個也都會顯示 `agent-identity switch: Claude Code on, Codex on`。
 5. 開一個新的 Claude Code session，並重新啟動 Codex，讓兩邊都載入新的 guard。
-6. 看這次改了什麼。打開 [`CHANGELOG.md`](../CHANGELOG.md)，讀完比這台機器原本版本更新的每一則條目。如果有條目寫了這台機器要做的事，請前往 [B](#b-release-要求額外步驟)。
+6. 看這次改了什麼。打開 [`CHANGELOG.md`](../CHANGELOG.md)（它連到每個大版號的檔案），讀完比這台機器原本版本更新的每一則條目。如果有條目寫了這台機器要做的事，請前往 [B](#b-release-要求額外步驟)。
 
 ## B. release 要求額外步驟
 

@@ -16,9 +16,12 @@ labelled point on this machine, not something to propagate. Every release
 carries a note in [`CHANGELOG.md`](../CHANGELOG.md), above all a MINOR or MAJOR
 one, which says what changed, why, and what to do on this machine afterwards.
 
-To cut a release, the pull request that makes it adds the entry to
-`CHANGELOG.md` under `## Unreleased` and renames that heading to the version, so
-the note is reviewed. After the merge, the entry becomes the tag's message and
+To cut a release, the pull request that makes it adds the entry under
+`## Unreleased`, at the top of the file for the newest major version in
+[`docs/changelog/`](./changelog/) (which `CHANGELOG.md` links), and renames that
+heading to `## vX.Y.Z (YYYY-MM-DD)`, the date being the tag's own date in Taipei
+time (UTC+8), so the note is reviewed. A release that starts a new major version
+adds `docs/changelog/vN.md` and a row for it in `CHANGELOG.md`. After the merge, the entry becomes the tag's message and
 the GitHub Release's notes:
 
 ```sh
