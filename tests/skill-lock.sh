@@ -82,8 +82,10 @@ fixture unlocked lock:alpha session-notes beta
 expect unlocked 1 "UNLOCKED  beta has no lock entry"
 
 # A name that only occurs inside a maintained name is not maintained.
-fixture substring lock:alpha session-notes notes
+fixture substring lock:alpha session-notes notes session
 expect substring 1 "UNLOCKED  notes has no lock entry"
+expect substring 1 "UNLOCKED  session has no lock entry"
 
-echo "$((total - fails))/$total passed"
-[ "$fails" = 0 ]
+echo
+if [ "$fails" -gt 0 ]; then echo "$fails of $total failed"; exit 1; fi
+echo "all $total passed"
