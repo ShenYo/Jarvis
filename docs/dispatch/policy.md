@@ -59,9 +59,9 @@ Paste this into every brief:
 Before dispatch, give each writer its exact editable paths and its read-only
 context paths. Parallel work is allowed only when editable paths do not
 overlap. Assignees edit the named originals in the shared workspace, never a
-parallel copy or an isolated version unless the task asks for one. An assignee never commits, pushes or writes to GitHub;
-the Commander does, after checking the report. An assignee
-that finds an ownership overlap stops and reports `BLOCKED` instead of
+parallel copy or an isolated version unless the task asks for one. An
+assignee never commits, pushes or writes to GitHub; the Commander does,
+after checking the report. An assignee that finds an ownership overlap stops and reports `BLOCKED` instead of
 editing. The Commander integrates the results.
 
 ## Escalation and de-escalation

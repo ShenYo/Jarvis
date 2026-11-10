@@ -37,8 +37,8 @@ authorized: stop and report the scope conflict. Never change a production
 fact, fixture, spec or page copy to make a check pass; an authorized fixture
 update still tests the intended behaviour. Add no lint or type-check
 suppression the task did not ask for. Read-only Git and GitHub inspection is
-allowed; committing, pushing and changing GitHub follow the repository's Git
-rules.
+allowed; never commit, push or change GitHub: the Commander does, after
+checking your report.
 ```
 
 A criterion that constrains data invites the assignee to change the data. The
