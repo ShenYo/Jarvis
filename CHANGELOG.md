@@ -18,7 +18,8 @@ and links to each file.
 How an entry is written:
 
 - The pull request that makes a release adds its entry under `## Unreleased`, at the top
-  of the newest major's file, and renames that heading to `## vX.Y.Z (YYYY-MM-DD)`, so
+  of the file for the major it will be released in (the newest, unless it is a
+  maintenance release of an older major), and renames that heading to `## vX.Y.Z (YYYY-MM-DD)`, so
   the entry is reviewed with the change. The date is the tag's own date in Taipei time
   (UTC+8). Tag on the Taipei day the heading names; if the tag lands on another day, correct the heading in a follow-up pull request. The same text is the annotated tag's message and the GitHub Release's notes.
 - A PATCH entry (documentation only) may be one line.
@@ -29,4 +30,4 @@ How an entry is written:
   for a consumer.
 - A release that starts a new major version moves `## Unreleased` out of the old file to the
   top of the new `docs/changelog/vN.md`, and adds a row for it to the table above, in the
-  same pull request. That is the last edit to the old file.
+  same pull request. Apart from a later maintenance release of that major, that is the last edit to the old file.
