@@ -4,10 +4,11 @@
 # The guard is .agents/claude-guard/guard.json: permission deny and ask rules,
 # auto-mode classifier rules, hook entries, and settings it sets or removes.
 # The hooks themselves are installed under ~/.claude/hooks/: bash-guard.py as
-# claude-guard.py, and session-notes.py, which tells the agent when to save
-# its session notes, as jarvis-session-notes.py. All are copied, never linked,
-# so a Claude session keeps its guard on a machine where this repository is
-# absent or broken.
+# claude-guard.py, session-notes.py, which tells the agent when to save its
+# session notes, as jarvis-session-notes.py, and shell-syntax.py, which tells
+# it when a shell script it edited does not parse, as jarvis-shell-syntax.py.
+# All are copied, never linked, so a Claude session keeps its guard on a
+# machine where this repository is absent or broken.
 #
 # The settings file belongs to the person, not to this script. Rules the
 # person wrote stay, including one that happens to equal a guard rule. The
@@ -40,8 +41,10 @@ claude_home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 settings="$claude_home/settings.json"
 record="$claude_home/claude-guard.applied.json"
 # Each hook file in this repository, and where its copy is installed.
-hook_srcs=("$here/.agents/claude-guard/bash-guard.py" "$here/.agents/claude-guard/session-notes.py")
-hook_dsts=("$claude_home/hooks/claude-guard.py" "$claude_home/hooks/jarvis-session-notes.py")
+hook_srcs=("$here/.agents/claude-guard/bash-guard.py" "$here/.agents/claude-guard/session-notes.py"
+           "$here/.agents/claude-guard/shell-syntax.py")
+hook_dsts=("$claude_home/hooks/claude-guard.py" "$claude_home/hooks/jarvis-session-notes.py"
+           "$claude_home/hooks/jarvis-shell-syntax.py")
 
 jq -e 'type == "object"' "$guard" >/dev/null 2>&1 || die "$guard is not a JSON object"
 for src in "${hook_srcs[@]}"; do
@@ -92,7 +95,7 @@ result=$(jq -n \
   def lists: [["permissions","deny"], ["permissions","ask"],
               ["autoMode","hard_deny"], ["autoMode","soft_deny"],
               ["hooks","PreToolUse"], ["hooks","UserPromptSubmit"],
-              ["hooks","SessionStart"]];
+              ["hooks","SessionStart"], ["hooks","PostToolUse"]];
   def has_e($a; $e): ($a | index([$e])) != null;
   def owned_before($p):
     if ($prev | has("owned")) then ($prev.owned[$p | join(".")] // [])

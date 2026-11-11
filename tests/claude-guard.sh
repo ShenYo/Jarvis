@@ -31,7 +31,8 @@ alt_guard() {
   local alt="$root/alt-$n"
   mkdir -p "$alt/scripts" "$alt/.agents/claude-guard"
   cp "$apply" "$alt/scripts/"
-  cp "$repo/.agents/claude-guard/bash-guard.py" "$repo/.agents/claude-guard/session-notes.py" "$alt/.agents/claude-guard/"
+  cp "$repo/.agents/claude-guard/bash-guard.py" "$repo/.agents/claude-guard/session-notes.py" \
+     "$repo/.agents/claude-guard/shell-syntax.py" "$alt/.agents/claude-guard/"
   jq "$1" "$guard" >"$alt/.agents/claude-guard/guard.json"
   echo "$alt/scripts/apply-claude-guard.sh"
 }
@@ -79,6 +80,17 @@ for ev in UserPromptSubmit SessionStart; do
   check "installed $ev command exits 0" test "$rc" = 0
   check "installed $ev command runs the hook" names_notes "$ev" "$p/docs/temp/session-notes/s1.md"
 done
+check "fresh: shell-syntax hook installed" cmp -s "$repo/.agents/claude-guard/shell-syntax.py" "$dir/hooks/jarvis-shell-syntax.py"
+check "fresh: shell-syntax hook runs after Edit and Write" q '.hooks.PostToolUse[-1].matcher == "Edit|Write" and .hooks.PostToolUse[-1].hooks[0].timeout == 10'
+# Exit 2 from a PostToolUse hook is shown to the agent as a problem, so a
+# missing hook file must be a silent no-op here too.
+cmd=$(jq -r '.hooks.PostToolUse[-1].hooks[0].command' "$s")
+out=$(echo '{}' | CLAUDE_CONFIG_DIR="$root/no-such-dir" bash -c "$cmd" 2>&1); rc=$?
+check "missing shell-syntax hook file: command exits 0 silently" test "$rc:$out" = "0:"
+printf 'if true; then\n' >"$dir/broken.sh"
+event=$(jq -nc --arg f "$dir/broken.sh" '{hook_event_name:"PostToolUse",tool_name:"Write",tool_input:{file_path:$f}}')
+out=$(echo "$event" | CLAUDE_CONFIG_DIR="$dir" bash -c "$cmd" 2>&1); rc=$?
+check "installed PostToolUse command runs the hook" test "$rc" = 2 -a -n "$out"
 check "fresh: record lists the guard's deny rules as its own" q_file "(.owned[\"permissions.deny\"] | sort) == ($(jq -c '.permissions.deny | sort' "$guard"))" "$r"
 
 # 2. Existing settings: everything the person wrote survives.
@@ -89,7 +101,8 @@ cat >"$s" <<'EOF'
   "skipDangerousModePermissionPrompt": true,
   "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "true"}]}],
             "PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "other-tool"}]}],
-            "SessionStart": [{"hooks": [{"type": "command", "command": "other-start"}]}]},
+            "SessionStart": [{"hooks": [{"type": "command", "command": "other-start"}]}],
+            "PostToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "other-post"}]}]},
   "permissions": {"defaultMode": "auto", "deny": ["Bash(user-rule *)"], "allow": ["Bash(npm test)"]},
   "autoMode": {"environment": ["Source control: example"]}
 }
@@ -97,6 +110,7 @@ EOF
 run
 check "keep: unrelated keys untouched" q '.model == "opus" and .hooks.Stop[0].hooks[0].command == "true" and .permissions.defaultMode == "auto"'
 check "keep: another tool's PreToolUse hook stays first" q '.hooks.PreToolUse[0].hooks[0].command == "other-tool" and (.hooks.PreToolUse | length) == 2'
+check "keep: another tool's PostToolUse hook stays first" q '.hooks.PostToolUse[0].hooks[0].command == "other-post" and (.hooks.PostToolUse | length) == 2'
 check "keep: another tool's SessionStart hook stays first" q '.hooks.SessionStart[0].hooks[0].command == "other-start" and (.hooks.SessionStart | length) == 2'
 check "keep: person's deny and allow rules stay" q '(.permissions.deny | index("Bash(user-rule *)")) != null and .permissions.allow == ["Bash(npm test)"]'
 check "keep: person's rule stays ahead of the guard's" q '.permissions.deny[0] == "Bash(user-rule *)"'
@@ -136,6 +150,11 @@ run --check; rc=$?
 check "session-notes hook drift: --check exit 1" test "$rc" = 1
 run
 check "session-notes hook drift: run restores it" cmp -s "$repo/.agents/claude-guard/session-notes.py" "$dir/hooks/jarvis-session-notes.py"
+echo "# edited" >>"$dir/hooks/jarvis-shell-syntax.py"
+run --check; rc=$?
+check "shell-syntax hook drift: --check exit 1" test "$rc" = 1
+run
+check "shell-syntax hook drift: run restores it" cmp -s "$repo/.agents/claude-guard/shell-syntax.py" "$dir/hooks/jarvis-shell-syntax.py"
 
 # 4. A rule the previous guard added, and this one no longer has, is retired.
 #    A person's rule that happens to look similar is not.

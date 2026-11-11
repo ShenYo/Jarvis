@@ -161,6 +161,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/jarvis-shell-syntax.py\"; [ -f \"$f\" ] || exit 0; py=/usr/bin/python3; [ -x \"$py\" ] || py=python3; exec \"$py\" -I \"$f\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
