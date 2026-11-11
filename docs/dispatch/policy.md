@@ -51,6 +51,8 @@ Paste this into every brief:
   file dumps.
 - When an authorized task needs an artifact over about 30 lines, put it in its
   proper file and return the path; report length never authorizes a write.
+- Never commit, push or change GitHub: the Commander does, after checking
+  the report.
 - End with exactly one of: `DONE`; `BLOCKED:` followed by the exact blocker;
   or `UNVERIFIED:` followed by what could not be checked and why.
 

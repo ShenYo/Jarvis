@@ -23,7 +23,8 @@ The closing block, appended to every brief:
 ```text
 Report: conclusions + file:line only; when authorized, artifacts >30 lines go
 to their proper file and return the path; report length never authorizes a
-write. End with exactly one of DONE / BLOCKED: <the exact blocker> /
+write. Never commit, push or change GitHub: the Commander does, after
+checking your report. End with exactly one of DONE / BLOCKED: <the exact blocker> /
 UNVERIFIED: <what wasn't checked, and why>.
 ```
 
@@ -37,8 +38,7 @@ authorized: stop and report the scope conflict. Never change a production
 fact, fixture, spec or page copy to make a check pass; an authorized fixture
 update still tests the intended behaviour. Add no lint or type-check
 suppression the task did not ask for. Read-only Git and GitHub inspection is
-allowed; never commit, push or change GitHub: the Commander does, after
-checking your report.
+allowed.
 ```
 
 A criterion that constrains data invites the assignee to change the data. The
