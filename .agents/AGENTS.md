@@ -135,7 +135,8 @@ costs context.
 
 A handoff written while the session has a notes file
 (`docs/temp/session-notes/<session id>.md`) starts from it: bring the notes up
-to date, link them by absolute path, and add only what they lack
+to date, link them by absolute path, and add only what they lack. A handoff
+that leaves this machine copies what it needs from them instead of linking
 ([why](../docs/session-notes.md#notes-and-handoffs)).
 
 ### A deletion the user runs

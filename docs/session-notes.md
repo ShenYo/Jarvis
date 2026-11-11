@@ -67,7 +67,10 @@ has notes starts from them: it brings them up to date first, so the handoff is
 the current state, links them by absolute path, since the two files may sit
 under different roots, and adds only what they lack, such as what the next
 session is for and what the [handoff Skill](../.agents/skills/handoff/SKILL.md)
-itself asks for.
+itself asks for. The link works only on this machine, where the notes live,
+Git-ignored, and an absolute path carries the home directory's name. A
+handoff that leaves the machine, for another person or a remote session,
+copies what it needs from the notes instead.
 
 ## Codex
 
