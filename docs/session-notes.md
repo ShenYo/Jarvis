@@ -54,6 +54,24 @@ only advises: on any error it says nothing, and the prompt goes through.
 Only the owner can run `/compact`. Auto-compact does not run the Skill; it fires
 near the auto-compact window, long after the hint.
 
+## Notes and handoffs
+
+A handoff and the session notes describe the same work for different readers.
+The notes serve this session after a compaction: the Skill can run on its own,
+and they are kept per session. A handoff serves a fresh agent: it is written
+only when asked, and kept where the repository names (per worktree in a Friday
+consumer), else in the OS temporary directory. Each has a reason to exist, so
+both stay. Two summaries written separately from one conversation can still
+disagree, and the next session cannot tell which is current. So a handoff written while the session
+has notes starts from them: it brings them up to date first, so the handoff is
+the current state, links them by absolute path, since the two files may sit
+under different roots, and adds only what they lack, such as what the next
+session is for and what the [handoff Skill](../.agents/skills/handoff/SKILL.md)
+itself asks for. The link works only on this machine, where the notes live,
+Git-ignored, and an absolute path carries the home directory's name. A
+handoff that leaves the machine, for another person or a remote session,
+copies what it needs from the notes instead.
+
 ## Codex
 
 Codex has no such hooks here. Invoke the Skill by hand before compacting. It
