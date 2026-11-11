@@ -59,12 +59,15 @@ near the auto-compact window, long after the hint.
 A handoff and the session notes describe the same work for different readers.
 The notes serve this session after a compaction: the Skill can run on its own,
 and they are kept per session. A handoff serves a fresh agent: it is written
-only when asked, and kept per worktree under the handoff location the
-repository names. Each has a reason to exist, so both stay. Two summaries
-written separately from one conversation can still disagree, and the next
-session cannot tell which is current. So a handoff written while the session
-has notes starts from them and links them, and adds only what they lack: what
-the next session is for and the Skills it should load.
+only when asked, and kept where the repository names (per worktree in a Friday
+consumer), else in the OS temporary directory. Each has a reason to exist, so
+both stay. Two summaries written separately from one conversation can still
+disagree, and the next session cannot tell which is current. So a handoff written while the session
+has notes starts from them: it brings them up to date first, so the handoff is
+the current state, links them by absolute path, since the two files may sit
+under different roots, and adds only what they lack, such as what the next
+session is for and what the [handoff Skill](../.agents/skills/handoff/SKILL.md)
+itself asks for.
 
 ## Codex
 
