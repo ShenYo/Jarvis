@@ -51,6 +51,8 @@ Paste this into every brief:
   file dumps.
 - When an authorized task needs an artifact over about 30 lines, put it in its
   proper file and return the path; report length never authorizes a write.
+- Never commit, push or change GitHub: the Commander does, after checking
+  the report.
 - End with exactly one of: `DONE`; `BLOCKED:` followed by the exact blocker;
   or `UNVERIFIED:` followed by what could not be checked and why.
 
@@ -59,9 +61,11 @@ Paste this into every brief:
 Before dispatch, give each writer its exact editable paths and its read-only
 context paths. Parallel work is allowed only when editable paths do not
 overlap. Assignees edit the named originals in the shared workspace, never a
-parallel copy or an isolated version unless the task asks for one. An assignee
-that finds an ownership overlap stops and reports `BLOCKED` instead of
-editing. The Commander integrates the results.
+parallel copy or an isolated version unless the task asks for one. An
+assignee never commits, pushes or writes to GitHub; the Commander does,
+after checking the report. An assignee that finds an ownership overlap stops
+and reports `BLOCKED` instead of editing. The Commander integrates the
+results.
 
 ## Escalation and de-escalation
 
