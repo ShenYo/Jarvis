@@ -133,6 +133,14 @@ pull request bodies and code comments, and the instruction files loaded on
 every turn (this file, a `CLAUDE.md`, a Skill's `SKILL.md`), where each line
 costs context.
 
+### A handoff starts from the session notes
+
+When you write a handoff and this session has a notes file
+(`docs/temp/session-notes/<session id>.md`), start from it: link it rather
+than summarising the conversation again, and add only what the notes lack,
+such as what the next session is for. Why:
+[`docs/session-notes.md`](../docs/session-notes.md#notes-and-handoffs).
+
 ### A deletion the user runs
 
 When a deletion is the user's to run, because the rules keep it from agents,
