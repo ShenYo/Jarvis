@@ -24,8 +24,8 @@ The closing block, appended to every brief:
 Report: conclusions + file:line only; when authorized, artifacts >30 lines go
 to their proper file and return the path; report length never authorizes a
 write. Never commit, push or change GitHub: the Commander does, after
-checking your report. End with exactly one of DONE / BLOCKED: <the exact blocker> /
-UNVERIFIED: <what wasn't checked, and why>.
+checking your report. End with exactly one of DONE / BLOCKED: <the exact
+blocker> / UNVERIFIED: <what wasn't checked, and why>.
 ```
 
 The read-only block, appended to every brief that writes files:
