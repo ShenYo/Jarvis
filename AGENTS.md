@@ -72,7 +72,7 @@ Do not reach for `--no-verify`; the Claude Code guard refuses that flag.
 The general rules for how to work -- understand first, nothing speculative,
 surgical changes, verify and say what you ran -- are the personal
 instructions, [`.agents/AGENTS.md`](./.agents/AGENTS.md), which every session
-already loads. These six are this repository's own:
+already loads. These five are this repository's own:
 
 1. **Scratch files go under `docs/temp/<purpose>/`**, which `.gitignore`
    ignores. Never stage one, and never reach for a blanket `git add -A` across
@@ -95,16 +95,6 @@ already loads. These six are this repository's own:
    GitHub Release's notes. Cut a tag or a GitHub Release only with the user's
    go-ahead, naming the tag and the commit
    ([Releases](./docs/releases.md)).
-6. **Work that needs the machine account, and Codex behaviour, is paused
-   while the account is suspended**
-   ([#13](https://github.com/ShenYo/Jarvis/issues/13)). Do not take up the
-   agent-identity issues (#14 to #16, #52, #54, #64, the later steps of
-   #56), and do not change the Codex guard, hooks, identity or adapter
-   ([`docs/dispatch/codex.md`](./docs/dispatch/codex.md)). Answer a review
-   finding about Codex by deferring it, and write the follow-up down; when
-   the account is restored, align Codex with what Claude Code does.
-   [Review loop](./docs/dispatch/review-loop.md#while-the-machine-account-is-suspended)
-   lists what to remove then.
 
 ### Git
 
