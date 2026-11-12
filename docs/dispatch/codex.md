@@ -63,10 +63,11 @@ copy an implementation, or make a worktree by default.
    and an Implementer for behavioural or implementation review.
 
 Children may run scoped checks and edit their assigned files. A child never
-commits, pushes or writes to GitHub
-([workspace ownership](./policy.md#workspace-ownership)); the Commander does,
-after checking the report, under the repository's own Git rules, or
-[`~/.Jarvis/docs/git.md`](../git.md) where it has none.
+commits, pushes, opens pull requests, writes to GitHub, deletes files or
+changes other external state
+([workspace ownership](./policy.md#workspace-ownership)); the Commander does
+what the task needs, after checking the report, under the repository's own
+Git rules, or [`~/.Jarvis/docs/git.md`](../git.md) where it has none.
 
 ## CLI fallback
 
