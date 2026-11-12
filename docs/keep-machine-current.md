@@ -26,6 +26,7 @@ this machine. No update touches it.
 | `--check` or `--trust` reports a problem after an update | [C. A check fails after an update](#c-a-check-fails-after-an-update) |
 | A Skill was added or removed | [D. A Skill was added or removed](#d-a-skill-was-added-or-removed) |
 | You are not sure whether this machine is current | [E. Is this machine current?](#e-is-this-machine-current) |
+| GitHub suspended the agents' machine account, or restored it | [F. The machine account is suspended or restored](#f-the-machine-account-is-suspended-or-restored) |
 
 ## A. Routine update
 
@@ -130,3 +131,72 @@ This machine is current when all four hold:
 - both `--check` runs exit 0.
 
 Otherwise do [A](#a-routine-update).
+
+## F. The machine account is suspended or restored
+
+While GitHub suspends the agents' machine account, agents act as this
+machine's operator instead: the account this machine's own `gh` login and SSH
+key belong to. No login is written down here, because each machine has its
+own operator. Find it in a normal terminal with `gh api user -q .login`.
+
+You know the account is suspended when an agent's `gh api user` answers
+`HTTP 403` with "Your account was suspended", and the pull requests it opened
+answer `404`. You know it is back when
+`bash ~/.Jarvis/scripts/apply-agent-identity.sh --check` passes: SSH answers
+`Hi <login>!` and `gh` is logged in as the `login` of the identity config.
+
+### Switch to the operator's account
+
+On every machine with the identity applied:
+
+```sh
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --unrequire
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --unapply
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --unapply --codex
+```
+
+1. Turn the switch off first: with it on and no identity applied, the guard
+   refuses every GitHub write.
+2. The switch changes the Codex hook's command, so trust the guard again in
+   Codex `/hooks` ([C](#c-a-check-fails-after-an-update)).
+3. Start new Claude Code and Codex sessions. A running session keeps the
+   agent's environment, and so does every background session until the
+   background daemon restarts ([Agent identity](./agent-identity.md#what-a-run-writes)).
+4. Check, in a new session: `gh api user -q .login` prints the operator's
+   login, the same as in a normal terminal, and `git var GIT_AUTHOR_IDENT`
+   names the operator.
+5. Put the interim rules back, in a pull request: the review loop's section
+   "While the machine account is suspended" and rule 6 of Jarvis's
+   `AGENTS.md`, both as of
+   [`a226a64`](https://github.com/ShenYo/Jarvis/blob/a226a64/docs/dispatch/review-loop.md#while-the-machine-account-is-suspended),
+   and Friday's bullet from
+   [Friday #60](https://github.com/ShenYo/Friday/pull/60). They say how
+   reviews run while nothing can be posted as the agent. Update their dates
+   and issue numbers to the new suspension, and replace the section's
+   closing "When the account is restored" paragraph with a pointer to
+   "Switch back to the machine account" below: its own list is out of date.
+
+### Switch back to the machine account
+
+On every machine, once `--check` passes:
+
+```sh
+bash ~/.Jarvis/scripts/apply-agent-identity.sh
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --codex
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --require
+```
+
+1. Skip `--codex` if Codex was never unapplied; `--check --codex` reports
+   `state: applied` then.
+2. Trust the guard again in Codex `/hooks`, as in step 2 above. `--require`
+   refuses while Codex does not trust the guard, so trust it first if
+   `--check --codex` reports `UNTRUSTED`, and again after `--require`.
+3. Start new sessions, as in step 3 above.
+4. Check, in a new session: `gh api user -q .login` prints the identity
+   config's `login`, while a normal terminal still prints the operator's.
+   `--check --codex` reports `agent-identity switch: Claude Code on, Codex on`.
+5. Remove the interim rules, in a pull request, as
+   [#77](https://github.com/ShenYo/Jarvis/pull/77) and
+   [Friday #66](https://github.com/ShenYo/Friday/pull/66) did. Also look for
+   notes about the suspension in the agents' memory of each project
+   (`~/.claude/projects/*/memory/`), and remove them.

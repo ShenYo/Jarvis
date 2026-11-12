@@ -19,6 +19,7 @@ Jarvis 安裝的東西分成兩類。個人規則和每個 Skill 都是連結，
 | 更新之後 `--check` 或 `--trust` 回報問題 | [C. 更新後檢查失敗](#c-更新後檢查失敗) |
 | 新增或移除了 Skill | [D. 新增或移除 Skill](#d-新增或移除-skill) |
 | 不確定這台機器是不是最新的 | [E. 這台機器是最新的嗎？](#e-這台機器是最新的嗎) |
+| GitHub 停權或恢復了 agent 的機器帳號 | [F. 機器帳號停權或恢復](#f-機器帳號停權或恢復) |
 
 ## A. 例行更新
 
@@ -100,3 +101,41 @@ bash ~/.Jarvis/scripts/apply-codex-guard.sh --check
 - 兩個 `--check` 都以 0 結束。
 
 否則請做 [A](#a-例行更新)。
+
+## F. 機器帳號停權或恢復
+
+GitHub 停權 agent 的機器帳號期間，agent 改用這台機器的 operator 身分操作，也就是這台機器自己的 `gh` 登入和 SSH key 所屬的帳號。這裡不寫死任何帳號，因為每台機器有各自的 operator。在一般終端機執行 `gh api user -q .login` 就知道是誰。
+
+agent 的 `gh api user` 回 `HTTP 403`、訊息是 "Your account was suspended"，而且它開過的 pull request 都回 404，就表示帳號被停權了。`bash ~/.Jarvis/scripts/apply-agent-identity.sh --check` 全部通過，也就是 SSH 回 `Hi <login>!`、`gh` 登入的是身分設定檔裡的 `login`，就表示帳號恢復了。
+
+### 切換到 operator 帳號
+
+每台套用過身分的機器都做：
+
+```sh
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --unrequire
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --unapply
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --unapply --codex
+```
+
+1. 先關掉開關：開關打開、身分卻沒套用時，guard 會擋下所有 GitHub 寫入。
+2. 開關會改變 Codex hook 的 command，所以要在 Codex `/hooks` 重新信任 guard（見 [C](#c-更新後檢查失敗)）。
+3. 開新的 Claude Code 和 Codex session。正在跑的 session 會保留 agent 的環境變數，背景 session 也會，直到背景 daemon 重新啟動（見 [Agent identity](./agent-identity.md#what-a-run-writes)）。
+4. 在新 session 檢查：`gh api user -q .login` 印出 operator 的帳號，和一般終端機印的一樣；`git var GIT_AUTHOR_IDENT` 是 operator 的名字。
+5. 開一個 pull request 把暫時規則放回去：review loop 的 "While the machine account is suspended" 段落，以及 Jarvis `AGENTS.md` 的第 6 條，兩者都取 [`a226a64`](https://github.com/ShenYo/Jarvis/blob/a226a64/docs/dispatch/review-loop.md#while-the-machine-account-is-suspended) 的版本；再加上 [Friday #60](https://github.com/ShenYo/Friday/pull/60) 的那一條。它們規定沒辦法用 agent 身分張貼時 review 怎麼進行。把裡面的日期和 issue 編號改成這次停權的，並把段落結尾 "When the account is restored" 那一段換成指向下方「切換回機器帳號」的說明：那一段自己的清單已經過時。
+
+### 切換回機器帳號
+
+`--check` 通過之後，每台機器都做：
+
+```sh
+bash ~/.Jarvis/scripts/apply-agent-identity.sh
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --codex
+bash ~/.Jarvis/scripts/apply-agent-identity.sh --require
+```
+
+1. Codex 沒有 unapply 過的話，跳過 `--codex`；這時 `--check --codex` 會顯示 `state: applied`。
+2. 和上面第 2 步一樣，在 Codex `/hooks` 重新信任 guard。Codex 不信任 guard 時 `--require` 會拒絕執行，所以 `--check --codex` 顯示 `UNTRUSTED` 的話，先信任一次，`--require` 之後再信任一次。
+3. 和上面第 3 步一樣，開新的 session。
+4. 在新 session 檢查：`gh api user -q .login` 印出身分設定檔的 `login`，一般終端機則仍然印出 operator 的帳號。`--check --codex` 顯示 `agent-identity switch: Claude Code on, Codex on`。
+5. 開一個 pull request 移除暫時規則，做法同 [#77](https://github.com/ShenYo/Jarvis/pull/77) 與 [Friday #66](https://github.com/ShenYo/Friday/pull/66)。也檢查每個專案的 agent memory（`~/.claude/projects/*/memory/`）裡有沒有停權相關的紀錄，有的話一併移除。

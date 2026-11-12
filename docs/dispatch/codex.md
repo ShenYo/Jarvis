@@ -62,10 +62,12 @@ copy an implementation, or make a worktree by default.
 4. Where fresh verification is required, use a Worker for deterministic checks
    and an Implementer for behavioural or implementation review.
 
-Children may run scoped checks and edit their assigned files. Committing,
-pushing, opening pull requests, deleting files and changing external state
-follow the repository's own Git rules, or
-[`~/.Jarvis/docs/git.md`](../git.md) where it has none.
+Children may run scoped checks and edit their assigned files. A child never
+commits, pushes, opens pull requests, writes to GitHub, deletes files or
+changes other external state
+([workspace ownership](./policy.md#workspace-ownership)); the Commander does
+what the task needs, after checking the report, under the repository's own
+Git rules, or [`~/.Jarvis/docs/git.md`](../git.md) where it has none.
 
 ## CLI fallback
 
