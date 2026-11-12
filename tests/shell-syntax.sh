@@ -75,6 +75,28 @@ check "a Write is checked too" flagged "$root/bad.sh"
 run "$(edited "$root/missing.sh")"
 check "a file that is gone: silent" silent
 
+mkdir "$root/dir.sh"
+run "$(edited "$root/dir.sh")"
+check "a directory named like a script: silent" silent
+
+printf '# sh notes\n%s\n' "$bad" >"$root/notes"
+run "$(edited "$root/notes")"
+check "a first line that is not #!: left alone" silent
+
+# bash quotes the failing line back, so its message carries the raw byte.
+printf 'echo caf\351 )\n' >"$root/latin1.sh"
+run "$(edited "$root/latin1.sh")"
+check "a parse error on a line that is not UTF-8: still flagged" flagged "$root/latin1.sh"
+
+if [ -x /bin/bash ]; then
+  mkdir "$root/fakebin"
+  # Fake only for -n: python3 itself may be a bash shim found through PATH.
+  printf '#!/bin/sh\ncase "$1" in -n) echo fake >&2; exit 1 ;; esac\nexec /bin/bash "$@"\n' >"$root/fakebin/bash"
+  chmod +x "$root/fakebin/bash"
+  PATH="$root/fakebin:$PATH" run "$(edited "$root/good.sh")"
+  check "/bin/bash is preferred over a bash earlier on PATH" silent
+fi
+
 run '{"tool_input":{}}'
 check "no file_path: silent" silent
 

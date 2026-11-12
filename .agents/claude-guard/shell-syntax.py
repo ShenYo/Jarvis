@@ -52,7 +52,7 @@ def main():
     if not path or not os.path.isfile(path) or not is_shell_script(path):
         return 0
     bash = "/bin/bash" if os.access("/bin/bash", os.X_OK) else "bash"
-    result = subprocess.run([bash, "-n", path], capture_output=True, text=True, timeout=8)
+    result = subprocess.run([bash, "-n", path], capture_output=True, text=True, errors="replace", timeout=8)
     if result.returncode == 0:
         return 0
     message = result.stderr.strip() or "bash -n exited %d" % result.returncode
