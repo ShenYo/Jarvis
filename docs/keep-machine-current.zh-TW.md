@@ -122,7 +122,7 @@ bash ~/.Jarvis/scripts/apply-agent-identity.sh --unapply --codex
 2. 開關會改變 Codex hook 的 command，所以要在 Codex `/hooks` 重新信任 guard（見 [C](#c-更新後檢查失敗)）。
 3. 開新的 Claude Code 和 Codex session。正在跑的 session 會保留 agent 的環境變數，背景 session 也會，直到背景 daemon 重新啟動（見 [Agent identity](./agent-identity.md#what-a-run-writes)）。
 4. 在新 session 檢查：`gh api user -q .login` 印出 operator 的帳號，和一般終端機印的一樣；`git var GIT_AUTHOR_IDENT` 是 operator 的名字。
-5. 開一個 pull request 把暫時規則放回去：review loop 的 "While the machine account is suspended" 段落，以及 Jarvis `AGENTS.md` 的第 6 條，兩者都取 [`a226a64`](https://github.com/ShenYo/Jarvis/blob/a226a64/docs/dispatch/review-loop.md#while-the-machine-account-is-suspended) 的版本；再加上 [Friday #60](https://github.com/ShenYo/Friday/pull/60) 的那一條。它們規定沒辦法用 agent 身分張貼時 review 怎麼進行。把裡面的日期和 issue 編號改成這次停權的。
+5. 開一個 pull request 把暫時規則放回去：review loop 的 "While the machine account is suspended" 段落，以及 Jarvis `AGENTS.md` 的第 6 條，兩者都取 [`a226a64`](https://github.com/ShenYo/Jarvis/blob/a226a64/docs/dispatch/review-loop.md#while-the-machine-account-is-suspended) 的版本；再加上 [Friday #60](https://github.com/ShenYo/Friday/pull/60) 的那一條。它們規定沒辦法用 agent 身分張貼時 review 怎麼進行。把裡面的日期和 issue 編號改成這次停權的，並把段落結尾 "When the account is restored" 那一段換成指向下方「切換回機器帳號」的說明：那一段自己的清單已經過時。
 
 ### 切換回機器帳號
 

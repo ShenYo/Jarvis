@@ -172,7 +172,9 @@ bash ~/.Jarvis/scripts/apply-agent-identity.sh --unapply --codex
    and Friday's bullet from
    [Friday #60](https://github.com/ShenYo/Friday/pull/60). They say how
    reviews run while nothing can be posted as the agent. Update their dates
-   and issue numbers to the new suspension.
+   and issue numbers to the new suspension, and replace the section's
+   closing "When the account is restored" paragraph with a pointer to
+   "Switch back to the machine account" below: its own list is out of date.
 
 ### Switch back to the machine account
 
