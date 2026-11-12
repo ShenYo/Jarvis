@@ -39,7 +39,7 @@ check "a .sh file that parses: silent" silent
 printf '%s\n' "$bad" >"$root/bad.sh"
 run "$(edited "$root/bad.sh")"
 check "a .sh file that does not parse: exit 2, names the file" flagged "$root/bad.sh"
-check "a .sh file that does not parse: bash's own message is passed on" test -n "${err#*does not parse*:}"
+check "a .sh file that does not parse: bash's own message is passed on" eval '[[ ${err#*does not parse*:} == *"syntax error"* ]]'
 
 printf '%s\n' "$bad" >"$root/bad.bash"
 run "$(edited "$root/bad.bash")"
@@ -56,6 +56,14 @@ check "no suffix, #!/bin/sh: flagged" flagged "$root/hook-sh"
 printf '#!/usr/bin/env -S bash -e\n%s\n' "$bad" >"$root/env-s"
 run "$(edited "$root/env-s")"
 check "no suffix, env with an option: flagged" flagged "$root/env-s"
+
+printf '#!/usr/bin/env LC_ALL=C bash\n%s\n' "$bad" >"$root/env-assign"
+run "$(edited "$root/env-assign")"
+check "no suffix, env with an assignment: flagged" flagged "$root/env-assign"
+
+printf 'shopt -s extglob\ncase "$1" in\n  +(a|b)) echo x ;;\nesac\n' >"$root/extglob.sh"
+run "$(edited "$root/extglob.sh")"
+check "a script that turns extglob on: its patterns parse" silent
 
 printf '#!/bin/zsh\n%s\n' "$bad" >"$root/zsh-script"
 run "$(edited "$root/zsh-script")"

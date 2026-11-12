@@ -30,7 +30,7 @@ def interpreter(first_line):
         return ""
     prog = os.path.basename(words[0])
     if prog == "env":
-        rest = [w for w in words[1:] if not w.startswith("-")]
+        rest = [w for w in words[1:] if not w.startswith("-") and "=" not in w]
         prog = os.path.basename(rest[0]) if rest else ""
     return prog
 
@@ -52,7 +52,13 @@ def main():
     if not path or not os.path.isfile(path) or not is_shell_script(path):
         return 0
     bash = "/bin/bash" if os.access("/bin/bash", os.X_OK) else "bash"
-    result = subprocess.run([bash, "-n", path], capture_output=True, text=True, errors="replace", timeout=8)
+    # `bash -n` runs nothing, so a script's own `shopt -s extglob` is not in
+    # force while its patterns are parsed; turn it on for a script that names it.
+    with open(path, "rb") as f:
+        extglob = ["-O", "extglob"] if b"extglob" in f.read() else []
+    result = subprocess.run(
+        [bash] + extglob + ["-n", path], capture_output=True, text=True, errors="replace", timeout=8
+    )
     if result.returncode == 0:
         return 0
     message = result.stderr.strip() or "bash -n exited %d" % result.returncode
