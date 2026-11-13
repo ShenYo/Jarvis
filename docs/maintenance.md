@@ -86,10 +86,14 @@ the entry is and where it came from (another tool may have installed it), keep
 it under a dated name if it may still be wanted, and rerun the script:
 
 ```sh
-ls -la ~/.claude/skills/<name>
-mv ~/.claude/skills/<name> "$HOME/.claude/skills.conflict-<name>-$(date +%Y%m%d-%H%M%S)"
+SKILLS=~/.claude/skills   # for Codex: "${CODEX_HOME:-$HOME/.codex}/skills"
+ls -la "$SKILLS/<name>"
+mv "$SKILLS/<name>" "$SKILLS.conflict-<name>-$(date +%Y%m%d-%H%M%S)"
 ~/.Jarvis/sync-personal-skills.sh
 ```
+
+A relative link moved this way no longer resolves; what `ls -la` printed is the
+record of where it pointed.
 
 When the entry points at another Skill inside `.agents/skills`, two Skills
 declare the same `name:`; rename one of them rather than moving the entry.

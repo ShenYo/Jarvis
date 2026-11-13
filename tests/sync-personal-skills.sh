@@ -45,9 +45,11 @@ run() {
 
 # A clean home links everything and exits 0.
 h=$(home clean); run clean
-if [ "$code" = 0 ] \
-   && [ "$(readlink "$h/.claude/skills/alpha")" = "../../.agents/skills/alpha" ] \
-   && [ "$(readlink "$h/.codex/skills/grp-gamma")" = "../../.agents/skills/grp/gamma" ] \
+targets=$(for t in .claude .codex; do for n in alpha beta grp-gamma; do
+  printf '%s/%s=%s\n' "$t" "$n" "$(readlink "$h/$t/skills/$n")"; done; done)
+want_targets=$(for t in .claude .codex; do
+  printf '%s/alpha=../../.agents/skills/alpha\n%s/beta=../../.agents/skills/beta\n%s/grp-gamma=../../.agents/skills/grp/gamma\n' "$t" "$t" "$t"; done)
+if [ "$code" = 0 ] && [ "$targets" = "$want_targets" ] \
    && [ "$(find "$h/.claude/skills" -type l | wc -l | tr -d ' ')" = 3 ] \
    && [ "$(find "$h/.codex/skills" -type l | wc -l | tr -d ' ')" = 3 ]; then
   ok "clean home links every Skill into both tools and exits 0"
