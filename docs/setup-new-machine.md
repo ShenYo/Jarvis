@@ -129,8 +129,9 @@ fresh Codex install has the home but not yet that subdirectory
 treated as an error. It checks that each canonical skill has an existing entry under its declared name in every bridged tool, reports
 dangling non-reserved entries, and rejects a top-level canonical directory that
 is neither a Skill nor a grouping directory. A live canonical-name entry that
-points at the wrong target is left unchanged and is not detected. It exits
-non-zero if these checks fail. Re-run it after adding or removing a skill.
+does not resolve to its canonical directory is reported as a `CONFLICT`
+(entry, where it points, what was expected) and left unchanged, never
+overwritten. It exits non-zero if these checks fail. Re-run it after adding or removing a skill.
 
 ## 4. Apply the guards
 

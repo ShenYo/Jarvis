@@ -45,6 +45,8 @@ jobs:
         run: bash tests/githooks.sh
       - name: The Skill lock check refuses a locked maintained Skill and an unlocked unknown one
         run: bash tests/skill-lock.sh
+      - name: The Skill bridge links, reports a wrong-target entry, and leaves it alone
+        run: bash tests/sync-personal-skills.sh
       - name: The two READMEs agree
         run: python3 scripts/check-readme-parity.py README.md README.zh-TW.md scripts/readme-stale-terms.txt
       - name: The two setup guides agree

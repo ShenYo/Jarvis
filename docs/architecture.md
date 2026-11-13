@@ -150,8 +150,9 @@ checks canonical-name presence and dangling entries rather than merely printing
 success, because a hand-maintained bridge once left installed Skills on disk
 yet invisible to Claude Code
 ([history](./history.md#hand-maintained-bridge)). It ensures canonical names have existing
-entries in each bridged tool and reports dangling non-reserved entries. It does not validate or
-repair a live canonical-name entry that points at the wrong target, nor does it
+entries in each bridged tool and reports dangling non-reserved entries. It
+reports a live canonical-name entry that does not resolve to its canonical
+directory as a `CONFLICT`, and does not repair it. It does not
 prove Git-operation enforcement or each runtime's native skill-loader behavior.
 
 Claude Code receives links in `~/.claude/skills/`. Codex receives links in
