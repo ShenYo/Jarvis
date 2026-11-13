@@ -86,9 +86,24 @@ Avoid a blanket `npx skills update -g`: upstream can remove Skills that are
 still locally installed
 ([history](./history.md#upstream-removed-installed-skills)). Use
 `npx skills update -g <name>` only after checking that specific upstream Skill,
-then review the diff. The existing global lock filename is
-[`.agents/.skill-lock.json`](../.agents/.skill-lock.json); `skills-lock.json` is project scope. Missing
-`agents/openai.yaml` descriptors are not, by themselves, a reason to reinstall.
+then review the diff.
+
+That command cannot move an entry whose `ref` is a commit SHA: it fetches the
+pinned commit, finds nothing newer and reports "up to date" (seen with
+`skills` 1.8.1 on 2026-11-13, for the two `stablyai/orca` Skills). For such
+an entry, re-add the named Skills from their source and name the agents:
+`npx skills add <source> -g --skill <name> --agent <agents>`. Run it from a
+plain terminal, not from inside an agent session: in the same run, started
+from inside one, it detected the agent, did not prompt, and without `--agent`
+installed to every agent it found, the fan-out warned against above.
+Afterwards check which agent directories it wrote to. That run also dropped
+the `ref` pin from both entries; whether `npx skills update -g <name>` then
+moves them has not been tried.
+
+The existing global lock filename is
+[`.agents/.skill-lock.json`](../.agents/.skill-lock.json);
+`skills-lock.json` is project scope. Missing `agents/openai.yaml` descriptors
+are not, by themselves, a reason to reinstall.
 
 ## Troubleshooting
 
