@@ -60,8 +60,8 @@ must not inherit the author's conversation.
   Claude Code review it.
 
 The reviewer is always the one named here. A Skill whose description claims
-review requests, such as `orchestration` ("have Codex or Claude review this"
-means an Orca worker), does not apply to this loop.
+review requests, such as `orchestration` ("Have Codex (or Claude) review this
+and report back" means an Orca worker), does not apply to this loop.
 
 In round 1 the reviewer gets the PR, its description and the issue, and nothing
 of the author's reasoning. From round 2 on it also gets the previous round's
