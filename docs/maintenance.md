@@ -77,6 +77,23 @@ ln -s .Jarvis/.agents ~/.agents
 ~/.Jarvis/sync-personal-skills.sh
 ```
 
+### Recover a Skill entry conflict
+
+The script prints `CONFLICT` when an entry under a Skill's name, in
+`~/.claude/skills` or the Codex skills directory, is live but does not resolve
+to that Skill's canonical directory. It never changes the entry. Look at what
+the entry is and where it came from (another tool may have installed it), keep
+it under a dated name if it may still be wanted, and rerun the script:
+
+```sh
+ls -la ~/.claude/skills/<name>
+mv ~/.claude/skills/<name> "$HOME/.claude/skills.conflict-<name>-$(date +%Y%m%d-%H%M%S)"
+~/.Jarvis/sync-personal-skills.sh
+```
+
+When the entry points at another Skill inside `.agents/skills`, two Skills
+declare the same `name:`; rename one of them rather than moving the entry.
+
 ## Two CLI behaviours to know
 
 Avoid `npx skills add -y`: its non-interactive fan-out can create unrelated

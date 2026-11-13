@@ -13,7 +13,8 @@ set -uo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 script="${SCRIPT_UNDER_TEST:-$repo/sync-personal-skills.sh}"
-root=$(cd -P "$(mktemp -d "${TMPDIR:-/tmp}/sync-skills-test.XXXXXX")" && pwd -P)
+root=$(mktemp -d "${TMPDIR:-/tmp}/sync-skills-test.XXXXXX") && [ -n "$root" ] || exit 1
+root=$(cd -P "$root" && pwd -P) || exit 1
 echo "sandboxes: $root"
 
 fails=0
@@ -70,6 +71,20 @@ if [ "$code" = 0 ] && ! grep -q CONFLICT "$root/absolute.log"; then
   ok "an equivalent absolute spelling of the right target is accepted"
 else
   bad "an equivalent absolute spelling of the right target is accepted (exit $code)" "$root/absolute.log"
+fi
+
+# A clone reached through a symlink (~/.Jarvis -> elsewhere, as in CI's fresh
+# home) is still the canonical directory: a second run reports nothing.
+h=$(home symlinked)
+mv "$h/.Jarvis" "$h/clone"
+ln -s "$h/clone" "$h/.Jarvis"
+run symlinked; first=$code
+run symlinked
+if [ "$first" = 0 ] && [ "$code" = 0 ] && ! grep -q CONFLICT "$root/symlinked.log" \
+   && [ -L "$h/.claude/skills/alpha" ]; then
+  ok "a clone reached through a symlink is accepted on a second run"
+else
+  bad "a clone reached through a symlink is accepted on a second run (exit $first, $code)" "$root/symlinked.log"
 fi
 
 # A dangling entry is replaced.
