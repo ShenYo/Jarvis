@@ -25,6 +25,7 @@ Code session on this machine runs under, whichever repository it starts in:
 | `autoMode.hard_deny`, `soft_deny` | The same rules for the auto-mode classifier, in prose, so spellings a pattern cannot see (`bash -c`, `git -C`, a script) are judged too. Both keep the built-in rules through `"$defaults"`. |
 | `hooks.PreToolUse` | Runs [`bash-guard.py`](../.agents/claude-guard/bash-guard.py) on every Bash call. It parses the command rather than matching its text, so it sees through `git -C <dir>`, `-c` options, a path such as `/usr/bin/git`, `bash -c` and `eval`, `$(...)`, a heredoc fed to a shell, `env`, `xargs` and `timeout`, flag clusters such as `-an` and `-vrf`, and git aliases. It denies the same operations and asks at the same checkpoints, including a bare `git push` from the default branch, and it also asks before a push that may carry a tag (`--tags`, `--follow-tags`, `push.followTags`, or a refspec naming a tag), and before publishing a release (`gh release create`, `edit` or `upload`, or the same through `gh api`), because a release tag and a release are checkpoints too. It fails closed: if it cannot start, the Bash call is blocked. |
 | `hooks.UserPromptSubmit`, `hooks.SessionStart` | Run [`session-notes.py`](../.agents/claude-guard/session-notes.py), which is not a guard: it tells the agent when to save its [session notes](./session-notes.md) and, after a compaction, where they are. It only advises, and never blocks. |
+| `hooks.PostToolUse` | Runs [`shell-syntax.py`](../.agents/claude-guard/shell-syntax.py) after every Edit and Write. When the file is a shell script (`.sh`, `.bash`, or a `#!` line that runs `sh` or `bash`, such as a Git hook) and `bash -n` cannot parse it, the agent sees bash's message at once, rather than in a review round. It uses `/bin/bash` where there is one, which on macOS is bash 3.2, so syntax only a newer bash accepts is caught there. For a script with a `shopt -s extglob` at the start of a line it runs `bash -O extglob -n`, since `bash -n` runs nothing and would otherwise reject that script's own patterns. Like `session-notes.py`, it only advises: the edit has already happened, and any error in the hook is silent. It does not see a script changed through Bash (`sed -i`, a heredoc). |
 | `disableBypassPermissionsMode` | Turns bypass mode off; in bypass mode no ask rule would prompt. |
 
 Apply it, or check whether the settings already carry it:
@@ -35,7 +36,8 @@ Apply it, or check whether the settings already carry it:
 ```
 
 The script copies the rules into the settings file, and the hooks to
-`~/.claude/hooks/` (`claude-guard.py` and `jarvis-session-notes.py`), rather
+`~/.claude/hooks/` (`claude-guard.py`, `jarvis-session-notes.py` and
+`jarvis-shell-syntax.py`), rather
 than linking them here, so a
 session keeps its guard on a machine where this repository is missing. It
 keeps every rule the person wrote, including one that equals a guard rule,
@@ -77,11 +79,13 @@ use `git restore --staged <path>`.
 
 The tests run in sandboxes and never touch the real `~/.claude`. The first
 covers the merge; the second is the hook's probe corpus, including every
-spelling an independent review found getting past the text rules:
+spelling an independent review found getting past the text rules; the third
+covers the shell-syntax hook:
 
 ```sh
 bash ~/.Jarvis/tests/claude-guard.sh
 bash ~/.Jarvis/tests/bash-guard.sh
+bash ~/.Jarvis/tests/shell-syntax.sh
 ```
 
 ## Codex
