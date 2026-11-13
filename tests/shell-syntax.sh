@@ -81,6 +81,19 @@ printf 'f() {\n  shopt -s extglob\n  case "$1" in +(a|b)) echo m ;; esac\n}\n' >
 run "$(edited "$root/extglob-fn.sh")"
 check "extglob turned on inside the function that uses it: flagged" flagged "$root/extglob-fn.sh"
 
+pattern='case "$1" in\n  +(a|b)) echo x ;;\nesac\n'
+printf "shopt -s nullglob extglob\n$pattern" >"$root/extglob-two.sh"
+run "$(edited "$root/extglob-two.sh")"
+check "extglob turned on beside another option: its patterns parse" silent
+
+printf "shopt -u extglob\n$pattern" >"$root/extglob-unset.sh"
+run "$(edited "$root/extglob-unset.sh")"
+check "extglob turned off, not on: flagged" flagged "$root/extglob-unset.sh"
+
+printf "shopt -s nullglob # extglob\n$pattern" >"$root/extglob-comment.sh"
+run "$(edited "$root/extglob-comment.sh")"
+check "extglob only in a comment after another shopt: flagged" flagged "$root/extglob-comment.sh"
+
 printf '#!/bin/zsh\n%s\n' "$bad" >"$root/zsh-script"
 run "$(edited "$root/zsh-script")"
 check "a zsh script: left alone" silent
