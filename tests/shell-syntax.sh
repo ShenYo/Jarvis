@@ -65,6 +65,22 @@ printf 'shopt -s extglob\ncase "$1" in\n  +(a|b)) echo x ;;\nesac\n' >"$root/ext
 run "$(edited "$root/extglob.sh")"
 check "a script that turns extglob on: its patterns parse" silent
 
+{ printf '# %0300d\n' 0; printf 'shopt -s extglob\ncase "$1" in\n  +(a|b)) echo x ;;\nesac\n'; } >"$root/extglob-late.sh"
+run "$(edited "$root/extglob-late.sh")"
+check "extglob turned on after a long comment: its patterns parse" silent
+
+printf 'case "$1" in\n  +(a|b)) echo x ;;\nesac\n' >"$root/extglob-off.sh"
+run "$(edited "$root/extglob-off.sh")"
+check "an extglob pattern with extglob never turned on: flagged" flagged "$root/extglob-off.sh"
+
+printf '# we do not use extglob here\ncase "$1" in\n  +(a|b)) echo x ;;\nesac\n' >"$root/extglob-word.sh"
+run "$(edited "$root/extglob-word.sh")"
+check "extglob only named in a comment: flagged" flagged "$root/extglob-word.sh"
+
+printf 'f() {\n  shopt -s extglob\n  case "$1" in +(a|b)) echo m ;; esac\n}\n' >"$root/extglob-fn.sh"
+run "$(edited "$root/extglob-fn.sh")"
+check "extglob turned on inside the function that uses it: flagged" flagged "$root/extglob-fn.sh"
+
 printf '#!/bin/zsh\n%s\n' "$bad" >"$root/zsh-script"
 run "$(edited "$root/zsh-script")"
 check "a zsh script: left alone" silent

@@ -14,11 +14,13 @@ this hook, prints nothing and exits 0: this hook only advises.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 
 SUFFIXES = (".sh", ".bash")
 SHELLS = ("sh", "bash")
+EXTGLOB = re.compile(rb"(?m)^shopt[ \t]+-s\b[^\n#]*\bextglob\b")
 
 
 def interpreter(first_line):
@@ -53,9 +55,11 @@ def main():
         return 0
     bash = "/bin/bash" if os.access("/bin/bash", os.X_OK) else "bash"
     # `bash -n` runs nothing, so a script's own `shopt -s extglob` is not in
-    # force while its patterns are parsed; turn it on for a script that names it.
+    # force while its later patterns are parsed. Turn it on only for a top-level
+    # `shopt -s extglob`: inside a function or a compound command bash reads the
+    # patterns before the shopt runs, and that script really does not parse.
     with open(path, "rb") as f:
-        extglob = ["-O", "extglob"] if b"extglob" in f.read() else []
+        extglob = ["-O", "extglob"] if EXTGLOB.search(f.read()) else []
     result = subprocess.run(
         [bash] + extglob + ["-n", path], capture_output=True, text=True, errors="replace", timeout=8
     )
