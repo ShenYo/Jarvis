@@ -140,7 +140,7 @@ bridge() {
   local prefix
   prefix=$(agents_prefix "$target")
 
-  local created=0 rel name link
+  local created=0 rel name link want got where
   while IFS=$'\t' read -r rel name; do
     link="$target/$name"
     # -e is false for a dangling symlink, so a broken link is replaced too.
@@ -148,6 +148,23 @@ bridge() {
       ln -sfn "$prefix/$rel" "$link"
       echo "linked   $label: $name"
       created=$((created + 1))
+    else
+      # A live entry is only right if it resolves to this Skill's canonical
+      # directory. Anything else -- another copy, a real directory, a file --
+      # would load the wrong Skill while every check passed. Report it; never
+      # repair it, because it may have been put there on purpose.
+      want=$(cd -P "$CANONICAL/$rel" 2>/dev/null && pwd -P) || want="$CANONICAL/$rel"
+      got=$(cd -P "$link" 2>/dev/null && pwd -P) || got=""
+      if [ "$got" != "$want" ]; then
+        if [ -L "$link" ]; then
+          where="points at $(readlink "$link")"
+        else
+          where="is not a symlink"
+        fi
+        echo "CONFLICT $label: $link $where; expected a link to $want." >&2
+        echo "         Left alone: it may be there on purpose. Move it away, then run this again." >&2
+        fail=1
+      fi
     fi
   done < <(skills)
 

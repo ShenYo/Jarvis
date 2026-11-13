@@ -115,8 +115,9 @@ Claude/Codex bridge 目錄。
 錯誤。它會檢查每個 canonical skill，在每個
 已 bridge 的工具裡，是否都有一個以其宣告名稱存在的 entry，回報 dangling 的
 non-reserved entries，並拒絕一個既不是 Skill、也不是 grouping directory 的
-top-level canonical 目錄。一個指向錯誤目標、但本身仍是 live 的
-canonical-name entry 會被保留不動，也不會被偵測出來。這些檢查任一失敗，它就會
+top-level canonical 目錄。一個 live、但沒有解析到其 canonical 目錄的
+canonical-name entry 會被回報為 `CONFLICT`（entry、它指向哪裡、預期是什麼），並保留不動，
+絕不覆寫。這些檢查任一失敗，它就會
 以非零狀態結束。每次新增或移除一個 skill 之後，請重新執行它。
 
 ## 4. 套用 guard
