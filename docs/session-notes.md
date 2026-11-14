@@ -87,9 +87,10 @@ Where exactly it goes, and when to ask first:
   worktree, so a session in any worktree of that repository finds the same
   file. That root is what
   `git rev-parse --path-format=absolute --git-common-dir` prints, without its
-  trailing `/.git`. If the write there is refused, as a sandbox may do from a
-  linked worktree, ask the user. The file is not in Git: a handoff for another
-  clone or another machine is sent there, it does not travel with a push.
+  trailing `/.git`. If it does not end in `/.git`, or the write there is
+  refused, as a sandbox may do from a linked worktree, ask the user. The file
+  is not in Git: a handoff for another clone or another machine is sent there,
+  it does not travel with a push.
 - **Only where Git ignores it.** Run
   `git -C <main root> check-ignore -q docs/temp/handoff/<task>.md` first; the
   path is read from that root, not from the directory you are in. If the path

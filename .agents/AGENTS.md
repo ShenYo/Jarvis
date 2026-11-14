@@ -13,8 +13,8 @@ responsible for.
 
 <!-- Responsibility: how every session behaves, whatever the task: the reply
 language, which source wins, which repository a command runs in, and who does
-the work. Written out: every turn
-needs it; the dispatch detail is in docs/dispatch/, behind its pointer. -->
+the work. Written out: every turn needs it; the dispatch detail is in
+docs/dispatch/, behind its pointer. -->
 
 ### Reply in the user's language
 <!-- PERSONAL: the owner's preference; a fork replaces this. -->
@@ -122,10 +122,10 @@ involved.
 
 ## Contracts
 
-<!-- Responsibility: formats other people and tools read: documents, handoffs,
-commit messages, pull requests, and commands handed to the user to run. Short rules
-are written out; the Git contract is in docs/git.md, behind the pointer
-below. -->
+<!-- Responsibility: formats other people and tools read: documents,
+handoffs, commit messages, pull requests, and commands handed to the user to
+run. Short rules are written out; the Git contract is in docs/git.md, behind
+the pointer below. -->
 
 ### Documents: English, opened by a Chinese summary
 <!-- PERSONAL: the owner's preference; a fork replaces this. -->
@@ -154,7 +154,7 @@ Skill's temporary-directory default; a Friday consumer keeps its per-worktree
 convention). It copies from the notes, never links them, and summarises and
 points to the issues and pull requests that hold decisions, open items and
 blockers. Before writing one, read
-[`docs/session-notes.md`](../docs/session-notes.md#notes-and-handoffs).
+[`~/.Jarvis/docs/session-notes.md`](../docs/session-notes.md#notes-and-handoffs).
 
 ### A deletion the user runs
 <!-- MIXED: generic method, owner's style; a fork reviews this. -->
