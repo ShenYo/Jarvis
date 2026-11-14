@@ -2,7 +2,9 @@
 
 **English** · [繁體中文](./setup-new-machine.zh-TW.md)
 
-> **中文摘要**：這份指南帶你在一台全新的機器上依序完成 Jarvis：安裝前置工具、clone 到
+> **中文摘要**：這份指南分三個階段帶你在一台全新的機器上完成 Jarvis：stage 1 指示與 Skills，
+> stage 2 guard，stage 3 identity（選用，最後做，可以完全略過 machine account）。
+> 內容依序是：安裝前置工具、clone 到
 > `~/.Jarvis` 並啟用 Git hooks、執行 bridge、套用 Claude Code 與 Codex 的 guard、設定 agent
 > identity（Claude Code 與 Codex 各一次），可選擇打開 `--require` 開關，最後逐項驗證。clone 與
 > bridge 本身不安裝 runtime、不建立憑證，也不讓新專案依賴 Jarvis；憑證只出現在 agent identity 那幾步。
@@ -22,8 +24,11 @@ Adoption has three stages. Do them in order, and stop after any of them:
 - **Stage 2, the guard:** step 4. It refuses destructive Git and file
   operations in every project on the machine.
 - **Stage 3, identity (optional, last):** steps 5 and 6. This gives agents a
-  GitHub account of their own. You can skip the machine account entirely;
-  nothing in stages 1 and 2 needs it.
+  GitHub account of their own. You can skip the machine account entirely:
+  stages 1 and 2 install and work without it. The one thing that needs it is
+  the pull request review loop, which posts its comments as the machine
+  account and, without one, posts nothing
+  ([review-loop.md](./dispatch/review-loop.md#never-as-the-owner)).
 
 If you forked Jarvis rather than cloning the owner's copy, read the
 [fork checklist](./fork-checklist.md) first.
@@ -304,16 +309,18 @@ again.
 
 ## 7. Verify the whole machine
 
-Run each command; "OK" is what it should show, and every one exits 0.
+Run each command; "OK" is what it should show, and every one exits 0. The
+last column says which stage a row belongs to; skip the rows of a stage you did
+not do.
 
-| Command | OK looks like |
-| --- | --- |
-| `~/.Jarvis/sync-personal-skills.sh` | the last line starts `checks passed:` |
-| `git -C ~/.Jarvis config --get core.hooksPath` | `.githooks` |
-| `bash ~/.Jarvis/scripts/apply-claude-guard.sh --check` | `already carry the guard` |
-| `bash ~/.Jarvis/scripts/apply-codex-guard.sh --check` | `already carry the guard`, then `trust: OK - Codex trusts the Jarvis guard entry` |
-| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check` | `state: applied`, `Next: nothing — the identity is already applied; a new Claude Code session uses it`, `all checks passed` |
-| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex` | `state: applied`, `Next: nothing — the identity is already applied; a new Codex session uses it`, `all checks passed` |
+| Command | OK looks like | Stage |
+| --- | --- | --- |
+| `~/.Jarvis/sync-personal-skills.sh` | the last line starts `checks passed:` | 1 |
+| `git -C ~/.Jarvis config --get core.hooksPath` | `.githooks` | 1 |
+| `bash ~/.Jarvis/scripts/apply-claude-guard.sh --check` | `already carry the guard` | 2 |
+| `bash ~/.Jarvis/scripts/apply-codex-guard.sh --check` | `already carry the guard`, then `trust: OK - Codex trusts the Jarvis guard entry` | 2 |
+| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check` | `state: applied`, `Next: nothing — the identity is already applied; a new Claude Code session uses it`, `all checks passed` | 3 only |
+| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex` | `state: applied`, `Next: nothing — the identity is already applied; a new Codex session uses it`, `all checks passed` | 3 only |
 
 After step 6, both identity checks also show an `OK` line for the
 `agent-identity switch`, with Claude Code and Codex both `on`.

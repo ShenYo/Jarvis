@@ -2,7 +2,9 @@
 
 [English](./setup-new-machine.md) · **繁體中文**
 
-> **中文摘要**：這份指南帶你在一台全新的機器上依序完成 Jarvis：安裝前置工具、clone 到
+> **中文摘要**：這份指南分三個階段帶你在一台全新的機器上完成 Jarvis：stage 1 指示與 Skills，
+> stage 2 guard，stage 3 identity（選用，最後做，可以完全略過 machine account）。
+> 內容依序是：安裝前置工具、clone 到
 > `~/.Jarvis` 並啟用 Git hooks、執行 bridge、套用 Claude Code 與 Codex 的 guard、設定 agent
 > identity（Claude Code 與 Codex 各一次），可選擇打開 `--require` 開關，最後逐項驗證。clone 與
 > bridge 本身不安裝 runtime、不建立憑證，也不讓新專案依賴 Jarvis；憑證只出現在 agent identity 那幾步。
@@ -19,7 +21,9 @@
   不安裝 runtime，也不建立憑證。
 - **Stage 2，guard：** 第 4 步。它在這台機器的每個專案裡拒絕破壞性的 Git 與檔案操作。
 - **Stage 3，identity（選用，最後做）：** 第 5、6 步。這讓 agent 擁有自己的 GitHub 帳號。
-  machine account 可以完全略過；stage 1 與 stage 2 都不需要它。
+  machine account 可以完全略過：stage 1 與 stage 2 不用它就能安裝與運作。唯一需要它的是
+  pull request 的 review loop：它以 machine account 張貼 comment，沒有的話就什麼都不張貼
+  （[review-loop.md](./dispatch/review-loop.md#never-as-the-owner)，只有英文）。
 
 如果你是 fork 了 Jarvis，而不是 clone owner 的副本，請先讀 [fork 清單](./fork-checklist.md)
 （只有英文）。
@@ -266,16 +270,17 @@ bash ~/.Jarvis/scripts/apply-agent-identity.sh --require
 
 ## 7. 驗證整台機器
 
-逐一執行下列指令；「OK」是它應該顯示的內容，而且每一個都以 0 離開。
+逐一執行下列指令；「OK」是它應該顯示的內容，而且每一個都以 0 離開。最後一欄是該列所屬的
+stage；沒做的 stage，它的列就跳過。
 
-| 指令 | OK 的樣子 |
-| --- | --- |
-| `~/.Jarvis/sync-personal-skills.sh` | 最後一行以 `checks passed:` 開頭 |
-| `git -C ~/.Jarvis config --get core.hooksPath` | `.githooks` |
-| `bash ~/.Jarvis/scripts/apply-claude-guard.sh --check` | `already carry the guard` |
-| `bash ~/.Jarvis/scripts/apply-codex-guard.sh --check` | `already carry the guard`，接著是 `trust: OK - Codex trusts the Jarvis guard entry` |
-| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check` | `state: applied`、`Next: nothing — the identity is already applied; a new Claude Code session uses it`、`all checks passed` |
-| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex` | `state: applied`、`Next: nothing — the identity is already applied; a new Codex session uses it`、`all checks passed` |
+| 指令 | OK 的樣子 | Stage |
+| --- | --- | --- |
+| `~/.Jarvis/sync-personal-skills.sh` | 最後一行以 `checks passed:` 開頭 | 1 |
+| `git -C ~/.Jarvis config --get core.hooksPath` | `.githooks` | 1 |
+| `bash ~/.Jarvis/scripts/apply-claude-guard.sh --check` | `already carry the guard` | 2 |
+| `bash ~/.Jarvis/scripts/apply-codex-guard.sh --check` | `already carry the guard`，接著是 `trust: OK - Codex trusts the Jarvis guard entry` | 2 |
+| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check` | `state: applied`、`Next: nothing — the identity is already applied; a new Claude Code session uses it`、`all checks passed` | 只有 3 |
+| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex` | `state: applied`、`Next: nothing — the identity is already applied; a new Codex session uses it`、`all checks passed` | 只有 3 |
 
 做完第 6 步之後，兩個 identity 檢查也會多出一行 `agent-identity switch` 的 `OK`，Claude Code 與 Codex 都是
 `on`。

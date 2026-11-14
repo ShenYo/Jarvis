@@ -150,6 +150,7 @@ step in order, with a check after each.
 
 | Document | Read it when |
 | --- | --- |
+| [Forking Jarvis](./docs/fork-checklist.md) | You are adopting your own fork: what to change, what can stay, and what a fork does not get. |
 | [Setting up a new machine](./docs/setup-new-machine.md) | You are installing Jarvis on a machine for the first time: every step in order, with its check. |
 | [Keeping a machine current](./docs/keep-machine-current.md) | Jarvis has changed and a machine that already has it should catch up: the situations, and the steps for each. |
 | [Architecture](./docs/architecture.md) | You want to know how the layout and the symlink chain work, what is CLI-managed, and what the bridge does not prove. |
