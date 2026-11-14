@@ -13,6 +13,17 @@
 [Architecture](./architecture.md)、[Guard](./guard.md) 與
 [Agent identity](./agent-identity.md)（這三份只有英文）。
 
+採用分三個階段。依序進行，任何一個階段之後都可以停下來：
+
+- **Stage 1，指示與 Skills：** clone 與 bridge（第 2、3 步）。這會得到 Skills 與個人指示，
+  不安裝 runtime，也不建立憑證。
+- **Stage 2，guard：** 第 4 步。它在這台機器的每個專案裡拒絕破壞性的 Git 與檔案操作。
+- **Stage 3，identity（選用，最後做）：** 第 5、6 步。這讓 agent 擁有自己的 GitHub 帳號。
+  machine account 可以完全略過；stage 1 與 stage 2 都不需要它。
+
+如果你是 fork 了 Jarvis，而不是 clone owner 的副本，請先讀 [fork 清單](./fork-checklist.md)
+（只有英文）。
+
 ## 1. 前置條件
 
 前置條件是 Git、Bash，以及對設定好的 Jarvis remote 的存取權。只有在
@@ -20,10 +31,11 @@
 checkout 上面再 clone 一次。既有的 checkout 應該在它自己的 Git history 下
 檢查與調解。
 
-clone 與 bridge 不需要更多東西。這份指南其餘的部分需要，所以開始之前請全部裝好：
+clone 與 bridge 不需要更多東西。這份指南其餘的部分需要，所以開始之前請裝好你打算做的那些階段所需要的：
 
 - `git`：用來 clone，也用來執行這個 repository 的 hooks。
-- `gh`：GitHub CLI，用來以 machine account 登入。
+- `gh`：GitHub CLI，用來以 machine account 登入。只有 stage 3 需要；
+  略過 machine account 就可以不裝。
 - `jq`：guard 的腳本與 agent-identity 腳本都要求它。
 - `python3` 3.11 或更新的版本。guard hook 用它執行，而 Codex 是否信任這支 hook，是用
   `tomllib` 讀 `~/.codex/config.toml` 判斷的，只有 Python 3.11+ 才有 `tomllib`。
@@ -42,9 +54,11 @@ done
 python3 -c 'import tomllib' && echo "ok       python3 has tomllib"
 ```
 
-每一行都應該以 `ok` 開頭。
+每一行都應該以 `ok` 開頭；如果在 stage 3 之前停下來，`gh`、`ssh` 與 `ssh-keygen` 可以缺少。
 
 ## 2. Clone Jarvis
+
+Stage 1。
 
 clone 到 `~/.Jarvis`。路徑是固定的：bridge 腳本要求這個 repository 必須 clone 在那裡。下面的區塊
 在 `~/.Jarvis` 已經存在時會拒絕執行。
@@ -70,6 +84,8 @@ git -C ~/.Jarvis config core.hooksPath .githooks
 檢查：`git -C ~/.Jarvis config --get core.hooksPath` 印出 `.githooks`。
 
 ## 3. 建立 Skills 的 bridge
+
+Stage 1。
 
 執行 bridge 腳本。它可以安全地重複執行，每次新增或移除 Skill 之後都要重新執行：
 
@@ -122,6 +138,8 @@ canonical-name entry 會被回報為 `CONFLICT`（entry、它指向哪裡、預�
 
 ## 4. 套用 guard
 
+Stage 2。
+
 套用 guard：`bash ~/.Jarvis/scripts/apply-claude-guard.sh` 與
 `bash ~/.Jarvis/scripts/apply-codex-guard.sh`。
 
@@ -145,6 +163,8 @@ bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust
 `trust: OK - Codex trusts the Jarvis guard entry` 並以 0 離開。
 
 ## 5. 設定 agent identity
+
+Stage 3，選用。
 
 要讓 agent 以自己的帳號操作 GitHub，在 guard 之後依下列順序設定 [agent
 identity](./agent-identity.md)：
@@ -227,6 +247,8 @@ Codex：執行中的 session 仍用舊的環境。
 `apply-agent-identity: state: applied`。
 
 ## 6. 選用：打開 agent-identity 開關
+
+Stage 3，選用。
 
 開關打開時，identity 沒有套用的 runtime 寫入 GitHub，一律被 guard 拒絕，Claude Code 與 Codex 一起。在你打開
 之前它都是關的。它的作用見[打開開關](./guard.md#turning-the-switch-on)（只有英文）。請在第 5 步兩個 runtime

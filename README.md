@@ -10,6 +10,16 @@
 Jarvis is the version-controlled, machine-level home for one canonical copy of
 personal AI-agent Skills.
 
+## Who it is for
+
+People who want a personal-scope Skills and guard layer for their own machine.
+It is meant to be forked and adopted; the [fork checklist](./docs/fork-checklist.md)
+says what to change. A fork is a one-time snapshot, and there is no promise that
+upstream merges cleanly into it.
+
+Support: macOS and Claude Code first. Codex and agy are pending. Linux and
+Windows are not supported.
+
 ## What it solves
 
 Jarvis addresses four related scenarios:
