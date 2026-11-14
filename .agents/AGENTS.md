@@ -81,6 +81,10 @@ When you open a pull request, or the owner asks for one to be reviewed, read
 a fresh reviewer agent reviews it first, and you answer every finding. That loop
 is a floor; a repository's own rules may ask for more review, not less.
 
+Across repositories, use `git -C <absolute path>` or absolute paths, and never
+`cd` out of the working directory. State the target repository before any Git,
+tag or hook command.
+
 ## Coding
 
 <!-- Responsibility: how to change code and files, from reading first to
@@ -136,10 +140,13 @@ pull request bodies and code comments, and the instruction files loaded on
 every turn (this file, a `CLAUDE.md`, a Skill's `SKILL.md`), where each line
 costs context.
 
-A handoff written while the session has a notes file
-(`docs/temp/session-notes/<session id>.md`) starts from it: bring the notes up
-to date, link them by absolute path, and add only what they lack. A handoff
-that leaves this machine copies what it needs from them instead of linking
+Session notes serve only their own session after a compaction, never a new
+one. Any cross-session continuation gets a handoff,
+`docs/temp/handoff/<task>.md` in the repository the task belongs to; this
+overrides the `handoff` Skill's temporary-directory default, and a Friday
+consumer keeps its own per-worktree convention. The handoff copies what it
+needs from the notes, never links them, and points to the GitHub issues and
+pull requests that hold decisions, open items and blockers
 ([why](../docs/session-notes.md#notes-and-handoffs)).
 
 ### A deletion the user runs
