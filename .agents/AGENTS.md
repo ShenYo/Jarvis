@@ -149,11 +149,9 @@ costs context.
 Session notes (`docs/temp/session-notes/<session id>.md`) serve only their own
 session after a compaction, never a different session. A cross-session
 continuation gets a handoff named by task, `docs/temp/handoff/<task>.md` in
-the task's repository, where Git ignores it (this overrides the `handoff`
-Skill's temporary-directory default; a Friday consumer keeps its per-worktree
-convention). It copies from the notes, never links them, and summarises and
-points to the issues and pull requests that hold decisions, open items and
-blockers. Before writing one, read
+the task's repository where Git ignores it, overriding the `handoff` Skill's
+temporary-directory default. It copies from the notes and never links them.
+Before writing one, read
 [`~/.Jarvis/docs/session-notes.md`](../docs/session-notes.md#notes-and-handoffs).
 
 ### A deletion the user runs
