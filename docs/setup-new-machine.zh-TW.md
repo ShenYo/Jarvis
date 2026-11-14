@@ -21,9 +21,11 @@
   不安裝 runtime，也不建立憑證。
 - **Stage 2，guard：** 第 4 步。它在這台機器的每個專案裡拒絕破壞性的 Git 與檔案操作。
 - **Stage 3，identity（選用，最後做）：** 第 5、6 步。這讓 agent 擁有自己的 GitHub 帳號。
-  machine account 可以完全略過：stage 1 與 stage 2 不用它就能安裝與運作。唯一需要它的是
-  pull request 的 review loop：它以 machine account 張貼 comment，沒有的話就什麼都不張貼
-  （[review-loop.md](./dispatch/review-loop.md#never-as-the-owner)，只有英文）。
+  machine account 可以完全略過：stage 1 與 stage 2 不用它就能安裝與運作。你放棄的是
+  pull request 這一段：review loop 以 machine account 張貼 comment，沒有的話就什麼都不張貼
+  （[review-loop.md](./dispatch/review-loop.md#never-as-the-owner)，只有英文），而且 agent 開的
+  pull request 會是你自己的，你不能自己 approve
+  （[fork 清單](./fork-checklist.md#5-what-a-fork-does-not-get)，只有英文）。
 
 如果你是 fork 了 Jarvis，而不是 clone owner 的副本，請先讀 [fork 清單](./fork-checklist.md)
 （只有英文）。
@@ -58,7 +60,8 @@ done
 python3 -c 'import tomllib' && echo "ok       python3 has tomllib"
 ```
 
-每一行都應該以 `ok` 開頭；如果在 stage 3 之前停下來，`gh`、`ssh` 與 `ssh-keygen` 可以缺少。
+每一行都應該以 `ok` 開頭，有兩個例外：只做到 stage 1 的話，`jq` 與 `python3` 可以缺少；
+在 stage 3 之前停下來的話，`gh`、`ssh` 與 `ssh-keygen` 可以缺少。
 
 ## 2. Clone Jarvis
 

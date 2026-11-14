@@ -25,10 +25,12 @@ Adoption has three stages. Do them in order, and stop after any of them:
   operations in every project on the machine.
 - **Stage 3, identity (optional, last):** steps 5 and 6. This gives agents a
   GitHub account of their own. You can skip the machine account entirely:
-  stages 1 and 2 install and work without it. The one thing that needs it is
-  the pull request review loop, which posts its comments as the machine
-  account and, without one, posts nothing
-  ([review-loop.md](./dispatch/review-loop.md#never-as-the-owner)).
+  stages 1 and 2 install and work without it. What you give up is on pull
+  requests: the review loop posts its comments as the machine account and,
+  without one, posts nothing
+  ([review-loop.md](./dispatch/review-loop.md#never-as-the-owner)), and the
+  agents' pull requests are your own, which you cannot approve yourself
+  ([fork checklist](./fork-checklist.md#5-what-a-fork-does-not-get)).
 
 If you forked Jarvis rather than cloning the owner's copy, read the
 [fork checklist](./fork-checklist.md) first.
@@ -67,8 +69,9 @@ done
 python3 -c 'import tomllib' && echo "ok       python3 has tomllib"
 ```
 
-Every line should start with `ok`, except `gh`, `ssh` and `ssh-keygen`, which
-you may leave missing if you stop before stage 3.
+Every line should start with `ok`, with two exceptions: `jq` and `python3` may
+be missing if you stop after stage 1, and `gh`, `ssh` and `ssh-keygen` if you
+stop before stage 3.
 
 ## 2. Clone Jarvis
 
