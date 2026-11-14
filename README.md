@@ -10,6 +10,16 @@
 Jarvis is the version-controlled, machine-level home for one canonical copy of
 personal AI-agent Skills.
 
+## Who it is for
+
+People who want a personal-scope Skills and guard layer for their own machine.
+It is meant to be forked and adopted; the [fork checklist](./docs/fork-checklist.md)
+says what to change. A fork is a one-time snapshot, and there is no promise that
+upstream merges cleanly into it.
+
+Support: macOS and Claude Code first. Codex and agy are pending. Linux and
+Windows are not supported.
+
 ## What it solves
 
 Jarvis addresses four related scenarios:
@@ -140,6 +150,7 @@ step in order, with a check after each.
 
 | Document | Read it when |
 | --- | --- |
+| [Forking Jarvis](./docs/fork-checklist.md) | You are adopting your own fork: what to change, what can stay, and what a fork does not get. |
 | [Setting up a new machine](./docs/setup-new-machine.md) | You are installing Jarvis on a machine for the first time: every step in order, with its check. |
 | [Keeping a machine current](./docs/keep-machine-current.md) | Jarvis has changed and a machine that already has it should catch up: the situations, and the steps for each. |
 | [Architecture](./docs/architecture.md) | You want to know how the layout and the symlink chain work, what is CLI-managed, and what the bridge does not prove. |

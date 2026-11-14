@@ -10,6 +10,14 @@
 Jarvis 是這台機器上、版本控制的 home，存放個人 AI-agent Skills 唯一的
 canonical copy。
 
+## 適用對象
+
+想為自己的機器建立個人層級 Skills 與 guard 的人。Jarvis 設計成可以被 fork 與採用；
+[fork 清單](./docs/fork-checklist.md)說明該改什麼。fork 是一次性的快照，不保證
+upstream 日後能乾淨地 merge 進來。
+
+支援範圍：優先支援 macOS 與 Claude Code。Codex 與 agy 尚待支援。不支援 Linux 與 Windows。
+
 ## 它解決的問題
 
 Jarvis 處理四個相關情境：
@@ -125,6 +133,7 @@ Codex。接下來是 guard 與 agent identity；[在新機器上設定](./docs/s
 
 | 文件 | 何時閱讀 |
 | --- | --- |
+| [Forking Jarvis](./docs/fork-checklist.md) | 要採用你自己的 fork：該改什麼、哪些可以留著，以及 fork 不會得到什麼。 |
 | [在新機器上設定](./docs/setup-new-machine.zh-TW.md) | 第一次在一台機器上安裝 Jarvis：每一步依序進行，並附檢查。 |
 | [讓機器保持最新](./docs/keep-machine-current.zh-TW.md) | Jarvis 有變動，已經導入的機器要跟上：列出各種情境，以及每個情境的步驟。 |
 | [Architecture](./docs/architecture.md) | 想了解版面配置與 symlink 鏈如何運作、哪些內容由 CLI 管理，以及 bridge 不能證明什麼。 |

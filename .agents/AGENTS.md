@@ -16,6 +16,7 @@ language, which source wins, and who does the work. Written out: every turn
 needs it; the dispatch detail is in docs/dispatch/, behind its pointer. -->
 
 ### Reply in the user's language
+<!-- PERSONAL: the owner's preference; a fork replaces this. -->
 
 Mirror the language of the user's latest message, and switch when they switch.
 When there is no language to mirror — a message that is only code, a command,
@@ -48,6 +49,7 @@ a large amount of reading, goes to a subagent on a cheaper model, to save
 tokens and keep this context small. Anything shorter it does itself: a brief
 and a verification cost more than a short task.
 
+<!-- PERSONAL: the owner's preference; a fork replaces this. -->
 | Work | Model |
 | --- | --- |
 | A pure lookup: find where something is, read it back, report | `haiku` |
@@ -118,6 +120,7 @@ are written out; the Git contract is in docs/git.md, behind the pointer
 below. -->
 
 ### Documents: English, opened by a Chinese summary
+<!-- PERSONAL: the owner's preference; a fork replaces this. -->
 
 Write a document's body in English, and open it with a brief summary in
 Traditional Chinese, two to four lines, so the user can pick up its context
@@ -140,6 +143,7 @@ that leaves this machine copies what it needs from them instead of linking
 ([why](../docs/session-notes.md#notes-and-handoffs)).
 
 ### A deletion the user runs
+<!-- MIXED: generic method, owner's style; a fork reviews this. -->
 
 When a deletion is the user's to run, because the rules keep it from agents,
 check the command before handing it over, and say what the check found:
@@ -163,6 +167,7 @@ an untracked or ignored file, a remote branch or tag, a force push, data
 outside any repository.
 
 ### Git in a repository without its own rules
+<!-- MIXED: generic method, owner's style; a fork reviews this. -->
 
 A repository's own Git guideline always wins. Where a repository has none,
 follow [`~/.Jarvis/docs/git.md`](../docs/git.md): it says whose call each

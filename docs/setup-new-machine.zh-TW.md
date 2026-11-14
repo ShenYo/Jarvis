@@ -2,7 +2,9 @@
 
 [English](./setup-new-machine.md) · **繁體中文**
 
-> **中文摘要**：這份指南帶你在一台全新的機器上依序完成 Jarvis：安裝前置工具、clone 到
+> **中文摘要**：這份指南分三個階段帶你在一台全新的機器上完成 Jarvis：stage 1 指示與 Skills，
+> stage 2 guard，stage 3 identity（選用，最後做，可以完全略過 machine account）。
+> 內容依序是：安裝前置工具、clone 到
 > `~/.Jarvis` 並啟用 Git hooks、執行 bridge、套用 Claude Code 與 Codex 的 guard、設定 agent
 > identity（Claude Code 與 Codex 各一次），可選擇打開 `--require` 開關，最後逐項驗證。clone 與
 > bridge 本身不安裝 runtime、不建立憑證，也不讓新專案依賴 Jarvis；憑證只出現在 agent identity 那幾步。
@@ -13,6 +15,21 @@
 [Architecture](./architecture.md)、[Guard](./guard.md) 與
 [Agent identity](./agent-identity.md)（這三份只有英文）。
 
+採用分三個階段。依序進行，任何一個階段之後都可以停下來：
+
+- **Stage 1，指示與 Skills：** clone 與 bridge（第 2、3 步）。這會得到 Skills 與個人指示，
+  不安裝 runtime，也不建立憑證。
+- **Stage 2，guard：** 第 4 步。它在這台機器的每個專案裡拒絕破壞性的 Git 與檔案操作。
+- **Stage 3，identity（選用，最後做）：** 第 5、6 步。這讓 agent 擁有自己的 GitHub 帳號。
+  machine account 可以完全略過：stage 1 與 stage 2 不用它就能安裝與運作。你放棄的是
+  pull request 這一段：review loop 以 machine account 張貼 comment，沒有的話就什麼都不張貼
+  （[review-loop.md](./dispatch/review-loop.md#never-as-the-owner)，只有英文），而且 agent 開的
+  pull request 會是你自己的，你不能自己 approve
+  （[fork 清單](./fork-checklist.md#5-what-a-fork-does-not-get)，只有英文）。
+
+如果你是 fork 了 Jarvis，而不是 clone owner 的副本，請先讀 [fork 清單](./fork-checklist.md)
+（只有英文）。
+
 ## 1. 前置條件
 
 前置條件是 Git、Bash，以及對設定好的 Jarvis remote 的存取權。只有在
@@ -20,10 +37,11 @@
 checkout 上面再 clone 一次。既有的 checkout 應該在它自己的 Git history 下
 檢查與調解。
 
-clone 與 bridge 不需要更多東西。這份指南其餘的部分需要，所以開始之前請全部裝好：
+clone 與 bridge 不需要更多東西。這份指南其餘的部分需要，所以開始之前請裝好你打算做的那些階段所需要的：
 
 - `git`：用來 clone，也用來執行這個 repository 的 hooks。
-- `gh`：GitHub CLI，用來以 machine account 登入。
+- `gh`：GitHub CLI，用來以 machine account 登入。只有 stage 3 需要；
+  略過 machine account 就可以不裝。
 - `jq`：guard 的腳本與 agent-identity 腳本都要求它。
 - `python3` 3.11 或更新的版本。guard hook 用它執行，而 Codex 是否信任這支 hook，是用
   `tomllib` 讀 `~/.codex/config.toml` 判斷的，只有 Python 3.11+ 才有 `tomllib`。
@@ -42,9 +60,12 @@ done
 python3 -c 'import tomllib' && echo "ok       python3 has tomllib"
 ```
 
-每一行都應該以 `ok` 開頭。
+每一行都應該以 `ok` 開頭，有兩個例外：只做到 stage 1 的話，`jq` 與 `python3` 可以缺少；
+在 stage 3 之前停下來的話，`gh`、`ssh` 與 `ssh-keygen` 可以缺少。
 
 ## 2. Clone Jarvis
+
+Stage 1。
 
 clone 到 `~/.Jarvis`。路徑是固定的：bridge 腳本要求這個 repository 必須 clone 在那裡。下面的區塊
 在 `~/.Jarvis` 已經存在時會拒絕執行。
@@ -70,6 +91,8 @@ git -C ~/.Jarvis config core.hooksPath .githooks
 檢查：`git -C ~/.Jarvis config --get core.hooksPath` 印出 `.githooks`。
 
 ## 3. 建立 Skills 的 bridge
+
+Stage 1。
 
 執行 bridge 腳本。它可以安全地重複執行，每次新增或移除 Skill 之後都要重新執行：
 
@@ -122,6 +145,8 @@ canonical-name entry 會被回報為 `CONFLICT`（entry、它指向哪裡、預�
 
 ## 4. 套用 guard
 
+Stage 2。
+
 套用 guard：`bash ~/.Jarvis/scripts/apply-claude-guard.sh` 與
 `bash ~/.Jarvis/scripts/apply-codex-guard.sh`。
 
@@ -145,6 +170,8 @@ bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust
 `trust: OK - Codex trusts the Jarvis guard entry` 並以 0 離開。
 
 ## 5. 設定 agent identity
+
+Stage 3，選用。
 
 要讓 agent 以自己的帳號操作 GitHub，在 guard 之後依下列順序設定 [agent
 identity](./agent-identity.md)：
@@ -228,6 +255,8 @@ Codex：執行中的 session 仍用舊的環境。
 
 ## 6. 選用：打開 agent-identity 開關
 
+Stage 3，選用。
+
 開關打開時，identity 沒有套用的 runtime 寫入 GitHub，一律被 guard 拒絕，Claude Code 與 Codex 一起。在你打開
 之前它都是關的。它的作用見[打開開關](./guard.md#turning-the-switch-on)（只有英文）。請在第 5 步兩個 runtime
 都完成、Codex 信任 guard hook、而且兩個 `--check` 都乾淨之後才做：
@@ -244,16 +273,17 @@ bash ~/.Jarvis/scripts/apply-agent-identity.sh --require
 
 ## 7. 驗證整台機器
 
-逐一執行下列指令；「OK」是它應該顯示的內容，而且每一個都以 0 離開。
+逐一執行下列指令；「OK」是它應該顯示的內容，而且每一個都以 0 離開。最後一欄是該列所屬的
+stage；沒做的 stage，它的列就跳過。
 
-| 指令 | OK 的樣子 |
-| --- | --- |
-| `~/.Jarvis/sync-personal-skills.sh` | 最後一行以 `checks passed:` 開頭 |
-| `git -C ~/.Jarvis config --get core.hooksPath` | `.githooks` |
-| `bash ~/.Jarvis/scripts/apply-claude-guard.sh --check` | `already carry the guard` |
-| `bash ~/.Jarvis/scripts/apply-codex-guard.sh --check` | `already carry the guard`，接著是 `trust: OK - Codex trusts the Jarvis guard entry` |
-| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check` | `state: applied`、`Next: nothing — the identity is already applied; a new Claude Code session uses it`、`all checks passed` |
-| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex` | `state: applied`、`Next: nothing — the identity is already applied; a new Codex session uses it`、`all checks passed` |
+| 指令 | OK 的樣子 | Stage |
+| --- | --- | --- |
+| `~/.Jarvis/sync-personal-skills.sh` | 最後一行以 `checks passed:` 開頭 | 1 |
+| `git -C ~/.Jarvis config --get core.hooksPath` | `.githooks` | 1 |
+| `bash ~/.Jarvis/scripts/apply-claude-guard.sh --check` | `already carry the guard` | 2 |
+| `bash ~/.Jarvis/scripts/apply-codex-guard.sh --check` | `already carry the guard`，接著是 `trust: OK - Codex trusts the Jarvis guard entry` | 2 |
+| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check` | `state: applied`、`Next: nothing — the identity is already applied; a new Claude Code session uses it`、`all checks passed` | 只有 3 |
+| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex` | `state: applied`、`Next: nothing — the identity is already applied; a new Codex session uses it`、`all checks passed` | 只有 3 |
 
 做完第 6 步之後，兩個 identity 檢查也會多出一行 `agent-identity switch` 的 `OK`，Claude Code 與 Codex 都是
 `on`。

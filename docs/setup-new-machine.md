@@ -2,7 +2,9 @@
 
 **English** · [繁體中文](./setup-new-machine.zh-TW.md)
 
-> **中文摘要**：這份指南帶你在一台全新的機器上依序完成 Jarvis：安裝前置工具、clone 到
+> **中文摘要**：這份指南分三個階段帶你在一台全新的機器上完成 Jarvis：stage 1 指示與 Skills，
+> stage 2 guard，stage 3 identity（選用，最後做，可以完全略過 machine account）。
+> 內容依序是：安裝前置工具、clone 到
 > `~/.Jarvis` 並啟用 Git hooks、執行 bridge、套用 Claude Code 與 Codex 的 guard、設定 agent
 > identity（Claude Code 與 Codex 各一次），可選擇打開 `--require` 開關，最後逐項驗證。clone 與
 > bridge 本身不安裝 runtime、不建立憑證，也不讓新專案依賴 Jarvis；憑證只出現在 agent identity 那幾步。
@@ -14,6 +16,25 @@ normal terminal, not with `!` inside Claude Code or Codex (see
 [Architecture](./architecture.md), [Guard](./guard.md) and
 [Agent identity](./agent-identity.md).
 
+Adoption has three stages. Do them in order, and stop after any of them:
+
+- **Stage 1, instructions and Skills:** clone and bridge (steps 2 and 3). This
+  gives you the Skills and the personal instructions. It installs no runtime
+  and creates no credential.
+- **Stage 2, the guard:** step 4. It refuses destructive Git and file
+  operations in every project on the machine.
+- **Stage 3, identity (optional, last):** steps 5 and 6. This gives agents a
+  GitHub account of their own. You can skip the machine account entirely:
+  stages 1 and 2 install and work without it. What you give up is on pull
+  requests: the review loop posts its comments as the machine account and,
+  without one, posts nothing
+  ([review-loop.md](./dispatch/review-loop.md#never-as-the-owner)), and the
+  agents' pull requests are your own, which you cannot approve yourself
+  ([fork checklist](./fork-checklist.md#5-what-a-fork-does-not-get)).
+
+If you forked Jarvis rather than cloning the owner's copy, read the
+[fork checklist](./fork-checklist.md) first.
+
 ## 1. Prerequisites
 
 Prerequisites are Git, Bash, and access to the configured Jarvis remote. Choose
@@ -22,10 +43,11 @@ clone over an existing checkout. Inspect and reconcile an existing checkout
 under its own Git history instead.
 
 The clone and the bridge need nothing more. The rest of this guide does, so
-install all of it before you start:
+install what the stages you plan to do need before you start:
 
 - `git`, to clone and to run the repository's hooks.
-- `gh`, the GitHub CLI, to log in as the machine account.
+- `gh`, the GitHub CLI, to log in as the machine account. Needed only for
+  stage 3; skip it if you skip the machine account.
 - `jq`, which the guard scripts and the agent-identity script require.
 - `python3` 3.11 or newer. The guard hook runs under it, and Codex's trust in
   the hook is read from `~/.codex/config.toml` with `tomllib`, which only
@@ -47,9 +69,13 @@ done
 python3 -c 'import tomllib' && echo "ok       python3 has tomllib"
 ```
 
-Every line should start with `ok`.
+Every line should start with `ok`, with two exceptions: `jq` and `python3` may
+be missing if you stop after stage 1, and `gh`, `ssh` and `ssh-keygen` if you
+stop before stage 3.
 
 ## 2. Clone Jarvis
+
+Stage 1.
 
 Clone into `~/.Jarvis`. The path is fixed: the bridge script requires this
 repository to be cloned there. The block refuses to run over an existing
@@ -77,6 +103,8 @@ git -C ~/.Jarvis config core.hooksPath .githooks
 Check: `git -C ~/.Jarvis config --get core.hooksPath` prints `.githooks`.
 
 ## 3. Bridge the Skills
+
+Stage 1.
 
 Run the bridge script. It is safe to repeat, and you re-run it whenever a Skill
 is added or removed:
@@ -135,6 +163,8 @@ overwritten. It exits non-zero if these checks fail. Re-run it after adding or r
 
 ## 4. Apply the guards
 
+Stage 2.
+
 Apply the guards: `bash ~/.Jarvis/scripts/apply-claude-guard.sh` and
 `bash ~/.Jarvis/scripts/apply-codex-guard.sh`.
 
@@ -159,6 +189,8 @@ Check: both scripts exit 0 with `--check`, and `--trust` prints
 `trust: OK - Codex trusts the Jarvis guard entry` and exits 0.
 
 ## 5. Set up the agent identity
+
+Stage 3, optional.
 
 To let agents act on GitHub as an account of their own, set up the [agent
 identity](./agent-identity.md) after the guards, in this order:
@@ -257,6 +289,8 @@ Check: `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex` prints
 
 ## 6. Optional: turn the agent-identity switch on
 
+Stage 3, optional.
+
 With the switch on, the guard refuses every GitHub write from a runtime whose
 identity is not applied, in Claude Code and Codex together. It is off until you
 turn it on. What it does is in
@@ -278,16 +312,18 @@ again.
 
 ## 7. Verify the whole machine
 
-Run each command; "OK" is what it should show, and every one exits 0.
+Run each command; "OK" is what it should show, and every one exits 0. The
+last column says which stage a row belongs to; skip the rows of a stage you did
+not do.
 
-| Command | OK looks like |
-| --- | --- |
-| `~/.Jarvis/sync-personal-skills.sh` | the last line starts `checks passed:` |
-| `git -C ~/.Jarvis config --get core.hooksPath` | `.githooks` |
-| `bash ~/.Jarvis/scripts/apply-claude-guard.sh --check` | `already carry the guard` |
-| `bash ~/.Jarvis/scripts/apply-codex-guard.sh --check` | `already carry the guard`, then `trust: OK - Codex trusts the Jarvis guard entry` |
-| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check` | `state: applied`, `Next: nothing — the identity is already applied; a new Claude Code session uses it`, `all checks passed` |
-| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex` | `state: applied`, `Next: nothing — the identity is already applied; a new Codex session uses it`, `all checks passed` |
+| Command | OK looks like | Stage |
+| --- | --- | --- |
+| `~/.Jarvis/sync-personal-skills.sh` | the last line starts `checks passed:` | 1 |
+| `git -C ~/.Jarvis config --get core.hooksPath` | `.githooks` | 1 |
+| `bash ~/.Jarvis/scripts/apply-claude-guard.sh --check` | `already carry the guard` | 2 |
+| `bash ~/.Jarvis/scripts/apply-codex-guard.sh --check` | `already carry the guard`, then `trust: OK - Codex trusts the Jarvis guard entry` | 2 |
+| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check` | `state: applied`, `Next: nothing — the identity is already applied; a new Claude Code session uses it`, `all checks passed` | 3 only |
+| `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex` | `state: applied`, `Next: nothing — the identity is already applied; a new Codex session uses it`, `all checks passed` | 3 only |
 
 After step 6, both identity checks also show an `OK` line for the
 `agent-identity switch`, with Claude Code and Codex both `on`.
