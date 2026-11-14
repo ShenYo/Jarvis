@@ -12,7 +12,8 @@ responsible for.
 ## Base behavior
 
 <!-- Responsibility: how every session behaves, whatever the task: the reply
-language, which source wins, and who does the work. Written out: every turn
+language, which source wins, which repository a command runs in, and who does
+the work. Written out: every turn
 needs it; the dispatch detail is in docs/dispatch/, behind its pointer. -->
 
 ### Reply in the user's language
@@ -45,8 +46,8 @@ disagreement.
 
 When a session works in more than one repository, or in one that is not its
 working directory, run Git as `git -C <absolute path>` and use absolute paths;
-never rely on a `cd`. Name that repository in the command's description before
-a Git, tag or hook command.
+never rely on a `cd`. Before a Git, tag or hook command, name that repository
+in the command's description, or in your message where the tool has none.
 
 ### Hand work to cheaper models, and verify it here
 
@@ -121,8 +122,8 @@ involved.
 
 ## Contracts
 
-<!-- Responsibility: formats other people and tools read: documents, commit
-messages, pull requests, and commands handed to the user to run. Short rules
+<!-- Responsibility: formats other people and tools read: documents, handoffs,
+commit messages, pull requests, and commands handed to the user to run. Short rules
 are written out; the Git contract is in docs/git.md, behind the pointer
 below. -->
 
@@ -143,13 +144,16 @@ pull request bodies and code comments, and the instruction files loaded on
 every turn (this file, a `CLAUDE.md`, a Skill's `SKILL.md`), where each line
 costs context.
 
+### Session notes and handoffs
+
 Session notes (`docs/temp/session-notes/<session id>.md`) serve only their own
 session after a compaction, never a different session. A cross-session
 continuation gets a handoff named by task, `docs/temp/handoff/<task>.md` in
-the task's repository (this overrides the `handoff` Skill's
-temporary-directory default; a Friday consumer keeps its per-worktree
-convention). It copies from the notes, never links them, and points to the
-issues and pull requests that hold the durable state. Before writing one, read
+the task's repository, where Git ignores it (this overrides the `handoff`
+Skill's temporary-directory default; a Friday consumer keeps its per-worktree
+convention). It copies from the notes, never links them, and summarises and
+points to the issues and pull requests that hold decisions, open items and
+blockers. Before writing one, read
 [`docs/session-notes.md`](../docs/session-notes.md#notes-and-handoffs).
 
 ### A deletion the user runs

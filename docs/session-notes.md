@@ -77,19 +77,24 @@ on the notes but copies what it needs instead of linking them, so it survives
 the notes being deleted, and a link by absolute path would carry the home
 directory's name and work only on this machine. This location overrides the
 [handoff Skill](../.agents/skills/handoff/SKILL.md)'s default of the OS
-temporary directory, which a reboot may clear. A Friday consumer keeps its own
-per-worktree convention.
+temporary directory, which a reboot may clear, and copying from the notes
+overrides that Skill's advice to reference other artifacts by path. A Friday
+consumer keeps its own per-worktree convention.
 
 Where exactly it goes, and when to ask first:
 
 - **The main worktree.** The file sits under the root of the repository's main
   worktree, so a session in any worktree of that repository finds the same
-  file. It is not in Git: a handoff for another clone or another machine is
-  sent there, it does not travel with a push.
+  file. That root is what
+  `git rev-parse --path-format=absolute --git-common-dir` prints, without its
+  trailing `/.git`. If the write there is refused, as a sandbox may do from a
+  linked worktree, ask the user. The file is not in Git: a handoff for another
+  clone or another machine is sent there, it does not travel with a push.
 - **Only where Git ignores it.** Run
-  `git check-ignore -q docs/temp/handoff/<task>.md` first. If the path is not
-  ignored, or the task belongs to no repository, ask the user where the handoff
-  goes: an untracked file with a session's working state is one broad
+  `git -C <main root> check-ignore -q docs/temp/handoff/<task>.md` first; the
+  path is read from that root, not from the directory you are in. If the path
+  is not ignored, or the task belongs to no repository, ask the user where the
+  handoff goes: an untracked file with a session's working state is one broad
   `git add` away from a commit.
 - **A plain task name.** `<task>` is a short name of lowercase letters, digits
   and hyphens that you choose, never a path and never text taken as it came
