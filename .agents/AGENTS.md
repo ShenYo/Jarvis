@@ -41,6 +41,13 @@ it recorded. When a memory disagrees with this file or with a repository's
 own rules, follow the files, and correct the memory or point out the
 disagreement.
 
+### Name the repository a command runs in
+
+When a session works in more than one repository, or in one that is not its
+working directory, run Git as `git -C <absolute path>` and use absolute paths;
+never rely on a `cd`. Name that repository in the command's description before
+a Git, tag or hook command.
+
 ### Hand work to cheaper models, and verify it here
 
 The main session plans, decides, integrates and verifies. Work that is
@@ -80,10 +87,6 @@ When you open a pull request, or the owner asks for one to be reviewed, read
 [`~/.Jarvis/docs/dispatch/review-loop.md`](../docs/dispatch/review-loop.md):
 a fresh reviewer agent reviews it first, and you answer every finding. That loop
 is a floor; a repository's own rules may ask for more review, not less.
-
-Across repositories, use `git -C <absolute path>` or absolute paths, and never
-`cd` out of the working directory. State the target repository before any Git,
-tag or hook command.
 
 ## Coding
 
@@ -140,14 +143,14 @@ pull request bodies and code comments, and the instruction files loaded on
 every turn (this file, a `CLAUDE.md`, a Skill's `SKILL.md`), where each line
 costs context.
 
-Session notes serve only their own session after a compaction, never a new
-one. Any cross-session continuation gets a handoff,
-`docs/temp/handoff/<task>.md` in the repository the task belongs to; this
-overrides the `handoff` Skill's temporary-directory default, and a Friday
-consumer keeps its own per-worktree convention. The handoff copies what it
-needs from the notes, never links them, and points to the GitHub issues and
-pull requests that hold decisions, open items and blockers
-([why](../docs/session-notes.md#notes-and-handoffs)).
+Session notes (`docs/temp/session-notes/<session id>.md`) serve only their own
+session after a compaction, never a different session. A cross-session
+continuation gets a handoff named by task, `docs/temp/handoff/<task>.md` in
+the task's repository (this overrides the `handoff` Skill's
+temporary-directory default; a Friday consumer keeps its per-worktree
+convention). It copies from the notes, never links them, and points to the
+issues and pull requests that hold the durable state. Before writing one, read
+[`docs/session-notes.md`](../docs/session-notes.md#notes-and-handoffs).
 
 ### A deletion the user runs
 <!-- MIXED: generic method, owner's style; a fork reviews this. -->

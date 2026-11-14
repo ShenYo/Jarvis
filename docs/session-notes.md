@@ -64,7 +64,7 @@ A handoff and the session notes are different documents for different readers:
 | --- | --- | --- |
 | Bound to | One session (the session id is the file name) | One task, across sessions and agents |
 | Reader | The same session after a compaction | A new session or agent |
-| Lifetime | Ends with the session | Until the task is done |
+| Lifetime | Useful only within the session | Until the task is done |
 
 The notes are never the entry point for a new session. They stay in
 `docs/temp/session-notes/<session id>.md`, where the Skill and the hooks expect
@@ -79,6 +79,24 @@ directory's name and work only on this machine. This location overrides the
 [handoff Skill](../.agents/skills/handoff/SKILL.md)'s default of the OS
 temporary directory, which a reboot may clear. A Friday consumer keeps its own
 per-worktree convention.
+
+Where exactly it goes, and when to ask first:
+
+- **The main worktree.** The file sits under the root of the repository's main
+  worktree, so a session in any worktree of that repository finds the same
+  file. It is not in Git: a handoff for another clone or another machine is
+  sent there, it does not travel with a push.
+- **Only where Git ignores it.** Run
+  `git check-ignore -q docs/temp/handoff/<task>.md` first. If the path is not
+  ignored, or the task belongs to no repository, ask the user where the handoff
+  goes: an untracked file with a session's working state is one broad
+  `git add` away from a commit.
+- **A plain task name.** `<task>` is a short name of lowercase letters, digits
+  and hyphens that you choose, never a path and never text taken as it came
+  from an issue or a message.
+- **One file per task.** A session that continues the task reads the existing
+  handoff first and revises it. It does not write a second file, and it does
+  not replace one it has not read.
 
 Durable state, meaning decisions, open items and blockers, goes to GitHub
 issues and pull requests, where every session and agent can read it. The
