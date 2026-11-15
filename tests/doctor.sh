@@ -75,7 +75,7 @@ fixture() {
 # run <name>: doctor in that sandbox; sets $code and $log.
 run() {
   log="$root/$1.log"
-  HOME="$h" CODEX_HOME="$cx" JARVIS_AGENT_IDENTITY_FILE="${identity:-$h/no-identity}" STUB_DIR="${stubdir:-}" \
+  env ${runenv:-} HOME="$h" CODEX_HOME="$cx" JARVIS_AGENT_IDENTITY_FILE="${identity:-$h/no-identity}" STUB_DIR="${stubdir:-}" \
     PATH="${runpath:-$PATH}" bash "$doctor" ${2:+"$2"} >"$log" 2>&1
   code=$?
 }
@@ -243,11 +243,20 @@ expect "identity applied, then settings drifted: exit 1, the Claude identity lin
   test '$code' = 1 && grep -Eq '^PROBLEM +identity ' '$log' && grep -q 'state: ready' '$log'"
 clear_ident
 
+# A permanent "was not checked" warning (rulesets unreadable) is UNVERIFIED and does not fail the run.
+rulesets_unreadable() { put "$stubdir/gh-agent/rulesets.acme__app.out" '{"message":"Upgrade to GitHub Pro"}'; put "$stubdir/gh-agent/rulesets.acme__app.rc" 1; }
 ident_fixture id-warn; name=id-warn; ident_apply
+rulesets_unreadable
+run id-warn; cp "$log" "$root/id-warn-only.log"
+expect "identity applied with a permanent warning (rulesets unreadable): exit 0, UNVERIFIED with the count and the first warning, not ok" bash -c "
+  test '$code' = 0 && grep -Eq '^UNVERIFIED +identity +passes, with 1 warning\\(s\\); first: repo acme/app: its rulesets are not readable' '$log' &&
+  grep -q 'WARN  repo acme/app' '$log' && ! grep -Eq '^ok +identity ' '$log'"
+# ... and the same machine with the switch on in one runtime only is a different result: a PROBLEM, exit 1.
 jq '.env.JARVIS_REQUIRE_AGENT_IDENTITY = "1"' "$h/.claude/settings.json" >"$h/s.new" && cat "$h/s.new" >"$h/.claude/settings.json"
 run id-warn
-expect "identity applied with a warning (switch on for one runtime only): exit 0, UNVERIFIED with the WARN line, not ok" bash -c "
-  test '$code' = 0 && grep -Eq '^UNVERIFIED +identity ' '$log' && grep -q 'WARN  agent-identity switch' '$log' && ! grep -Eq '^ok +identity ' '$log'"
+expect "a permanent warning plus a switch on in one runtime only: exit 1, a PROBLEM, not the same as the permanent warning alone" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +identity ' '$log' && grep -q 'WARN  agent-identity switch' '$log' &&
+  ! cmp -s '$log' '$root/id-warn-only.log' && grep -Eq 'fix: bash .*apply-agent-identity.sh --check' '$log'"
 clear_ident
 
 # --- identity: evidence without a config file --------------------------------
@@ -256,6 +265,25 @@ printf '{"env":{"JARVIS_REQUIRE_AGENT_IDENTITY":"1"}}\n' >"$h/.claude/agent-iden
 run sw-on
 expect "switch on, no config file: the identity is not skipped as optional; exit 1" bash -c "
   test '$code' = 1 && grep -Eq '^PROBLEM +identity ' '$log' && ! grep -Eq '^skipped +identity ' '$log'"
+fixture sw-settings
+jq '.env.JARVIS_REQUIRE_AGENT_IDENTITY = "1"' "$h/.claude/settings.json" >"$h/s.new" && cat "$h/s.new" >"$h/.claude/settings.json"
+run sw-settings
+expect "switch in settings.json, no config file: the identity is not skipped as optional; exit 1" bash -c "
+  grep -Eq '^PROBLEM +identity ' '$log' && ! grep -Eq '^skipped +identity ' '$log'"
+fixture sw-env
+runenv="JARVIS_REQUIRE_AGENT_IDENTITY=1" run sw-env; runenv=""
+expect "switch in the environment, no config file: the identity is not skipped as optional; exit 1" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +identity ' '$log' && ! grep -Eq '^skipped +identity ' '$log'"
+fixture sw-codex
+HOME="$h" CODEX_HOME="$cx" bash "$repo/scripts/apply-codex-guard.sh" --require-identity >"$h.setup2" 2>&1; trust "$cx"
+run sw-codex
+expect "switch on in the Codex hook only, no config file: not skipped as optional; exit 1" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +identity-codex ' '$log' && ! grep -Eq '^skipped +identity' '$log'"
+fixture sw-home-record
+mkdir -p "$h/other"; printf '{"env":{"JARVIS_REQUIRE_AGENT_IDENTITY":"1"}}\n' >"$h/.claude/agent-identity.require.json"
+runenv="CLAUDE_CONFIG_DIR=$h/other" run sw-home-record; runenv=""
+expect "require record in ~/.claude while CLAUDE_CONFIG_DIR points elsewhere: not skipped as optional" bash -c "
+  grep -Eq '^PROBLEM +identity ' '$log' && ! grep -Eq '^skipped +identity ' '$log'"
 fixture rec-only
 printf '{}\n' >"$h/.claude/agent-identity.applied.json"
 run rec-only
@@ -294,10 +322,23 @@ for f in "$nopy"/*; do ln -sf "$(readlink "$f" 2>/dev/null || echo "$f")" "$nopy
 ln -sf "$root/idbin/ssh" "$nopy2/ssh"; ln -sf "$root/idbin/gh" "$nopy2/gh"
 ident_fixture id-no-tomllib; ident_apply
 runpath=$nopy2; run id-no-tomllib; runpath=""
-expect "no tomllib with an applied identity: codex-guard and identity-codex are both UNVERIFIED, exit 0" bash -c "
-  test '$code' = 0 && grep -Eq '^UNVERIFIED +codex-guard ' '$log' && grep -Eq '^UNVERIFIED +identity-codex ' '$log' && ! grep -q '^PROBLEM' '$log'"
+expect "no tomllib with an applied identity: codex-guard and identity-codex are both UNVERIFIED, exit 0, and the line says config.toml went unchecked" bash -c "
+  test '$code' = 0 && grep -Eq '^UNVERIFIED +codex-guard ' '$log' && grep -Eq '^UNVERIFIED +identity-codex .*config.toml could not be parsed' '$log' &&
+  grep -q 'MISSING  no python3 with tomllib' '$log' && ! grep -q '^PROBLEM' '$log'"
 clear_ident
 
+ident_fixture id-nt-never
+runpath=$nopy2; run id-nt-never; runpath=""
+expect "no tomllib and the Codex identity never applied: identity-codex is a PROBLEM that says not applied, fix --codex" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +identity-codex .*not applied' '$log' && ! grep -Eq '^UNVERIFIED +identity-codex' '$log' &&
+  grep -Eq 'fix: bash .*apply-agent-identity.sh --codex' '$log'"
+clear_ident
+ident_fixture id-nt-other; ident_apply
+rm "$h/.ssh/codex_key"
+runpath=$nopy2; run id-nt-other; runpath=""
+expect "no tomllib and a failing line unrelated to tomllib beside it: identity-codex is a PROBLEM, not UNVERIFIED" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +identity-codex ' '$log' && ! grep -Eq '^UNVERIFIED +identity-codex' '$log'"
+clear_ident
 fixture no-tomllib-stale
 printf '# drift\n' >>"$cx/hooks/jarvis-guard.py"
 runpath=$nopy; run no-tomllib-stale; runpath=""
@@ -341,7 +382,8 @@ cp "$repo/scripts/doctor.sh" "$repo/scripts/check-skill-lock.sh" "$repo/scripts/
 cp "$repo/sync-personal-skills.sh" "$scratch/"
 mkdir -p "$scratch/.agents/claude-guard"; cp "$repo"/.agents/claude-guard/* "$scratch/.agents/claude-guard/"
 printf 'name: demo\n' >"$scratch/.agents/skills/SKILL.md" 2>/dev/null; rm -f "$scratch/.agents/skills/SKILL.md"
-mkdir -p "$scratch/.agents/skills/demo"; printf 'name: demo\n' >"$scratch/.agents/skills/demo/SKILL.md"
+mkdir -p "$scratch/.agents/skills/demo" "$scratch/.agents/skills/session-notes"
+printf 'name: demo\n' >"$scratch/.agents/skills/demo/SKILL.md"; printf 'name: session-notes\n' >"$scratch/.agents/skills/session-notes/SKILL.md"
 printf 'rules\n' >"$scratch/.agents/AGENTS.md"
 git -C "$scratch" init -q && git -C "$scratch" add -A >/dev/null 2>&1
 git -C "$scratch" -c user.email=t@example.invalid -c user.name=t commit -qm base
@@ -365,14 +407,25 @@ printf 'x\n' >"$scratch/.agents/skills/demo/extra.md"
 lock_run lock-untracked
 expect "an untracked file in a Skill: skill-lock is a PROBLEM" grep -Eq '^PROBLEM +skill-lock ' "$log"
 rm "$scratch/.agents/skills/demo/extra.md"
+printf 'edited\n' >>"$scratch/.agents/skills/session-notes/SKILL.md"
+lock_run lock-maintained
+expect "an uncommitted edit to session-notes (maintained here, no lock entry) is not a PROBLEM" bash -c "
+  grep -Eq '^ok +skill-lock ' '$log' && ! grep -Eq '^PROBLEM +skill-lock' '$log'"
+printf 'patched\n' >>"$scratch/.agents/skills/demo/SKILL.md"
+lock_run lock-both
+expect "with session-notes edited too, a patched vendored Skill is still a PROBLEM" grep -Eq '^PROBLEM +skill-lock ' "$log"
+git -C "$scratch" checkout -q -- .agents/skills
 
 # --- terminal control characters in what is printed --------------------------
 fixture ctrl
 esc=$(printf '\033')
 ln -s "$h/nowhere" "$h/.claude/skills/x${esc}[2Jy"
+ln -s "$h/nowhere" "$h/.claude/skills/$(printf 'x\302\2332Jy')"
 run ctrl
 expect "a Skill entry whose name holds an escape character: doctor reports it without the escape character" bash -c "
   test '$code' = 1 && grep -Eq '^PROBLEM +bridge ' '$log' && grep -q 'DANGLING' '$log' && ! grep -q \"\$(printf '\\033')\" '$log'"
+expect "a Skill entry whose name holds a C1 control character (UTF-8 U+009B): doctor reports it without that character" bash -c "
+  grep -q 'DANGLING' '$log' && ! LC_ALL=C grep -q \"\$(printf '\\302\\233')\" '$log'"
 
 # --- read-only ---------------------------------------------------------------
 # A passing machine, a machine with every kind of fault, and one that was never

@@ -68,8 +68,9 @@ result() { # <word> <name> <text>
 }
 
 # detail <captured output> <grep -E pattern or empty>: indented excerpt. Control
-# characters are removed first: output can carry a Skill's name, which is not
-# trusted not to move the cursor or rewrite the screen.
+# characters are removed first, C0 and the C1 range (U+0080-U+009F as UTF-8): output
+# can carry a Skill's name, which is not trusted not to move the cursor or rewrite
+# the screen.
 detail() {
   local line count=0
   while IFS= read -r line; do
@@ -79,7 +80,8 @@ detail() {
     count=$((count + 1))
     [ "$count" -le 6 ] || { printf '%-11s %-15s %s\n' "" "" "  | ..."; break; }
     printf '%-11s %-15s %s\n' "" "" "  | $line"
-  done <<<"$(printf '%s\n' "$1" | LC_ALL=C tr -d '\000-\010\013-\037\177')"
+  done <<<"$(printf '%s\n' "$1" | LC_ALL=C tr -d '\000-\010\013-\037\177' |
+             LC_ALL=C sed "s/$(printf '\302')[$(printf '\200')-$(printf '\237')]//g")"
 }
 
 problem() { # <name> <text> <fix command> <captured output>
@@ -98,11 +100,12 @@ failed_to_run() { # <name> <captured output>
 warn_pattern='^WARN  |: WARN:'
 
 # A trust that could not be read, and nothing else wrong: no python3 with tomllib, or a hook entry key
-# the hash formula does not know. A config.toml that does not parse is not in this set: that is a fault.
+# the hash formula does not know. A config.toml that does not parse is not in this set, because its
+# message names neither of the two: that is a fault.
 unverifiable_only() { # <captured output>
   printf '%s\n' "$1" | grep -q 'UNVERIFIABLE' &&
   printf '%s\n' "$1" | grep -q 'needs a python3 with tomllib\|hash formula does not know' &&
-  ! printf '%s\n' "$1" | grep -q 'could not be read as TOML\|apply-codex-guard: .*differs from\|trust: UNTRUSTED\|trust: DISABLED\|trust: NOT-INSTALLED'
+  ! printf '%s\n' "$1" | grep -q 'apply-codex-guard: .*differs from\|trust: UNTRUSTED\|trust: DISABLED\|trust: NOT-INSTALLED'
 }
 
 # judge <name> <ok text> <fix> <kind>: classify $out and $rc of the check just run.
@@ -117,20 +120,40 @@ judge() {
     warns=$(printf '%s\n' "$out" | grep -E "$warn_pattern")
     if [ "$kind" = identity ] && [ "$state" != applied ]; then
       problem "$name" "every check passes, but the identity is not applied (state: ${state:-unknown})" "$fix" "$out"
+    elif printf '%s\n' "$warns" | grep -q '^WARN  agent-identity switch:'; then
+      # Definite: the switch is on in one runtime and not the other, or a record outlives its setting. Not a gap in
+      # what could be checked, so it is a finding. Other warnings say something was not checked (rulesets,
+      # network): UNVERIFIED, and so is any warning whose text is not known here.
+      problem "$name" "the agent-identity switch is inconsistent" "$checkfix" "$out"
     elif [ -n "$warns" ]; then
-      result UNVERIFIED "$name" "passes, with a warning"
+      result UNVERIFIED "$name" "passes, with $(printf '%s\n' "$warns" | grep -c .) warning(s); first: $(printf '%s\n' "$warns" | head -1 |
+        sed 's/^WARN  //; s/^[^:]*: WARN: //' | LC_ALL=C tr -d '\000-\037\177' | cut -c1-110)"
       detail "$out" "$warn_pattern"
     else
       result ok "$name" "$okmsg"
     fi
     return
   fi
-  if [ "$kind" != plain ] && [ "$rc" = 1 ] && unverifiable_only "$out" &&
-     { [ "$kind" = guard ] || [ "$(printf '%s\n' "$out" | grep -c '^\(WRONG\|MISSING\)  ')" = \
-       "$(printf '%s\n' "$out" | grep '^\(WRONG\|MISSING\)  ' | grep -c 'tomllib')" ]; }; then
-    result UNVERIFIED "$name" "whether Codex trusts the guard could not be read; the rest passes"
-    detail "$out" 'UNVERIFIABLE'
-    return
+  if [ "$kind" != plain ] && [ "$rc" = 1 ] && unverifiable_only "$out"; then
+    if [ "$kind" = guard ]; then
+      result UNVERIFIED "$name" "whether Codex trusts the guard could not be read; the rest passes"
+      detail "$out" 'UNVERIFIABLE'
+      return
+    fi
+    # identity-codex: the only failing lines are about tomllib, and the Codex identity was applied before (its
+    # record exists). Without the record, the identity was never applied: that is a finding, not a gap.
+    if [ -e "$codex_home/agent-identity.applied.json" ] &&
+       [ "$(printf '%s\n' "$out" | grep -c '^\(WRONG\|MISSING\)  ')" = \
+         "$(printf '%s\n' "$out" | grep '^\(WRONG\|MISSING\)  ' | grep -c 'tomllib')" ]; then
+      result UNVERIFIED "$name" "$codex_home/config.toml could not be parsed (no python3 with tomllib), so the Codex identity in it went unchecked"
+      detail "$out" 'tomllib'
+      return
+    fi
+    if [ ! -e "$codex_home/agent-identity.applied.json" ]; then
+      problem "$name" "the Codex identity is not applied (and config.toml cannot be parsed here: no python3 with tomllib)" \
+        "bash $here/scripts/apply-agent-identity.sh --codex" "$out"
+      return
+    fi
   fi
   if [ "$name" = codex-guard ] && ! printf '%s\n' "$out" | grep -q 'apply-codex-guard: .*differs from' &&
      printf '%s\n' "$out" | grep -q 'trust: \(UNTRUSTED\|DISABLED\)'; then
@@ -158,7 +181,12 @@ check bridge "every Skill is linked into every installed tool, none points at th
 # finding too. GIT_OPTIONAL_LOCKS=0 keeps git status from refreshing (writing) the index.
 out=$(bash "$here/scripts/check-skill-lock.sh" 2>&1 </dev/null); rc=$?
 if [ "$rc" = 0 ]; then
-  dirty=$(GIT_OPTIONAL_LOCKS=0 git -C "$here" status --porcelain -- .agents/skills 2>&1 </dev/null); grc=$?
+  # Skills the lock check exempts as maintained here (it names them in `maintained=`) have no lock to differ from.
+  excl=()
+  for m in $(sed -n 's/^maintained="\(.*\)"$/\1/p' "$here/scripts/check-skill-lock.sh"); do
+    excl=(${excl[@]+"${excl[@]}"} ":(exclude).agents/skills/$m")
+  done
+  dirty=$(GIT_OPTIONAL_LOCKS=0 git -C "$here" status --porcelain -- .agents/skills ${excl[@]+"${excl[@]}"} 2>&1 </dev/null); grc=$?
   if [ "$grc" != 0 ]; then
     rc=$grc; failed_to_run skill-lock "$dirty"
   elif [ -n "$dirty" ]; then
@@ -191,7 +219,21 @@ claude_evidence=0 codex_evidence=0 shared_evidence=0
 { [ -e "$identity_file" ] || [ -L "$identity_file" ]; } && shared_evidence=1
 [ "${JARVIS_REQUIRE_AGENT_IDENTITY:-}" = 1 ] && shared_evidence=1
 jq -e '.env.JARVIS_REQUIRE_AGENT_IDENTITY == "1"' "$claude_home/settings.json" >/dev/null 2>&1 && shared_evidence=1
-{ [ -e "$claude_home/agent-identity.require.json" ] || [ -L "$claude_home/agent-identity.require.json" ]; } && shared_evidence=1
+# The require record is looked up where apply-agent-identity.sh (claude_switch_state) looks: in the Claude config
+# directory and in ~/.claude. A record that cannot be read counts as on there, so any record counts here.
+for rec in "$claude_home/agent-identity.require.json" "$HOME/.claude/agent-identity.require.json"; do
+  { [ -e "$rec" ] || [ -L "$rec" ]; } && shared_evidence=1
+done
+# Codex's switch is an argument of its hook command: --require-identity after --codex (as codex_switch_state reads it).
+if [ -e "$codex_home/hooks.json" ] && [ "$(jq -r '
+    def own_h: (.command? // "") | contains("/hooks/jarvis-guard.py");
+    [(.hooks.PreToolUse // [])[] | .hooks[]? | select(own_h)] | first
+    | if . == null then "none"
+      elif ((.command // "") | [splits("[ \t]+")] as $w | ($w | index("--codex")) as $i
+            | $i != null and (($w[$i + 1:]) | index("--require-identity") != null)) then "on"
+      else "off" end' "$codex_home/hooks.json" 2>/dev/null)" = on ]; then
+  shared_evidence=1
+fi
 { [ -e "$claude_home/agent-identity.applied.json" ] || [ -L "$claude_home/agent-identity.applied.json" ]; } && claude_evidence=1
 { [ -e "$codex_home/agent-identity.applied.json" ] || [ -L "$codex_home/agent-identity.applied.json" ]; } && codex_evidence=1
 
