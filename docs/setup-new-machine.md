@@ -188,6 +188,39 @@ bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust
 Check: both scripts exit 0 with `--check`, and `--trust` prints
 `trust: OK - Codex trusts the Jarvis guard entry` and exits 0.
 
+Optional: tell Claude Code's auto-mode classifier which repositories this
+machine trusts. Run `/auto-mode-setup` in Claude Code from inside the Jarvis
+checkout (`~/.Jarvis`); run from the home directory, it describes a directory
+with no remotes. It first asks whether to add to the existing environment list
+or replace it: choose add, because replacing discards the repositories added
+by hand and the `"$defaults"` entry. It then offers two optional scans; accept
+the one that reads the repositories under your home directory to have the
+others drafted, or add them by hand afterwards. The draft is accepted or
+discarded as a whole: accept it and prune it afterwards. Then read everything the draft wrote, not only the environment
+list:
+
+```sh
+jq '.autoMode' ~/.claude/settings.json
+```
+
+In `environment`, keep only repositories you own or push to, because each one
+becomes a trusted destination; remove any entry you do not recognise, such as a
+trusted-services entry with no source, and keep `"$defaults"`, which stands
+for the built-in entries (add it as the first entry if it is missing and you
+want them). If the draft added `allow` entries, remove any that overlap the guard's
+Human-Review Checkpoint rule (merging, auto-merge, closing or reopening a pull
+request, pushing to the default branch, repository settings): an `allow` entry
+is an exception to the guard's `soft_deny` rules, and `--check` does not see
+it. Edit the list in `/permissions` › Auto mode or in
+`~/.claude/settings.json`, and confirm what is in effect with
+`claude auto-mode config`. If the draft added rules to `soft_deny` or
+`hard_deny`, run `apply-claude-guard.sh` again so that its `--check` exits 0.
+
+Re-run or edit it when the set of repositories changes. The setting is per
+machine and per person: it names that machine's repositories and trusted
+services, so do not copy it from another machine. It is not stored in
+`guard.json`, and `apply-claude-guard.sh` neither writes nor overwrites it.
+
 ## 5. Set up the agent identity
 
 Stage 3, optional.

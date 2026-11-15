@@ -169,6 +169,28 @@ bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust
 檢查：兩支腳本加 `--check` 都以 0 離開，而 `--trust` 印出
 `trust: OK - Codex trusts the Jarvis guard entry` 並以 0 離開。
 
+選用：告訴 Claude Code 的 auto-mode classifier 這台機器信任哪些 repository。在 Claude Code 裡，從
+Jarvis checkout（`~/.Jarvis`）內執行 `/auto-mode-setup`；從 home 目錄執行的話，它描述的是沒有 remote 的
+目錄。它會先問要加到現有的 environment 清單還是取代：選加入，因為取代會丟掉手動補上的 repository 和
+`"$defaults"` 項目。接著它會提供兩個選用的掃描；接受讀取 home 目錄下各 repository 的那一個，其他
+repository 會一併起草，不接受就事後手動補上。起草結果只能整份接受或捨棄：先接受，事後再刪減。然後讀一下起草寫入的全部內容，不只 environment 清單：
+
+```sh
+jq '.autoMode' ~/.claude/settings.json
+```
+
+在 `environment` 裡只留下你擁有或會 push 的 repository，因為每一個都會成為受信任的目的地；刪掉你不認得的項目，例如沒有來源的受信任服務項目，並保留 `"$defaults"`，它代表內建的
+項目（缺少而你想保留內建項目時，把它加成第一個項目）。如果起草加了 `allow` 項目，刪掉任何和 guard 的
+Human-Review Checkpoint 規則重疊的項目（merge、auto-merge、關閉或重新開啟 pull request、push 到預設
+branch、修改 repository 設定）：`allow` 項目是 guard 的 `soft_deny` 規則的例外，而
+`--check` 看不到它。可以在 `/permissions` › Auto mode 或 `~/.claude/settings.json` 編輯清單，再用
+`claude auto-mode config` 確認實際生效的內容。如果起草在 `soft_deny` 或 `hard_deny` 加了規則，再執行一次
+`apply-claude-guard.sh`，讓它的 `--check` 以 0 離開。
+
+repository 的組合有變動時，重新執行或直接編輯。這個設定是每台機器、每個人各自的：它記的是那台機器的
+repository 與受信任服務，所以不要從別台機器複製。它不存在 `guard.json`，`apply-claude-guard.sh`
+也不會寫入或覆寫它。
+
 ## 5. 設定 agent identity
 
 Stage 3，選用。
