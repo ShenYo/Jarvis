@@ -171,18 +171,20 @@ bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust
 
 選用：告訴 Claude Code 的 auto-mode classifier 這台機器信任哪些 repository。在 Claude Code 裡，從
 Jarvis checkout（`~/.Jarvis`）內執行 `/auto-mode-setup`；從 home 目錄執行的話，它描述的是沒有 remote 的
-目錄。掃描前它會提供一個選用的掃描，讀取 home 目錄下各 repository：接受的話其他 repository 會一併起草，
-不接受就事後手動補上。不論哪種方式，都只留下你擁有或會 push 的 repository，因為每一個都會成為受信任的
-目的地。它問要加到現有的 environment 清單還是取代時，選加入：取代會丟掉手動補上的 repository 和
-`"$defaults"` 項目。然後讀一下結果：
+目錄。它會先問要加到現有的 environment 清單還是取代：選加入，因為取代會丟掉手動補上的 repository 和
+`"$defaults"` 項目。接著它會提供兩個選用的掃描；接受讀取 home 目錄下各 repository 的那一個，其他
+repository 會一併起草，不接受就事後手動補上。不論哪種方式，都只留下你擁有或會 push 的 repository，因為
+每一個都會成為受信任的目的地。然後讀一下起草寫入的全部內容，不只 environment 清單：
 
 ```sh
-jq '.autoMode.environment' ~/.claude/settings.json
+jq '.autoMode' ~/.claude/settings.json
 ```
 
-刪掉你不認得的項目，例如沒有來源的受信任服務項目，但保留 `"$defaults"`，它代表內建的項目。可以在
-`/permissions` › Auto mode 或 `~/.claude/settings.json` 編輯清單，再用 `claude auto-mode config` 確認
-實際生效的內容。如果起草結果也在 `soft_deny` 或 `hard_deny` 加了規則，再執行一次
+在 `environment` 裡刪掉你不認得的項目，例如沒有來源的受信任服務項目，並保留 `"$defaults"`，它代表內建的
+項目（缺少而你想保留內建項目時，把它加成第一個項目）。如果起草加了 `allow` 項目，刪掉任何涵蓋 merge、
+push 到預設 branch 或修改 repository 設定的項目：`allow` 項目是 guard 的 `soft_deny` 規則的例外，而
+`--check` 看不到它。可以在 `/permissions` › Auto mode 或 `~/.claude/settings.json` 編輯清單，再用
+`claude auto-mode config` 確認實際生效的內容。如果起草在 `soft_deny` 或 `hard_deny` 加了規則，再執行一次
 `apply-claude-guard.sh`，讓它的 `--check` 以 0 離開。
 
 repository 的組合有變動時，重新執行或直接編輯。這個設定是每台機器、每個人各自的：它記的是那台機器的

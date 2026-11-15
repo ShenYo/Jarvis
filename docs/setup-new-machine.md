@@ -191,24 +191,29 @@ Check: both scripts exit 0 with `--check`, and `--trust` prints
 Optional: tell Claude Code's auto-mode classifier which repositories this
 machine trusts. Run `/auto-mode-setup` in Claude Code from inside the Jarvis
 checkout (`~/.Jarvis`); run from the home directory, it describes a directory
-with no remotes. Before it scans, it offers an optional scan of the
-repositories under your home directory: accept it to have the others drafted,
-or add them by hand afterwards. Either way, keep only repositories you own or
-push to, because each one becomes a trusted destination. When it asks whether
-to add to the existing environment list or replace it, choose add: replacing
-discards the repositories added by hand and the `"$defaults"` entry. Then read
-the result:
+with no remotes. It first asks whether to add to the existing environment list
+or replace it: choose add, because replacing discards the repositories added
+by hand and the `"$defaults"` entry. It then offers two optional scans; accept
+the one that reads the repositories under your home directory to have the
+others drafted, or add them by hand afterwards. Either way, keep only
+repositories you own or push to, because each one becomes a trusted
+destination. Then read everything the draft wrote, not only the environment
+list:
 
 ```sh
-jq '.autoMode.environment' ~/.claude/settings.json
+jq '.autoMode' ~/.claude/settings.json
 ```
 
-Remove any entry you do not recognise, such as a trusted-services entry with
-no source, but keep `"$defaults"`, which stands for the built-in entries. Edit
-the list in `/permissions` › Auto mode or in `~/.claude/settings.json`, and
-confirm what is in effect with `claude auto-mode config`. If the draft also
-added rules to `soft_deny` or `hard_deny`, run `apply-claude-guard.sh` again
-so that its `--check` exits 0.
+In `environment`, remove any entry you do not recognise, such as a
+trusted-services entry with no source, and keep `"$defaults"`, which stands
+for the built-in entries (add it as the first entry if it is missing and you
+want them). If the draft added `allow` entries, remove any that cover merging,
+pushing to a default branch or changing repository settings: an `allow` entry
+is an exception to the guard's `soft_deny` rules, and `--check` does not see
+it. Edit the list in `/permissions` › Auto mode or in
+`~/.claude/settings.json`, and confirm what is in effect with
+`claude auto-mode config`. If the draft added rules to `soft_deny` or
+`hard_deny`, run `apply-claude-guard.sh` again so that its `--check` exits 0.
 
 Re-run or edit it when the set of repositories changes. The setting is per
 machine and per person: it names that machine's repositories and trusted
