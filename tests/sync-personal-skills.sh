@@ -194,6 +194,30 @@ else
   bad "--check reports a wrong-target entry (exit $code)" "$root/chk-wrong.log"
 fi
 
+# A dangling instructions link is reported, not relinked, for each tool.
+for f in .claude/CLAUDE.md .codex/AGENTS.md; do
+  n="chk-dangling-${f%%/*}"; n=${n/./}
+  h=$(home "$n"); run "$n"
+  rm "$h/$f"; ln -s "$h/nowhere" "$h/$f"
+  before=$(snap "$h"); runc "$n"; after=$(snap "$h")
+  if [ "$code" = 1 ] && [ "$before" = "$after" ] && grep -q "^DANGLING .*$f" "$root/$n.log" \
+     && [ "$(readlink "$h/$f")" = "$h/nowhere" ]; then
+    ok "--check reports a dangling $f and does not relink it"
+  else
+    bad "--check reports a dangling $f and does not relink it (exit $code)" "$root/$n.log"
+  fi
+done
+
+# The old ~/.agents -> .Jarvis/agents link is migrated by a normal run, but only reported by --check.
+h=$(home chk-oldlink)
+ln -s .Jarvis/agents "$h/.agents"
+before=$(snap "$h"); runc chk-oldlink; after=$(snap "$h")
+if [ "$code" = 1 ] && [ "$before" = "$after" ] && [ "$(readlink "$h/.agents")" = .Jarvis/agents ]; then
+  ok "--check reports the old ~/.agents link and does not migrate it"
+else
+  bad "--check reports the old ~/.agents link and does not migrate it (exit $code)" "$root/chk-oldlink.log"
+fi
+
 # An unknown argument is a usage error.
 h=$(home chk-usage)
 HOME="$h" CODEX_HOME="$h/.codex" bash "$script" --nonsense >"$root/chk-usage.log" 2>&1; code=$?

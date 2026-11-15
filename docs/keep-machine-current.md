@@ -71,7 +71,8 @@ repeat.
 
    Check: both print `state: applied`. If the switch is on, both also print
    `agent-identity switch: Claude Code on, Codex on`. `bash ~/.Jarvis/scripts/doctor.sh`
-   runs these two and the other checks in one go, and changes nothing.
+   runs these two and the other checks in one go and repairs nothing; it counts
+   an identity as `ok` only when `state:` is `applied`.
 5. Start a new Claude Code session, and restart Codex, so both load the new
    guard.
 6. Read what changed. Open [`CHANGELOG.md`](../CHANGELOG.md), which links the file for
@@ -128,9 +129,15 @@ This machine is current when all three hold:
 
 - the first line shows no `behind`;
 - the tag is the newest on [Releases](https://github.com/ShenYo/Jarvis/releases);
-- `doctor.sh` exits 0, which means it printed no `PROBLEM` line (it runs both
-  guard `--check` commands, the bridge check and the identity checks, and changes
-  nothing; its `live-callback` line is always `UNVERIFIED`).
+- `doctor.sh` exits 0, which means it printed no `PROBLEM` and no `ERROR` line.
+  It runs both guard `--check` commands, the bridge check and the identity
+  checks, and repairs nothing (the identity check's SSH probe may add
+  `github.com` to `~/.ssh/known_hosts` once). Exit 0 still allows `UNVERIFIED`
+  lines: read each one. `codex-guard` `UNVERIFIED` means Codex's trust could not
+  be read (give `python3` on `PATH` the `tomllib` module, then run it again); an
+  identity `UNVERIFIED` shows its `WARN` lines, which are for you to settle; the
+  `live-callback` line is always `UNVERIFIED`, and only a probe in a new session
+  settles it.
 
 Otherwise do [A](#a-routine-update).
 

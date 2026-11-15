@@ -75,7 +75,8 @@ fixture() {
 # run <name>: doctor in that sandbox; sets $code and $log.
 run() {
   log="$root/$1.log"
-  HOME="$h" CODEX_HOME="$cx" JARVIS_AGENT_IDENTITY_FILE="${identity:-$h/no-identity}" bash "$doctor" ${2:+"$2"} >"$log" 2>&1
+  HOME="$h" CODEX_HOME="$cx" JARVIS_AGENT_IDENTITY_FILE="${identity:-$h/no-identity}" STUB_DIR="${stubdir:-}" \
+    PATH="${runpath:-$PATH}" bash "$doctor" ${2:+"$2"} >"$log" 2>&1
   code=$?
 }
 
@@ -96,6 +97,61 @@ repo_state() {
     printf '%s %s\n' "$f" "$(cksum <"$repo/$f" 2>/dev/null || echo gone)"; done
   git -C "$repo" rev-parse HEAD
 }
+
+# The identity check's own stubs are the ones tests/agent-identity.sh uses, taken from it so that there is one
+# copy: `ssh` and `gh` answer from files in $STUB_DIR, and nothing reaches a network.
+mkdir -p "$root/idbin"
+for t in ssh gh; do
+  awk -v start="cat >\"\$root/bin/$t\" <<'EOF'" '$0 == start {f = 1; next} f && $0 == "EOF" {exit} f' \
+    "$repo/tests/agent-identity.sh" >"$root/idbin/$t"
+  [ -s "$root/idbin/$t" ] || echo "FAIL could not take the $t stub from tests/agent-identity.sh"
+  chmod +x "$root/idbin/$t"
+done
+idpath="$root/idbin:$PATH"
+
+put() { mkdir -p "$(dirname "$1")"; printf '%s' "$2" >"$1"; }
+
+# ident_fixture <name>: a fully set-up machine that also has an identity configured, for both runtimes,
+# every check passing against the stubs, and nothing applied yet. Sets $identity, $stubdir, $runpath.
+ident_fixture() {
+  fixture "$1"
+  local st="$h/stub" cfgd="$h/idcfg"
+  mkdir -p "$h/.ssh" "$cfgd" "$st/gh-agent" "$st/gh-operator"
+  chmod 700 "$h/.ssh" "$cfgd"
+  identity="$cfgd/agent-identity"
+  cat >"$identity" <<'CFG'
+login=bot-agent
+email=1+bot-agent@users.noreply.github.com
+ssh_key=~/.ssh/agent_key
+gh_config_dir=~/.config/gh-agent
+repos=acme/app
+codex_ssh_key=~/.ssh/codex_key
+CFG
+  chmod 600 "$identity"
+  for k in agent_key codex_key; do
+    put "$h/.ssh/$k" "FAKE PRIVATE KEY"; chmod 600 "$h/.ssh/$k"
+    put "$h/.ssh/$k.pub" "ssh-ed25519 AAAAFAKE bot-agent"
+  done
+  put "$st/ssh.out" "Hi bot-agent! You've successfully authenticated, but GitHub does not provide shell access."; put "$st/ssh.rc" 1
+  put "$st/gh-agent/auth_status.out" $'github.com\n  \xe2\x9c\x93 Logged in to github.com account bot-agent (keyring)\n  - Active account: true'
+  put "$st/gh-agent/user.out" "bot-agent"
+  put "$st/gh-agent/repo.acme__app.out" '{"permissions":{"admin":false,"maintain":false,"push":true,"pull":true}}'
+  put "$st/gh-agent/rulesets.acme__app.out" "[]"
+  put "$st/gh-agent/invitations.out" "[]"
+  put "$st/gh-operator/user.out" "owner-person"
+  put "$st/ssh.default.out" "Hi owner-person! You've successfully authenticated, but GitHub does not provide shell access."; put "$st/ssh.default.rc" 1
+  stubdir=$st runpath=$idpath
+}
+# ident_apply: apply the identity for both runtimes with the real script, as a person would.
+ident_apply() {
+  local a
+  for a in "" --codex; do
+    HOME="$h" CODEX_HOME="$cx" JARVIS_AGENT_IDENTITY_FILE="$identity" STUB_DIR="$stubdir" PATH="$runpath" \
+      bash "$repo/scripts/apply-agent-identity.sh" ${a:+"$a"} >>"$h.setup" 2>&1 </dev/null ||
+      { echo "fixture: applying the identity ${a:-for Claude Code} failed"; tail -5 "$h.setup"; }
+  done
+}
+clear_ident() { identity="" stubdir="" runpath=""; }
 
 # --- a correct machine -------------------------------------------------------
 fixture good; run good
@@ -133,8 +189,10 @@ fixture untrusted
 rm "$cx/config.toml"
 run untrusted
 expect "Codex trust missing: exit 1" test "$code" = 1
-expect "Codex trust missing: the Codex guard line is a PROBLEM that says UNTRUSTED and how to fix" bash -c "
-  grep -Eq '^PROBLEM +codex-guard ' '$log' && grep -q 'trust: UNTRUSTED' '$log' && grep -Eq 'fix: open /hooks in Codex and trust' '$log'"
+expect "Codex trust missing: the Codex guard line is a PROBLEM that says UNTRUSTED, and the fix is /hooks, not another apply" bash -c "
+  grep -Eq '^PROBLEM +codex-guard ' '$log' && grep -q 'trust: UNTRUSTED' '$log' &&
+  grep -Fq 'fix: open /hooks in Codex and trust (or enable) the Jarvis guard; the installed guard itself is current' '$log' &&
+  ! grep -Eq 'fix: bash .*apply-codex-guard.sh' '$log'"
 expect "Codex trust missing: live callback is UNVERIFIED" live
 
 fixture disabled
@@ -163,6 +221,159 @@ expect "identity configured but broken: exit 1, a PROBLEM with its fix" bash -c 
   test '$code' = 1 && grep -Eq '^PROBLEM +identity ' '$log' && grep -Eq 'fix: bash .*apply-agent-identity.sh --check' '$log'"
 expect "identity configured but broken: live callback is UNVERIFIED" live
 
+# --- identity: applied, ready, stale, warned ---------------------------------
+ident_fixture id-applied; name=id-applied; ident_apply; run id-applied
+expect "identity applied: exit 0, both identity lines ok" bash -c "
+  test '$code' = 0 && grep -Eq '^ok +identity ' '$log' && grep -Eq '^ok +identity-codex ' '$log' && ! grep -q '^PROBLEM' '$log'"
+expect "identity applied: live callback is UNVERIFIED" live
+clear_ident
+
+ident_fixture id-ready; run id-ready
+expect "identity configured, never applied: exit 1, a PROBLEM that says not applied, with the apply command" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +identity ' '$log' && grep -q 'state: ready' '$log' &&
+  grep -Eq 'fix: bash .*apply-agent-identity.sh ' '$log' && grep -Eq '^PROBLEM +identity-codex ' '$log' &&
+  grep -Eq 'fix: bash .*apply-agent-identity.sh --codex' '$log'"
+expect "identity configured, never applied: live callback is UNVERIFIED" live
+clear_ident
+
+ident_fixture id-stale; name=id-stale; ident_apply
+jq 'del(.env.GH_CONFIG_DIR)' "$h/.claude/settings.json" >"$h/s.new" && cat "$h/s.new" >"$h/.claude/settings.json"
+run id-stale
+expect "identity applied, then settings drifted: exit 1, the Claude identity line is a PROBLEM" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +identity ' '$log' && grep -q 'state: ready' '$log'"
+clear_ident
+
+ident_fixture id-warn; name=id-warn; ident_apply
+jq '.env.JARVIS_REQUIRE_AGENT_IDENTITY = "1"' "$h/.claude/settings.json" >"$h/s.new" && cat "$h/s.new" >"$h/.claude/settings.json"
+run id-warn
+expect "identity applied with a warning (switch on for one runtime only): exit 0, UNVERIFIED with the WARN line, not ok" bash -c "
+  test '$code' = 0 && grep -Eq '^UNVERIFIED +identity ' '$log' && grep -q 'WARN  agent-identity switch' '$log' && ! grep -Eq '^ok +identity ' '$log'"
+clear_ident
+
+# --- identity: evidence without a config file --------------------------------
+fixture sw-on
+printf '{"env":{"JARVIS_REQUIRE_AGENT_IDENTITY":"1"}}\n' >"$h/.claude/agent-identity.require.json"
+run sw-on
+expect "switch on, no config file: the identity is not skipped as optional; exit 1" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +identity ' '$log' && ! grep -Eq '^skipped +identity ' '$log'"
+fixture rec-only
+printf '{}\n' >"$h/.claude/agent-identity.applied.json"
+run rec-only
+expect "an applied record, no config file: the identity is not skipped as optional; exit 1" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +identity ' '$log'"
+fixture rec-codex
+printf '{}\n' >"$cx/agent-identity.applied.json"
+run rec-codex
+expect "a Codex applied record, no config file: identity-codex runs and is a PROBLEM, identity stays optional" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +identity-codex ' '$log' && grep -Eq '^skipped +identity +not configured' '$log'"
+fixture id-dir
+mkdir -p "$h/identdir"; identity="$h/identdir"; run id-dir; identity=""
+expect "identity path is a directory: the check runs and reports, it is not skipped" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +identity ' '$log' && ! grep -Eq '^skipped +identity ' '$log'"
+fixture id-dangling
+ln -s "$h/nowhere" "$h/identlink"; identity="$h/identlink"; run id-dangling; identity=""
+expect "identity path is a dangling link: the check runs and reports, it is not skipped" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +identity ' '$log'"
+
+# --- Codex guard: what is UNVERIFIED and what is a PROBLEM -------------------
+# A PATH with the tools the checks need and a python3 that has no tomllib, so Codex's trust cannot be read.
+nopy="$root/nopy"; mkdir -p "$nopy"
+for t in bash sh env jq git sed grep egrep awk cat cksum cmp diff find sort tr head tail mktemp cp mv rm dirname basename \
+         readlink wc shasum sha256sum stat ls mkdir ln cut date uname tee true false test xargs rmdir chmod pwd; do
+  p=$(command -v "$t" 2>/dev/null) && [ -x "$p" ] && ln -sf "$p" "$nopy/$t"
+done
+printf '#!/bin/sh\nexit 1\n' >"$nopy/python3"; chmod +x "$nopy/python3"
+
+fixture no-tomllib; runpath=$nopy; run no-tomllib; runpath=""
+expect "no tomllib: the Codex guard line is UNVERIFIED, doctor exits 0" bash -c "
+  test '$code' = 0 && grep -Eq '^UNVERIFIED +codex-guard ' '$log' && grep -q 'tomllib' '$log' && ! grep -q '^PROBLEM' '$log'"
+
+# The same, with an applied identity: identity-codex says UNVERIFIED too, so the two lines agree.
+nopy2="$root/nopy2"; mkdir -p "$nopy2"
+for f in "$nopy"/*; do ln -sf "$(readlink "$f" 2>/dev/null || echo "$f")" "$nopy2/$(basename "$f")"; done
+ln -sf "$root/idbin/ssh" "$nopy2/ssh"; ln -sf "$root/idbin/gh" "$nopy2/gh"
+ident_fixture id-no-tomllib; ident_apply
+runpath=$nopy2; run id-no-tomllib; runpath=""
+expect "no tomllib with an applied identity: codex-guard and identity-codex are both UNVERIFIED, exit 0" bash -c "
+  test '$code' = 0 && grep -Eq '^UNVERIFIED +codex-guard ' '$log' && grep -Eq '^UNVERIFIED +identity-codex ' '$log' && ! grep -q '^PROBLEM' '$log'"
+clear_ident
+
+fixture no-tomllib-stale
+printf '# drift\n' >>"$cx/hooks/jarvis-guard.py"
+runpath=$nopy; run no-tomllib-stale; runpath=""
+expect "no tomllib and a stale Codex guard: a PROBLEM, not UNVERIFIED" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +codex-guard ' '$log' && grep -Eq 'fix: bash .*apply-codex-guard.sh' '$log'"
+
+fixture hook-unknown-key
+jq '.hooks.PreToolUse |= map(.hooks |= map(if (.command // "" | contains("jarvis-guard.py")) then . + {futureKey: 1} else . end))' \
+  "$cx/hooks.json" >"$h/hj.new" && cat "$h/hj.new" >"$cx/hooks.json"
+run hook-unknown-key
+expect "a key in the hook entry the trust formula does not know, with the entry stale: a PROBLEM" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +codex-guard ' '$log'"
+
+fixture bad-toml
+printf 'this is = not [valid\n' >"$cx/config.toml"
+run bad-toml
+expect "config.toml that does not parse: the Codex guard line is a PROBLEM, not UNVERIFIED" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +codex-guard ' '$log' && ! grep -Eq '^UNVERIFIED +codex-guard ' '$log'"
+
+fixture stale-and-untrusted
+printf '# drift\n' >>"$cx/hooks/jarvis-guard.py"; rm "$cx/config.toml"
+run stale-and-untrusted
+expect "a stale Codex guard that is also untrusted: the fix is to apply it, then trust" bash -c "
+  grep -Eq 'fix: bash .*apply-codex-guard.sh   \(then open /hooks' '$log'"
+
+# --- a check that cannot run -------------------------------------------------
+fixture cannot-run
+printf 'this is not json\n' >"$h/.claude/settings.json"
+run cannot-run
+expect "a check that exits 2 (settings.json is not JSON): doctor exits 2 and names the check" bash -c "
+  test '$code' = 2 && grep -Eq '^ERROR +claude-guard ' '$log' && tail -1 '$log' | grep -q 'could not run 1 check(s) (first: claude-guard)'"
+expect "a check that exits 2: the other checks still ran" bash -c "grep -Eq '^ok +bridge ' '$log' && grep -Eq '^UNVERIFIED +live-callback ' '$log'"
+
+# --- a Skill changed in the working tree -------------------------------------
+# The lock check reads HEAD; this checks the working tree. The checkout is the real one, so the change is made in a
+# copy of the checkout's .agents/skills tree view: a scratch repository with the same layout.
+scratch="$root/lockrepo"
+mkdir -p "$scratch/scripts" "$scratch/.agents/skills"
+cp "$repo/scripts/doctor.sh" "$repo/scripts/check-skill-lock.sh" "$repo/scripts/apply-claude-guard.sh" \
+   "$repo/scripts/apply-codex-guard.sh" "$repo/scripts/apply-agent-identity.sh" "$scratch/scripts/"
+cp "$repo/sync-personal-skills.sh" "$scratch/"
+mkdir -p "$scratch/.agents/claude-guard"; cp "$repo"/.agents/claude-guard/* "$scratch/.agents/claude-guard/"
+printf 'name: demo\n' >"$scratch/.agents/skills/SKILL.md" 2>/dev/null; rm -f "$scratch/.agents/skills/SKILL.md"
+mkdir -p "$scratch/.agents/skills/demo"; printf 'name: demo\n' >"$scratch/.agents/skills/demo/SKILL.md"
+printf 'rules\n' >"$scratch/.agents/AGENTS.md"
+git -C "$scratch" init -q && git -C "$scratch" add -A >/dev/null 2>&1
+git -C "$scratch" -c user.email=t@example.invalid -c user.name=t commit -qm base
+tree=$(git -C "$scratch" rev-parse HEAD:.agents/skills/demo)
+printf '{"skills":{"demo":{"skillFolderHash":"%s"}}}\n' "$tree" >"$scratch/.agents/.skill-lock.json"
+git -C "$scratch" add -A >/dev/null 2>&1; git -C "$scratch" -c user.email=t@example.invalid -c user.name=t commit -qm lock
+lock_run() { # <name>: doctor from the scratch repository, with a home whose ~/.Jarvis is that repository
+  h="$root/$1"; cx="$h/.codex"; mkdir -p "$h" "$cx"; ln -s "$scratch" "$h/.Jarvis"
+  HOME="$h" CODEX_HOME="$cx" bash "$scratch/sync-personal-skills.sh" >/dev/null 2>&1
+  log="$root/$1.log"
+  HOME="$h" CODEX_HOME="$cx" JARVIS_AGENT_IDENTITY_FILE="$h/no-identity" bash "$scratch/scripts/doctor.sh" >"$log" 2>&1; code=$?
+}
+lock_run lock-clean
+expect "skill-lock in a scratch repository whose Skill matches its lock: ok" grep -Eq '^ok +skill-lock ' "$log"
+printf 'patched\n' >>"$scratch/.agents/skills/demo/SKILL.md"
+lock_run lock-patched
+expect "a vendored Skill patched in the working tree: skill-lock is a PROBLEM although HEAD matches the lock" bash -c "
+  grep -Eq '^PROBLEM +skill-lock ' '$log' && grep -q 'working tree' '$log'"
+git -C "$scratch" checkout -q -- .agents/skills/demo/SKILL.md
+printf 'x\n' >"$scratch/.agents/skills/demo/extra.md"
+lock_run lock-untracked
+expect "an untracked file in a Skill: skill-lock is a PROBLEM" grep -Eq '^PROBLEM +skill-lock ' "$log"
+rm "$scratch/.agents/skills/demo/extra.md"
+
+# --- terminal control characters in what is printed --------------------------
+fixture ctrl
+esc=$(printf '\033')
+ln -s "$h/nowhere" "$h/.claude/skills/x${esc}[2Jy"
+run ctrl
+expect "a Skill entry whose name holds an escape character: doctor reports it without the escape character" bash -c "
+  test '$code' = 1 && grep -Eq '^PROBLEM +bridge ' '$log' && grep -q 'DANGLING' '$log' && ! grep -q \"\$(printf '\\033')\" '$log'"
+
 # --- read-only ---------------------------------------------------------------
 # A passing machine, a machine with every kind of fault, and one that was never
 # set up (where a bridge run that is not a check would create every link).
@@ -188,9 +399,10 @@ expect "read-only: the faulty and the fresh machine exit 1, the good one 0" bash
 h="$root/good"; cx="$h/.codex"
 log="$root/usage.log"
 HOME="$h" CODEX_HOME="$cx" bash "$doctor" --bogus >"$log" 2>&1; c1=$?
-HOME="$h" CODEX_HOME="$cx" bash "$doctor" --check extra >"$log.2" 2>&1; c2=$?
+HOME="$h" CODEX_HOME="$cx" bash "$doctor" "" extra >"$log.2" 2>&1; c2=$?
 HOME="$h" CODEX_HOME="$cx" bash "$doctor" --help >"$log.3" 2>&1; c3=$?
-expect "usage: an unknown argument exits 2, two arguments exit 2, --help exits 0" test "$c1$c2$c3" = 220
+expect "usage: an unknown argument exits 2, an empty plus an extra argument exits 2, --help exits 0" test "$c1$c2$c3" = 220
+expect "usage: the two-argument case is refused for its count, not for an unknown flag" grep -q '^Usage:' "$log.2"
 
 echo
 if [ "$fails" -gt 0 ]; then echo "$fails of $total failed"; exit 1; fi

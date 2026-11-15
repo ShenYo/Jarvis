@@ -273,13 +273,16 @@ bash ~/.Jarvis/scripts/apply-agent-identity.sh --require
 
 ## 7. 驗證整台機器
 
-只要執行一個指令：`bash ~/.Jarvis/scripts/doctor.sh`。它會唯讀地跑下面這些檢查，什麼都不改，每項檢查印一行
-（`ok`、`PROBLEM`、`skipped` 或 `UNVERIFIED`），有問題的附上修正指令；沒有問題時以 0 離開。
-如果你沒做第 5 步（identity 是選用的），identity 那行顯示 `skipped` 是正確的；沒有 Codex 時，Codex 那行顯示
-`skipped` 也是。`live-callback` 那一行永遠是 `UNVERIFIED`：沒有任何檢查能證明執行中的 session 會呼叫 hook
-（見[打開開關](./guard.md#turning-the-switch-on)）。
+只要執行一個指令：`bash ~/.Jarvis/scripts/doctor.sh`。它會跑下面這些檢查，但不含 `core.hooksPath` 那一列；
+它什麼都不修，每項檢查印一行（`ok`、`PROBLEM`、`skipped`、`UNVERIFIED`，檢查本身跑不起來時是 `ERROR`），
+有問題的附上修正指令；沒有問題時以 0 離開。
+如果你沒做第 5 步（identity 是選用的：沒有 config 檔、沒有開關、也沒有套用紀錄），identity 那行顯示
+`skipped` 是正確的；沒有 Codex 時，Codex 那行顯示 `skipped` 也是。identity 那行只有在 `state:` 是 `applied`
+時才是 `ok`。`UNVERIFIED` 不會讓它失敗，所以每一條都要讀。`live-callback` 那一行永遠是 `UNVERIFIED`：沒有任何檢查
+能證明執行中的 session 會呼叫 hook（見[打開開關](./guard.md#turning-the-switch-on)）。它不會改你的任何檔案，
+只有一個例外：identity 檢查的 SSH probe 第一次連線時，可能把 `github.com` 加進 `~/.ssh/known_hosts`。
 
-下面的表是它實際執行的內容，想單獨跑某一項時用。「OK」是各項應該顯示的內容，而且每一個都以 0 離開。
+下面的表一項一項列出這些檢查，想單獨跑某一項時用。「OK」是各項應該顯示的內容，而且每一個都以 0 離開。
 最後一欄是該列所屬的 stage；沒做的 stage，它的列就跳過。
 
 | 指令 | OK 的樣子 | Stage |
