@@ -188,6 +188,23 @@ bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust
 Check: both scripts exit 0 with `--check`, and `--trust` prints
 `trust: OK - Codex trusts the Jarvis guard entry` and exits 0.
 
+Optional: tell Claude Code's auto-mode classifier which repositories this
+machine trusts. Run `/auto-mode-setup` in Claude Code from inside the Jarvis
+checkout (`~/.Jarvis`), not from the home directory: run elsewhere, it
+describes a directory with no remotes. It names only the repository it was run
+in, so read the result, add by hand every other repository this machine works
+in (each through its own remote), and remove any entry you do not recognise,
+such as a trusted-services entry with no source:
+
+```sh
+jq '.autoMode.environment' ~/.claude/settings.json
+```
+
+Re-run or edit it when the set of repositories changes. The setting is per
+machine and per person: it names that machine's repositories and trusted
+services, so do not copy it from another machine. It is not stored in
+`guard.json`, and `apply-claude-guard.sh` neither writes nor overwrites it.
+
 ## 5. Set up the agent identity
 
 Stage 3, optional.

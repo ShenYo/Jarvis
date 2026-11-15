@@ -169,6 +169,19 @@ bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust
 檢查：兩支腳本加 `--check` 都以 0 離開，而 `--trust` 印出
 `trust: OK - Codex trusts the Jarvis guard entry` 並以 0 離開。
 
+選用：告訴 Claude Code 的 auto-mode classifier 這台機器信任哪些 repository。在 Claude Code 裡，從
+Jarvis checkout（`~/.Jarvis`）內執行 `/auto-mode-setup`，不要從 home 目錄執行：在別處執行，它描述的是沒有
+remote 的目錄。它只會寫出執行當下所在的那個 repository，所以請讀一下結果，手動補上這台機器上其他每個
+repository（各自透過自己的 remote），並刪掉你不認得的項目，例如沒有來源的受信任服務項目：
+
+```sh
+jq '.autoMode.environment' ~/.claude/settings.json
+```
+
+repository 的組合有變動時，重新執行或直接編輯。這個設定是每台機器、每個人各自的：它記的是那台機器的
+repository 與受信任服務，所以不要從別台機器複製。它不存在 `guard.json`，`apply-claude-guard.sh`
+也不會寫入或覆寫它。
+
 ## 5. 設定 agent identity
 
 Stage 3，選用。
