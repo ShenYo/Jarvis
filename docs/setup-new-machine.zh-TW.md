@@ -170,13 +170,20 @@ bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust
 `trust: OK - Codex trusts the Jarvis guard entry` 並以 0 離開。
 
 選用：告訴 Claude Code 的 auto-mode classifier 這台機器信任哪些 repository。在 Claude Code 裡，從
-Jarvis checkout（`~/.Jarvis`）內執行 `/auto-mode-setup`，不要從 home 目錄執行：在別處執行，它描述的是沒有
-remote 的目錄。它只會寫出執行當下所在的那個 repository，所以請讀一下結果，手動補上這台機器上其他每個
-repository（各自透過自己的 remote），並刪掉你不認得的項目，例如沒有來源的受信任服務項目：
+Jarvis checkout（`~/.Jarvis`）內執行 `/auto-mode-setup`；從 home 目錄執行的話，它描述的是沒有 remote 的
+目錄。掃描前它會提供一個選用的掃描，讀取 home 目錄下各 repository：接受的話其他 repository 會一併起草，
+不接受就事後手動補上。不論哪種方式，都只留下你擁有或會 push 的 repository，因為每一個都會成為受信任的
+目的地。它問要加到現有的 environment 清單還是取代時，選加入：取代會丟掉手動補上的 repository 和
+`"$defaults"` 項目。然後讀一下結果：
 
 ```sh
 jq '.autoMode.environment' ~/.claude/settings.json
 ```
+
+刪掉你不認得的項目，例如沒有來源的受信任服務項目，但保留 `"$defaults"`，它代表內建的項目。可以在
+`/permissions` › Auto mode 或 `~/.claude/settings.json` 編輯清單，再用 `claude auto-mode config` 確認
+實際生效的內容。如果起草結果也在 `soft_deny` 或 `hard_deny` 加了規則，再執行一次
+`apply-claude-guard.sh`，讓它的 `--check` 以 0 離開。
 
 repository 的組合有變動時，重新執行或直接編輯。這個設定是每台機器、每個人各自的：它記的是那台機器的
 repository 與受信任服務，所以不要從別台機器複製。它不存在 `guard.json`，`apply-claude-guard.sh`

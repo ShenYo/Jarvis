@@ -190,15 +190,25 @@ Check: both scripts exit 0 with `--check`, and `--trust` prints
 
 Optional: tell Claude Code's auto-mode classifier which repositories this
 machine trusts. Run `/auto-mode-setup` in Claude Code from inside the Jarvis
-checkout (`~/.Jarvis`), not from the home directory: run elsewhere, it
-describes a directory with no remotes. It names only the repository it was run
-in, so read the result, add by hand every other repository this machine works
-in (each through its own remote), and remove any entry you do not recognise,
-such as a trusted-services entry with no source:
+checkout (`~/.Jarvis`); run from the home directory, it describes a directory
+with no remotes. Before it scans, it offers an optional scan of the
+repositories under your home directory: accept it to have the others drafted,
+or add them by hand afterwards. Either way, keep only repositories you own or
+push to, because each one becomes a trusted destination. When it asks whether
+to add to the existing environment list or replace it, choose add: replacing
+discards the repositories added by hand and the `"$defaults"` entry. Then read
+the result:
 
 ```sh
 jq '.autoMode.environment' ~/.claude/settings.json
 ```
+
+Remove any entry you do not recognise, such as a trusted-services entry with
+no source, but keep `"$defaults"`, which stands for the built-in entries. Edit
+the list in `/permissions` › Auto mode or in `~/.claude/settings.json`, and
+confirm what is in effect with `claude auto-mode config`. If the draft also
+added rules to `soft_deny` or `hard_deny`, run `apply-claude-guard.sh` again
+so that its `--check` exits 0.
 
 Re-run or edit it when the set of repositories changes. The setting is per
 machine and per person: it names that machine's repositories and trusted
