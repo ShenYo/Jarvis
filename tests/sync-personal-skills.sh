@@ -132,6 +132,74 @@ wrong wrong-codex-link  .codex  link
 wrong wrong-claude-dir  .claude dir
 wrong wrong-claude-file .claude file
 
+# --check changes nothing. snap <home>: every path under the sandbox with its
+# link target or content hash, so a created link, directory or file shows.
+snap() { (cd "$1" && find . | sort | while IFS= read -r f; do
+  if [ -L "$f" ]; then printf '%s -> %s\n' "$f" "$(readlink "$f")"
+  elif [ -f "$f" ]; then printf '%s %s\n' "$f" "$(cksum <"$f")"
+  else printf '%s dir\n' "$f"; fi; done); }
+runc() { # <name>: --check in that sandbox; sets $code, writes <name>.log
+  HOME="$root/$1" CODEX_HOME="$root/$1/.codex" bash "$script" --check >"$root/$1.log" 2>&1
+  code=$?
+}
+
+# A fully bridged home passes --check and nothing is written.
+h=$(home chk-clean); run chk-clean
+before=$(snap "$h"); runc chk-clean; after=$(snap "$h")
+if [ "$code" = 0 ] && [ "$before" = "$after" ] && grep -q '^checks passed:' "$root/chk-clean.log"; then
+  ok "--check on a bridged home exits 0 and writes nothing"
+else
+  bad "--check on a bridged home exits 0 and writes nothing (exit $code)" "$root/chk-clean.log"
+fi
+
+# A home that was never bridged fails --check, names what is missing, and is
+# left exactly as it was: no ~/.agents link, no skills directory, no links.
+h=$(home chk-fresh)
+ln -s .Jarvis/.agents "$h/.agents"
+before=$(snap "$h"); runc chk-fresh; after=$(snap "$h")
+if [ "$code" = 1 ] && [ "$before" = "$after" ] && grep -q '^MISSING  Claude Code' "$root/chk-fresh.log" \
+   && grep -q '^MISSING  .*CLAUDE.md' "$root/chk-fresh.log" && [ ! -e "$h/.claude" ]; then
+  ok "--check on an unbridged home exits 1, reports MISSING and creates nothing"
+else
+  bad "--check on an unbridged home exits 1, reports MISSING and creates nothing (exit $code)" "$root/chk-fresh.log"
+fi
+
+# A missing ~/.agents link is reported, not created.
+h=$(home chk-noagents)
+before=$(snap "$h"); runc chk-noagents; after=$(snap "$h")
+if [ "$code" = 1 ] && [ "$before" = "$after" ] && [ ! -e "$h/.agents" ]; then
+  ok "--check reports a missing ~/.agents and does not create it"
+else
+  bad "--check reports a missing ~/.agents and does not create it (exit $code)" "$root/chk-noagents.log"
+fi
+
+# One removed link and one dangling link in an otherwise bridged home.
+h=$(home chk-partial); run chk-partial
+rm "$h/.claude/skills/alpha"; ln -sfn "$h/nowhere" "$h/.codex/skills/beta"
+before=$(snap "$h"); runc chk-partial; after=$(snap "$h")
+if [ "$code" = 1 ] && [ "$before" = "$after" ] && grep -q '^MISSING  Claude Code: alpha' "$root/chk-partial.log" \
+   && grep -q '^DANGLING Codex: beta' "$root/chk-partial.log"; then
+  ok "--check reports a removed and a dangling link and repairs neither"
+else
+  bad "--check reports a removed and a dangling link and repairs neither (exit $code)" "$root/chk-partial.log"
+fi
+
+# A wrong-target entry still fails --check.
+h=$(home chk-wrong); run chk-wrong
+rm "$h/.claude/skills/alpha"; mkdir -p "$h/elsewhere/alpha"; ln -s "$h/elsewhere/alpha" "$h/.claude/skills/alpha"
+runc chk-wrong
+if [ "$code" = 1 ] && grep -q '^CONFLICT Claude Code' "$root/chk-wrong.log"; then
+  ok "--check reports a wrong-target entry"
+else
+  bad "--check reports a wrong-target entry (exit $code)" "$root/chk-wrong.log"
+fi
+
+# An unknown argument is a usage error.
+h=$(home chk-usage)
+HOME="$h" CODEX_HOME="$h/.codex" bash "$script" --nonsense >"$root/chk-usage.log" 2>&1; code=$?
+if [ "$code" = 2 ] && [ ! -e "$h/.claude" ]; then ok "an unknown argument exits 2 and writes nothing"
+else bad "an unknown argument exits 2 and writes nothing (exit $code)" "$root/chk-usage.log"; fi
+
 echo
 if [ "$fails" -gt 0 ]; then echo "$fails of $total failed"; exit 1; fi
 echo "all $total passed"

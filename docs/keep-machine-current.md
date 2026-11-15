@@ -70,7 +70,8 @@ repeat.
    ```
 
    Check: both print `state: applied`. If the switch is on, both also print
-   `agent-identity switch: Claude Code on, Codex on`.
+   `agent-identity switch: Claude Code on, Codex on`. `bash ~/.Jarvis/scripts/doctor.sh`
+   runs these two and the other checks in one go, and changes nothing.
 5. Start a new Claude Code session, and restart Codex, so both load the new
    guard.
 6. Read what changed. Open [`CHANGELOG.md`](../CHANGELOG.md), which links the file for
@@ -120,15 +121,16 @@ installed. A removed one is gone from both.
 ```sh
 git -C ~/.Jarvis fetch -q && git -C ~/.Jarvis status -sb | head -1
 git -C ~/.Jarvis describe --tags --abbrev=0
-bash ~/.Jarvis/scripts/apply-claude-guard.sh --check
-bash ~/.Jarvis/scripts/apply-codex-guard.sh --check
+bash ~/.Jarvis/scripts/doctor.sh
 ```
 
-This machine is current when all four hold:
+This machine is current when all three hold:
 
 - the first line shows no `behind`;
 - the tag is the newest on [Releases](https://github.com/ShenYo/Jarvis/releases);
-- both `--check` runs exit 0.
+- `doctor.sh` exits 0, which means it printed no `PROBLEM` line (it runs both
+  guard `--check` commands, the bridge check and the identity checks, and changes
+  nothing; its `live-callback` line is always `UNVERIFIED`).
 
 Otherwise do [A](#a-routine-update).
 

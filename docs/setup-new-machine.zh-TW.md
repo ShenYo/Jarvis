@@ -273,8 +273,14 @@ bash ~/.Jarvis/scripts/apply-agent-identity.sh --require
 
 ## 7. 驗證整台機器
 
-逐一執行下列指令；「OK」是它應該顯示的內容，而且每一個都以 0 離開。最後一欄是該列所屬的
-stage；沒做的 stage，它的列就跳過。
+只要執行一個指令：`bash ~/.Jarvis/scripts/doctor.sh`。它會唯讀地跑下面這些檢查，什麼都不改，每項檢查印一行
+（`ok`、`PROBLEM`、`skipped` 或 `UNVERIFIED`），有問題的附上修正指令；沒有問題時以 0 離開。
+如果你沒做第 5 步（identity 是選用的），identity 那行顯示 `skipped` 是正確的；沒有 Codex 時，Codex 那行顯示
+`skipped` 也是。`live-callback` 那一行永遠是 `UNVERIFIED`：沒有任何檢查能證明執行中的 session 會呼叫 hook
+（見[打開開關](./guard.md#turning-the-switch-on)）。
+
+下面的表是它實際執行的內容，想單獨跑某一項時用。「OK」是各項應該顯示的內容，而且每一個都以 0 離開。
+最後一欄是該列所屬的 stage；沒做的 stage，它的列就跳過。
 
 | 指令 | OK 的樣子 | Stage |
 | --- | --- | --- |
