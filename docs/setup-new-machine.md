@@ -195,20 +195,21 @@ with no remotes. It first asks whether to add to the existing environment list
 or replace it: choose add, because replacing discards the repositories added
 by hand and the `"$defaults"` entry. It then offers two optional scans; accept
 the one that reads the repositories under your home directory to have the
-others drafted, or add them by hand afterwards. Either way, keep only
-repositories you own or push to, because each one becomes a trusted
-destination. Then read everything the draft wrote, not only the environment
+others drafted, or add them by hand afterwards. The draft is accepted or
+discarded as a whole: accept it and prune it afterwards. Then read everything the draft wrote, not only the environment
 list:
 
 ```sh
 jq '.autoMode' ~/.claude/settings.json
 ```
 
-In `environment`, remove any entry you do not recognise, such as a
+In `environment`, keep only repositories you own or push to, because each one
+becomes a trusted destination; remove any entry you do not recognise, such as a
 trusted-services entry with no source, and keep `"$defaults"`, which stands
 for the built-in entries (add it as the first entry if it is missing and you
-want them). If the draft added `allow` entries, remove any that cover merging,
-pushing to a default branch or changing repository settings: an `allow` entry
+want them). If the draft added `allow` entries, remove any that overlap the guard's
+Human-Review Checkpoint rule (merging, auto-merge, closing or reopening a pull
+request, pushing to the default branch, repository settings): an `allow` entry
 is an exception to the guard's `soft_deny` rules, and `--check` does not see
 it. Edit the list in `/permissions` › Auto mode or in
 `~/.claude/settings.json`, and confirm what is in effect with
