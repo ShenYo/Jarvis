@@ -12,8 +12,9 @@ responsible for.
 ## Base behavior
 
 <!-- Responsibility: how every session behaves, whatever the task: the reply
-language, which source wins, and who does the work. Written out: every turn
-needs it; the dispatch detail is in docs/dispatch/, behind its pointer. -->
+language, which source wins, which repository a command runs in, and who does
+the work. Written out: every turn needs it; the dispatch detail is in
+docs/dispatch/, behind its pointer. -->
 
 ### Reply in the user's language
 <!-- PERSONAL: the owner's preference; a fork replaces this. -->
@@ -40,6 +41,13 @@ Auto memory holds notes from earlier sessions, and a note can outlive the rule
 it recorded. When a memory disagrees with this file or with a repository's
 own rules, follow the files, and correct the memory or point out the
 disagreement.
+
+### Name the repository a command runs in
+
+When a session works in more than one repository, or in one that is not its
+working directory, run Git as `git -C <absolute path>` and use absolute paths;
+never rely on a `cd`. Before a Git, tag or hook command, name that repository
+in the command's description, or in your message where the tool has none.
 
 ### Hand work to cheaper models, and verify it here
 
@@ -114,10 +122,10 @@ involved.
 
 ## Contracts
 
-<!-- Responsibility: formats other people and tools read: documents, commit
-messages, pull requests, and commands handed to the user to run. Short rules
-are written out; the Git contract is in docs/git.md, behind the pointer
-below. -->
+<!-- Responsibility: formats other people and tools read: documents,
+handoffs, commit messages, pull requests, and commands handed to the user to
+run. Short rules are written out; the Git contract is in docs/git.md, behind
+the pointer below. -->
 
 ### Documents: English, opened by a Chinese summary
 <!-- PERSONAL: the owner's preference; a fork replaces this. -->
@@ -136,11 +144,15 @@ pull request bodies and code comments, and the instruction files loaded on
 every turn (this file, a `CLAUDE.md`, a Skill's `SKILL.md`), where each line
 costs context.
 
-A handoff written while the session has a notes file
-(`docs/temp/session-notes/<session id>.md`) starts from it: bring the notes up
-to date, link them by absolute path, and add only what they lack. A handoff
-that leaves this machine copies what it needs from them instead of linking
-([why](../docs/session-notes.md#notes-and-handoffs)).
+### Session notes and handoffs
+
+Session notes (`docs/temp/session-notes/<session id>.md`) serve only their own
+session after a compaction, never a different session. A cross-session
+continuation gets a handoff named by task, `docs/temp/handoff/<task>.md` in
+the task's repository where Git ignores it, overriding the `handoff` Skill's
+temporary-directory default. It copies from the notes and never links them.
+Before writing one, read
+[`~/.Jarvis/docs/session-notes.md`](../docs/session-notes.md#notes-and-handoffs).
 
 ### A deletion the user runs
 <!-- MIXED: generic method, owner's style; a fork reviews this. -->

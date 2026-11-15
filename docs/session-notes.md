@@ -3,6 +3,8 @@
 > **中文摘要**：context 越大，每次 request 讀 cache 的成本越高；離開超過 cache 的存活時間再回來，還要把整段 context 重寫一次。所以在自然段落壓縮比較划算，但壓縮會丟掉細節。
 >
 > `session-notes` skill 會在壓縮前把 session 的工作狀態寫進專案的 `docs/temp/session-notes/<session id>.md`，每次都改寫同一個檔案。Claude Code 的兩個 hook 讓這件事半自動：context 超過 300k 時提醒 agent 在段落點更新筆記並建議 `/compact`，壓縮後再提醒 agent 先讀筆記。
+>
+> 筆記只給同一個 session 在壓縮後讀，不是新 session 的入口；跨 session 的接手另寫以 task 命名的 handoff，放在 `docs/temp/handoff/<task>.md`，複製所需內容而不連結筆記，決策與待辦則留在 GitHub issue 與 PR。
 
 Compacting a long session saves tokens, but the summary drops detail. The
 [`session-notes`](../.agents/skills/session-notes/SKILL.md) Skill keeps that
@@ -56,21 +58,56 @@ near the auto-compact window, long after the hint.
 
 ## Notes and handoffs
 
-A handoff and the session notes describe the same work for different readers.
-The notes serve this session after a compaction: the Skill can run on its own,
-and they are kept per session. A handoff serves a fresh agent: it is written
-only when asked, and kept where the repository names (per worktree in a Friday
-consumer), else in the OS temporary directory. Each has a reason to exist, so
-both stay. Two summaries written separately from one conversation can still
-disagree, and the next session cannot tell which is current. So a handoff written while the session
-has notes starts from them: it brings them up to date first, so the handoff is
-the current state, links them by absolute path, since the two files may sit
-under different roots, and adds only what they lack, such as what the next
-session is for and what the [handoff Skill](../.agents/skills/handoff/SKILL.md)
-itself asks for. The link works only on this machine, where the notes live,
-Git-ignored, and an absolute path carries the home directory's name. A
-handoff that leaves the machine, for another person or a remote session,
-copies what it needs from the notes instead.
+A handoff and the session notes are different documents for different readers:
+
+| | Session notes | Handoff |
+| --- | --- | --- |
+| Bound to | One session (the session id is the file name) | One task, across sessions and agents |
+| Reader | The same session after a compaction | A new session or agent |
+| Lifetime | Useful only within the session | Until the task is done |
+
+The notes are never the entry point for a new session. They stay in
+`docs/temp/session-notes/<session id>.md`, where the Skill and the hooks expect
+them. Handing a session's notes to a new session, still named by session id,
+mixes the two: the reader gets a session's working state, not the task's.
+
+Any cross-session continuation gets a handoff named by task, at
+`docs/temp/handoff/<task>.md` in the repository the task belongs to. It draws
+on the notes but copies what it needs instead of linking them, so it survives
+the notes being deleted, and a link by absolute path would carry the home
+directory's name and work only on this machine. This location overrides the
+[handoff Skill](../.agents/skills/handoff/SKILL.md)'s default of the OS
+temporary directory, which a reboot may clear, and copying from the notes
+overrides that Skill's advice to reference other artifacts by path. A Friday
+consumer keeps its own per-worktree convention.
+
+Where exactly it goes, and when to ask first:
+
+- **The main worktree.** The file sits under the root of the repository's main
+  worktree, so a session in any worktree of that repository finds the same
+  file. That root is what
+  `git rev-parse --path-format=absolute --git-common-dir` prints, without its
+  trailing `/.git`. If it does not end in `/.git`, or the write there is
+  refused, as a sandbox may do from a linked worktree, ask the user. The file
+  is not in Git: a handoff for another clone or another machine is sent there,
+  it does not travel with a push.
+- **Only where Git ignores it.** Run
+  `git -C <main root> check-ignore -q docs/temp/handoff/<task>.md` first; the
+  path is read from that root, not from the directory you are in. If the path
+  is not ignored, or the task belongs to no repository, ask the user where the
+  handoff goes: an untracked file with a session's working state is one broad
+  `git add` away from a commit.
+- **A plain task name.** `<task>` is a short name of lowercase letters, digits
+  and hyphens that you choose, never a path and never text taken as it came
+  from an issue or a message.
+- **One file per task.** A session that continues the task reads the existing
+  handoff first and revises it. It does not write a second file, and it does
+  not replace one it has not read.
+
+Durable state, meaning decisions, open items and blockers, goes to GitHub
+issues and pull requests, where every session and agent can read it. The
+handoff summarises that state and points there; it does not become its only
+home.
 
 ## Codex
 
