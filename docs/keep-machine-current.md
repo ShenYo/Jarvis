@@ -134,8 +134,7 @@ This machine is current when all three hold:
   checks, and repairs nothing (the identity check's SSH probe may add
   `github.com` to `~/.ssh/known_hosts` once). Exit 0 still allows `UNVERIFIED`
   lines: read each one. `codex-guard` `UNVERIFIED` means Codex's trust could not
-  be read: `python3` on `PATH` has no `tomllib` module, or the hook entry has a key
-  the trust check does not know. An `identity-codex` `UNVERIFIED` means either the
+  be read: `python3` on `PATH` has no `tomllib` module. An `identity-codex` `UNVERIFIED` means either the
   same missing `tomllib` (the identity in `config.toml` went unchecked), or
   warnings that say something was not checked, such as unreadable rulesets or an
   unreachable network; an `identity` `UNVERIFIED` is the second kind. In every case

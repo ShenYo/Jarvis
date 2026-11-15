@@ -256,6 +256,7 @@ jq '.env.JARVIS_REQUIRE_AGENT_IDENTITY = "1"' "$h/.claude/settings.json" >"$h/s.
 run id-warn
 expect "a permanent warning plus a switch on in one runtime only: exit 1, a PROBLEM, not the same as the permanent warning alone" bash -c "
   test '$code' = 1 && grep -Eq '^PROBLEM +identity ' '$log' && grep -q 'WARN  agent-identity switch' '$log' &&
+  ! grep -q 'rulesets are not readable' '$log' &&
   ! cmp -s '$log' '$root/id-warn-only.log' && grep -Eq 'fix: bash .*apply-agent-identity.sh --check' '$log'"
 clear_ident
 

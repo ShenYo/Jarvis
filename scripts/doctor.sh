@@ -84,9 +84,9 @@ detail() {
              LC_ALL=C sed "s/$(printf '\302')[$(printf '\200')-$(printf '\237')]//g")"
 }
 
-problem() { # <name> <text> <fix command> <captured output>
+problem() { # <name> <text> <fix command> <captured output> [<grep -E pattern for the excerpt>]
   result PROBLEM "$1" "$2"
-  detail "$4"
+  detail "$4" "${5-}"
   printf '%-11s %-15s %s\n' "" "" "fix: $3"
   [ -n "$first_fix" ] || first_fix=$3
 }
@@ -124,7 +124,7 @@ judge() {
       # Definite: the switch is on in one runtime and not the other, or a record outlives its setting. Not a gap in
       # what could be checked, so it is a finding. Other warnings say something was not checked (rulesets,
       # network): UNVERIFIED, and so is any warning whose text is not known here.
-      problem "$name" "the agent-identity switch is inconsistent" "$checkfix" "$out"
+      problem "$name" "the agent-identity switch is inconsistent" "$checkfix" "$out" '^WARN  agent-identity switch:'
     elif [ -n "$warns" ]; then
       result UNVERIFIED "$name" "passes, with $(printf '%s\n' "$warns" | grep -c .) warning(s); first: $(printf '%s\n' "$warns" | head -1 |
         sed 's/^WARN  //; s/^[^:]*: WARN: //' | LC_ALL=C tr -d '\000-\037\177' | cut -c1-110)"
@@ -150,7 +150,9 @@ judge() {
       return
     fi
     if [ ! -e "$codex_home/agent-identity.applied.json" ]; then
-      problem "$name" "the Codex identity is not applied (and config.toml cannot be parsed here: no python3 with tomllib)" \
+      why="Codex's trust of the guard could not be read"
+      ! printf '%s\n' "$out" | grep -q 'tomllib' || why="config.toml cannot be parsed here: no python3 with tomllib"
+      problem "$name" "the Codex identity is not applied (and $why)" \
         "bash $here/scripts/apply-agent-identity.sh --codex" "$out"
       return
     fi
