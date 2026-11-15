@@ -204,7 +204,8 @@ open `/hooks` in Codex and trust it. `--check --codex` reports `UNTRUSTED` until
 With the switch on, the guard is designed to refuse GitHub writes from a runtime
 whose identity is not applied or whose record fails, while allowing reads. That
 requires the running session to deliver the hook callback; a passing static
-identity or trust check does not prove live enforcement.
+identity or trust check does not prove live enforcement. `scripts/doctor.sh`
+says so on every run, as a `live-callback` line that is always `UNVERIFIED`.
 
 A live Codex check on 2026-11-04 confirmed the trust and identity checks, and a
 normal read command exited successfully. In that continuing session, a fake-token

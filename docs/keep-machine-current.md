@@ -70,7 +70,9 @@ repeat.
    ```
 
    Check: both print `state: applied`. If the switch is on, both also print
-   `agent-identity switch: Claude Code on, Codex on`.
+   `agent-identity switch: Claude Code on, Codex on`. `bash ~/.Jarvis/scripts/doctor.sh`
+   runs these two and the other checks in one go and repairs nothing; it counts
+   an identity as `ok` only when `state:` is `applied`.
 5. Start a new Claude Code session, and restart Codex, so both load the new
    guard.
 6. Read what changed. Open [`CHANGELOG.md`](../CHANGELOG.md), which links the file for
@@ -120,15 +122,26 @@ installed. A removed one is gone from both.
 ```sh
 git -C ~/.Jarvis fetch -q && git -C ~/.Jarvis status -sb | head -1
 git -C ~/.Jarvis describe --tags --abbrev=0
-bash ~/.Jarvis/scripts/apply-claude-guard.sh --check
-bash ~/.Jarvis/scripts/apply-codex-guard.sh --check
+bash ~/.Jarvis/scripts/doctor.sh
 ```
 
-This machine is current when all four hold:
+This machine is current when all three hold:
 
 - the first line shows no `behind`;
 - the tag is the newest on [Releases](https://github.com/ShenYo/Jarvis/releases);
-- both `--check` runs exit 0.
+- `doctor.sh` exits 0, which means it printed no `PROBLEM` and no `ERROR` line.
+  It runs both guard `--check` commands, the bridge check and the identity
+  checks, and repairs nothing (the identity check's SSH probe may add
+  `github.com` to `~/.ssh/known_hosts` once). Exit 0 still allows `UNVERIFIED`
+  lines: read each one. `codex-guard` `UNVERIFIED` means Codex's trust could not
+  be read: `python3` on `PATH` has no `tomllib` module. An `identity-codex` `UNVERIFIED` means either the
+  same missing `tomllib` (the identity in `config.toml` went unchecked), or
+  warnings that say something was not checked, such as unreadable rulesets or an
+  unreachable network; an `identity` `UNVERIFIED` is the second kind. In every case
+  give `python3` the `tomllib` module, or settle the warnings, and run it again.
+  A switch that is on in one runtime and off in the other, or a stale switch
+  record, is a `PROBLEM`, not `UNVERIFIED`. The `live-callback` line is always
+  `UNVERIFIED`, and only a probe in a new session settles it.
 
 Otherwise do [A](#a-routine-update).
 

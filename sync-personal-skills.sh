@@ -19,7 +19,21 @@
 # the thirty skills had no symlink at all, so Claude Code could not see them.
 # Nothing detected that. A rebuild that can be re-run makes the drift fixable,
 # and the checks below make it visible.
+#
+# Usage: sync-personal-skills.sh [--check]
+#   --check  change nothing: report every link that a normal run would create or
+#            repair as MISSING, DANGLING or CONFLICT, and exit 1 when there is
+#            any. scripts/doctor.sh runs it this way.
 set -euo pipefail
+
+check=0
+case "${1-}" in
+  "") ;;
+  --check) check=1 ;;
+  -h|--help) sed -n '/^# Usage:/,/doctor.sh runs it this way/s/^# \{0,1\}//p' "$0"; exit 0 ;;
+  *) sed -n '/^# Usage:/,/doctor.sh runs it this way/s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
+esac
+[ "$#" -le 1 ] || { echo "usage: sync-personal-skills.sh [--check]" >&2; exit 2; }
 
 CANONICAL="$HOME/.Jarvis/.agents/skills"
 
@@ -41,7 +55,7 @@ CANONICAL_PARENT=$(cd "$CANONICAL/.." && pwd -P)
 # ~/.agents name it is reached through. A link still naming the old directory
 # is migrated -- that exact target only, so a link someone pointed elsewhere on
 # purpose is still reported rather than rewritten.
-if [ -L "$AGENTS_LINK" ] && [ "$(readlink "$AGENTS_LINK")" = .Jarvis/agents ] \
+if [ "$check" = 0 ] && [ -L "$AGENTS_LINK" ] && [ "$(readlink "$AGENTS_LINK")" = .Jarvis/agents ] \
    && [ ! -e "$HOME/.Jarvis/agents" ]; then
   ln -sfn .Jarvis/.agents "$AGENTS_LINK"
   echo "migrated ~/.agents -> .Jarvis/.agents (was .Jarvis/agents)"
@@ -63,6 +77,9 @@ elif [ -d "$AGENTS_LINK" ]; then
   exit 1
 elif [ -e "$AGENTS_LINK" ]; then
   echo "error: ~/.agents exists but is neither a symlink nor a directory." >&2
+  exit 1
+elif [ "$check" = 1 ]; then
+  echo "error: ~/.agents does not exist; a normal run would link it to .Jarvis/.agents." >&2
   exit 1
 else
   ln -s .Jarvis/.agents "$AGENTS_LINK"
@@ -135,7 +152,12 @@ bridge() {
   shift 2
   local reserved=" $* "
 
-  mkdir -p "$target"
+  if [ "$check" = 1 ] && [ ! -d "$target" ]; then
+    echo "MISSING  $label: $target does not exist; a normal run would create it and link every Skill" >&2
+    fail=1
+    return 0
+  fi
+  [ "$check" = 1 ] || mkdir -p "$target"
 
   local prefix
   prefix=$(agents_prefix "$target")
@@ -144,7 +166,9 @@ bridge() {
   while IFS=$'\t' read -r rel name; do
     link="$target/$name"
     # -e is false for a dangling symlink, so a broken link is replaced too.
-    if [ ! -e "$link" ]; then
+    if [ ! -e "$link" ] && [ "$check" = 1 ]; then
+      : # reported below as MISSING (or DANGLING), nothing is created in a check
+    elif [ ! -e "$link" ]; then
       ln -sfn "$prefix/$rel" "$link"
       echo "linked   $label: $name"
       created=$((created + 1))
@@ -183,6 +207,7 @@ bridge() {
   # No link may dangle, including ones this script did not create.
   for link in "$target"/*; do
     [ -e "$link" ] && continue
+    [ -L "$link" ] || continue   # the unexpanded glob of an empty directory
     name=$(basename "$link")
     case "$reserved" in *" $name "*) continue ;; esac
     echo "DANGLING $label: $name -> $(readlink "$link")" >&2
@@ -227,6 +252,9 @@ link_rules() {
   target="$(agents_prefix "$(dirname "$link")" | sed 's|/skills$||')/AGENTS.md"
   if [ -L "$link" ] && [ -e "$link" ] && resolves_to_rules "$link"; then
     echo "$label instructions: $link -> $(readlink "$link")"
+  elif [ -L "$link" ] && [ ! -e "$link" ] && [ "$check" = 1 ]; then
+    echo "DANGLING $link -> $(readlink "$link"); a normal run would relink it to $target" >&2
+    fail=1
   elif [ -L "$link" ] && [ ! -e "$link" ]; then
     ln -sfn "$target" "$link"
     echo "relinked $link -> $target (was dangling)"
@@ -238,6 +266,9 @@ link_rules() {
     echo "CONFLICT $link is a real file. Left alone: it holds instructions" >&2
     echo "         someone wrote. Move what it should keep into $GLOBAL_RULES," >&2
     echo "         remove it, and run this again." >&2
+    fail=1
+  elif [ "$check" = 1 ]; then
+    echo "MISSING  $link does not exist; a normal run would link it to $target" >&2
     fail=1
   else
     ln -s "$target" "$link"

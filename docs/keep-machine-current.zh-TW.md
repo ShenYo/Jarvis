@@ -55,7 +55,7 @@ Jarvis 的 `main` 有變動後，每台機器都做一次。每一步重複執�
    bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex
    ```
 
-   檢查：兩個都顯示 `state: applied`。如果開關是打開的，兩個也都會顯示 `agent-identity switch: Claude Code on, Codex on`。
+   檢查：兩個都顯示 `state: applied`。如果開關是打開的，兩個也都會顯示 `agent-identity switch: Claude Code on, Codex on`。`bash ~/.Jarvis/scripts/doctor.sh` 會一次跑這兩個和其他檢查，而且什麼都不修；它只有在 `state:` 是 `applied` 時才把 identity 算成 `ok`。
 5. 開一個新的 Claude Code session，並重新啟動 Codex，讓兩邊都載入新的 guard。
 6. 看這次改了什麼。打開 [`CHANGELOG.md`](../CHANGELOG.md)（它連到每個大版號的檔案），讀完比這台機器原本版本更新的每一則條目。如果有條目寫了這台機器要做的事，請前往 [B](#b-release-要求額外步驟)。
 
@@ -90,15 +90,14 @@ Skill 是連結，所以只改了 Skill 本身的內容時，`git pull` 就會�
 ```sh
 git -C ~/.Jarvis fetch -q && git -C ~/.Jarvis status -sb | head -1
 git -C ~/.Jarvis describe --tags --abbrev=0
-bash ~/.Jarvis/scripts/apply-claude-guard.sh --check
-bash ~/.Jarvis/scripts/apply-codex-guard.sh --check
+bash ~/.Jarvis/scripts/doctor.sh
 ```
 
-四項都成立，這台機器就是最新的：
+三項都成立，這台機器就是最新的：
 
 - 第一行沒有 `behind`；
 - tag 是 [Releases](https://github.com/ShenYo/Jarvis/releases) 上最新的那一個；
-- 兩個 `--check` 都以 0 結束。
+- `doctor.sh` 以 0 結束，也就是沒有印出任何 `PROBLEM` 或 `ERROR` 行。它會跑兩個 guard 的 `--check`、bridge 檢查和 identity 檢查，而且什麼都不修（identity 檢查的 SSH probe 可能一次性地把 `github.com` 加進 `~/.ssh/known_hosts`）。以 0 結束仍然允許有 `UNVERIFIED` 行：每一條都要讀。`codex-guard` 的 `UNVERIFIED` 代表讀不到 Codex 的 trust：`PATH` 上的 `python3` 沒有 `tomllib` 模組。`identity-codex` 的 `UNVERIFIED` 代表同樣缺少 `tomllib`（`config.toml` 裡的 identity 沒被檢查），或是警告說有東西沒檢查到，例如 ruleset 讀不到、網路連不上；`identity` 的 `UNVERIFIED` 是第二種。不論哪一種，都讓 `python3` 有 `tomllib` 模組，或處理那些警告，再跑一次。開關在一個 runtime 開著、另一個關著，或開關的 record 過期，是 `PROBLEM`，不是 `UNVERIFIED`。`live-callback` 那一行永遠是 `UNVERIFIED`，只有在新 session 裡實際試一次才能確認。
 
 否則請做 [A](#a-例行更新)。
 

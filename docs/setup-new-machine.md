@@ -312,9 +312,23 @@ again.
 
 ## 7. Verify the whole machine
 
-Run each command; "OK" is what it should show, and every one exits 0. The
-last column says which stage a row belongs to; skip the rows of a stage you did
-not do.
+Run one command: `bash ~/.Jarvis/scripts/doctor.sh`. It runs the checks below
+except the `core.hooksPath` row, repairs nothing, prints one line per check
+(`ok`, `PROBLEM`, `skipped`, `UNVERIFIED`, or `ERROR` when a check could not
+run) with the fix command for each problem, and exits 0 when there is no
+problem. A `skipped` identity line is correct if you did not do step 5 (the
+identity is optional: no config file, no switch and no applied record), and so
+is a `skipped` Codex line without Codex. An identity line is `ok` only when its
+`state:` is `applied`. `UNVERIFIED` does not fail the run, so read each such
+line. The `live-callback` line is always `UNVERIFIED`: no check proves that a
+running session calls the hook (see
+[Turning the switch on](./guard.md#turning-the-switch-on)). It changes no file
+of yours, with one exception: the identity check's SSH probe may add
+`github.com` to `~/.ssh/known_hosts` the first time it connects.
+
+The table lists the checks one by one, for when you want a single check alone.
+"OK" is what each should show, and every one exits 0. The last column says which
+stage a row belongs to; skip the rows of a stage you did not do.
 
 | Command | OK looks like | Stage |
 | --- | --- | --- |

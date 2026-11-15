@@ -47,8 +47,12 @@ CODEX_SKILLS="${CODEX_HOME:-$HOME/.codex}/skills"
 
 ### Verify
 
-Running [`~/.Jarvis/sync-personal-skills.sh`](../sync-personal-skills.sh) is the normal bridge check. For a
-read-only inspection, use:
+Running [`~/.Jarvis/sync-personal-skills.sh`](../sync-personal-skills.sh) is the normal bridge check. It
+creates missing links; `sync-personal-skills.sh --check` reports them as
+`MISSING`, `DANGLING` or `CONFLICT` and changes nothing. `scripts/doctor.sh`
+runs that check together with the guard, Skill-lock and identity checks; it
+repairs nothing, apart from one SSH probe that may add `github.com` to
+`~/.ssh/known_hosts`. For a manual read-only inspection, use:
 
 ```sh
 test -L ~/.agents && test "$(cd -P ~/.agents && pwd)" = "$(cd -P ~/.Jarvis/.agents && pwd)"
