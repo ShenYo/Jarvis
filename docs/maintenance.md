@@ -122,8 +122,9 @@ plain terminal, not from inside an agent session: in the same run, started
 from inside one, it detected the agent, did not prompt, and without `--agent`
 installed to every agent it found, the fan-out warned against above.
 Afterwards check which agent directories it wrote to. That run also dropped
-the `ref` pin from both entries; whether `npx skills update -g <name>` then
-moves them has not been tried.
+the `ref` pin from both entries. After that, `npx skills update -g <name>`
+moved them (`skills` 1.9.0, 2026-11-20, run per Skill from a terminal), wrote
+only the named Skill's folder and lock entry, and added no agent link.
 
 The existing global lock filename is
 [`.agents/.skill-lock.json`](../.agents/.skill-lock.json);
