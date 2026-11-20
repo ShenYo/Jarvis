@@ -29,6 +29,11 @@ verifier is the independent-review row. In Codex, [`codex.md`](./codex.md)
 names the models. A tool with no separate execution facility keeps the
 role boundaries by using a bounded, fresh execution context.
 
+Splitting, parallelizing or fanning out work goes to these model subagents,
+even where a vendored Skill such as `orchestration` says to use Orca workers.
+Orca workers are for when the user names them or names another agent, such as
+Codex.
+
 ## The brief
 
 Every dispatch carries all three:
