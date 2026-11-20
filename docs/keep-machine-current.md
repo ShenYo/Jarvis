@@ -141,7 +141,12 @@ This machine is current when all three hold:
   give `python3` the `tomllib` module, or settle the warnings, and run it again.
   A switch that is on in one runtime and off in the other, or a stale switch
   record, is a `PROBLEM`, not `UNVERIFIED`. The `live-callback` line is always
-  `UNVERIFIED`, and only a probe in a new session settles it.
+  `UNVERIFIED`, and only a probe in a new session settles it. A `dup-skills` or
+  `dup-codex` `UNVERIFIED` lists each Skill name offered by more than one provider
+  (personal Skills, enabled plugins, Skills Anthropic syncs; Codex's `.system`
+  Skills): two descriptions of one name cost context and let the wrong copy
+  trigger. Keep one: disable the plugin or bundle, or stop bridging a vendored
+  Skill through its owning CLI; never edit a vendored Skill.
 
 Otherwise do [A](#a-routine-update).
 
