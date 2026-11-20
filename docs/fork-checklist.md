@@ -48,14 +48,14 @@ ruleset on `main` upstream has four rules:
   `skills` and `gitleaks`;
 - `deletion` and `non_fast_forward`.
 
-The repository settings that list names are `allow_auto_merge`,
-`delete_branch_on_merge` and a bypass actor for the admin role.
+The ruleset is the file [`.github/rulesets/main.json`](../.github/rulesets/main.json).
+The commands that apply it, the repository settings (`allow_auto_merge`,
+`delete_branch_on_merge`) and how to update an existing ruleset are in
+[Applying the ruleset and settings](./git.md#applying-the-ruleset-and-settings)
+in `docs/git.md`.
 
 Enable GitHub Actions on your fork, or the required checks never report and
 nothing can merge.
-
-The ruleset is not yet a file in this repository; that is tracked in
-[ShenYo/Jarvis#56](https://github.com/ShenYo/Jarvis/issues/56).
 
 ## 3. Review the marked sections of `.agents/AGENTS.md`
 
