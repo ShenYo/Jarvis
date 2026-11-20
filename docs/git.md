@@ -151,9 +151,9 @@ gh api --method POST repos/OWNER/REPO/rulesets --input .github/rulesets/main.jso
 gh api --method PATCH repos/OWNER/REPO -F allow_auto_merge=true -F delete_branch_on_merge=true
 ```
 
-To update a ruleset that already exists, find its ID with
-`gh api repos/OWNER/REPO/rulesets`, then replace it with the file, its
-`bypass_actors` included:
+POST adds a new ruleset every time it runs, so run it once. If
+`gh api repos/OWNER/REPO/rulesets` already lists a ruleset for the default
+branch, replace that one by its ID instead, its `bypass_actors` included:
 
 ```sh
 gh api --method PUT repos/OWNER/REPO/rulesets/ID --input .github/rulesets/main.json
