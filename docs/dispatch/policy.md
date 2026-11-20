@@ -29,10 +29,12 @@ verifier is the independent-review row. In Codex, [`codex.md`](./codex.md)
 names the models. A tool with no separate execution facility keeps the
 role boundaries by using a bounded, fresh execution context.
 
-Splitting, parallelizing or fanning out work goes to these model subagents,
-even where a vendored Skill such as `orchestration` says to use Orca workers.
-Orca workers are for when the user names them or names another agent, such as
-Codex.
+When the session itself chooses to split, parallelize or fan out work, the
+work goes to these model subagents, even where the vendored `orchestration`
+Skill says to use Orca workers. The user asks for Orca when they name Orca
+workers, `/orchestration`, or another agent: Codex from Claude, or Claude from
+Codex. A session dispatched as an Orca worker follows that Skill's worker
+protocol. The short form of this rule is in the personal instructions.
 
 ## The brief
 
