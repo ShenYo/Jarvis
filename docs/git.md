@@ -126,15 +126,39 @@ The owner applies these settings, from their own terminal with their own login,
 not from an agent session:
 
 - On the default branch's ruleset, the `pull_request` rule with the four fields above.
+  The ruleset is the file [`.github/rulesets/main.json`](../.github/rulesets/main.json);
+  [Applying the ruleset and settings](#applying-the-ruleset-and-settings) applies it.
 - [`.github/CODEOWNERS`](../.github/CODEOWNERS) with `* @ShenYo`, so the code-owner
   review that counts is the owner's, not that of an App that approves.
 - `allow_auto_merge` on, or there is nothing to arm, and `delete_branch_on_merge`
-  on, since the agent never passes `--delete-branch`.
+  on, since the agent never passes `--delete-branch`. Set them with the
+  second command below.
 - A bypass actor for the repository admin role, in `pull_request` mode, so the
   owner can still merge by hand. The agent's own account must never be one, and
   the guard checks that through `current_user_can_bypass`. With the identity
   switch off, the agent's `gh` may be the owner's admin login; the check then
   refuses, which is correct.
+
+### Applying the ruleset and settings
+
+Run these from your own terminal with your own admin login, never from an agent
+session. First replace `* @ShenYo` in [`.github/CODEOWNERS`](../.github/CODEOWNERS)
+and enable GitHub Actions; the required checks' `integration_id` 15368 is GitHub
+Actions.
+
+```sh
+gh api --method POST repos/OWNER/REPO/rulesets --input .github/rulesets/main.json
+gh api --method PATCH repos/OWNER/REPO -F allow_auto_merge=true -F delete_branch_on_merge=true
+```
+
+To update a ruleset that already exists, find its ID with
+`gh api repos/OWNER/REPO/rulesets`, then:
+
+```sh
+gh api --method PUT repos/OWNER/REPO/rulesets/ID --input .github/rulesets/main.json
+```
+
+The file's `bypass_actors` entry is the admin role in `pull_request` mode.
 
 ## Limits
 
