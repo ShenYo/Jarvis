@@ -141,10 +141,10 @@ not from an agent session:
 
 ### Applying the ruleset and settings
 
-Run these from your own terminal with your own admin login, never from an agent
-session. First replace `* @ShenYo` in [`.github/CODEOWNERS`](../.github/CODEOWNERS)
-and enable GitHub Actions; the required checks' `integration_id` 15368 is GitHub
-Actions.
+Run these from the repository's root, in your own terminal with your own admin
+login, never from an agent session. In a fork, first replace `* @ShenYo` in
+[`.github/CODEOWNERS`](../.github/CODEOWNERS) and enable GitHub Actions; the
+required checks' `integration_id` 15368 is GitHub Actions.
 
 ```sh
 gh api --method POST repos/OWNER/REPO/rulesets --input .github/rulesets/main.json
@@ -152,7 +152,8 @@ gh api --method PATCH repos/OWNER/REPO -F allow_auto_merge=true -F delete_branch
 ```
 
 To update a ruleset that already exists, find its ID with
-`gh api repos/OWNER/REPO/rulesets`, then:
+`gh api repos/OWNER/REPO/rulesets`, then replace it with the file, its
+`bypass_actors` included:
 
 ```sh
 gh api --method PUT repos/OWNER/REPO/rulesets/ID --input .github/rulesets/main.json
