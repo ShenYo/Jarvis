@@ -145,8 +145,10 @@ This machine is current when all three hold:
   `dup-codex` `UNVERIFIED` lists each Skill name offered by more than one provider
   (personal Skills, enabled plugins, Skills Anthropic syncs; Codex's `.system`
   Skills): two descriptions of one name cost context and let the wrong copy
-  trigger. Keep one: disable the plugin or bundle, or stop bridging a vendored
-  Skill through its owning CLI; never edit a vendored Skill. The check reads only
+  trigger. Keep one: disable the plugin or bundle, or remove the vendored Skill
+  (a reviewed Git change, see [Remove](./maintenance.md#remove)), delete its
+  now-dangling bridge links by hand (a resync reports them, it does not remove
+  them) and rerun `sync-personal-skills.sh`; never edit a vendored Skill. The check reads only
   what is on disk and does not read project Skills, plugins enabled in a project's
   own settings, or Codex plugin Skills under `~/.codex/plugins`. It counts every
   file on disk: turning off a synced plugin or bundle may leave its files there, so

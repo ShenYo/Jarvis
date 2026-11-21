@@ -451,6 +451,10 @@ expect "an enabled plugin offers a bridged Skill's name: dup-skills is UNVERIFIE
   test '$code' = 0 && grep -Eq '^UNVERIFIED +dup-skills +1 Skill name' '$log' &&
   grep -Eq '\| $skill_a: personal, plugin demo@market' '$log' && ! grep -q '^PROBLEM' '$log'"
 expect "an enabled plugin offers a bridged Skill's name: the Codex line is not affected" grep -Eq '^ok +dup-codex ' "$log"
+expect "the summary counts equal the result lines of each kind (a dup finding and a dup ok included)" bash -c "
+  for w in ok skipped UNVERIFIED; do
+    n=\$(grep -Ec \"^\$w +\" '$log'); grep -Eq \"\\(?\$n \$w[,)]\" <(grep '^doctor:' '$log') || { echo \"\$w: \$n lines, summary: \$(grep '^doctor:' '$log')\"; exit 1; }
+  done"
 
 fixture dup-plugin-off; plugin_with "$h" demo@market false "$skill_a" "$skill_a"; run dup-plugin-off
 expect "a disabled plugin with the same name is not offered: dup-skills is ok" grep -Eq '^ok +dup-skills ' "$log"

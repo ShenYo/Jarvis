@@ -24,7 +24,7 @@
 #   skipped     not applicable here (Codex not installed; identity not configured: optional)
 #   UNVERIFIED  could not be established by a static check, or passed with a warning; also a Skill name
 #               offered twice, which a static check cannot prove the agent shows twice, and which only a
-#               person can resolve (stop bridging a Skill through its CLI, or disable a plugin)
+#               person can resolve (remove the vendored Skill, or disable a plugin)
 #   ERROR       the check itself could not run (it exited 2); doctor then exits 2
 # Only PROBLEM makes the exit status 1. UNVERIFIED does not: read those lines.
 #
@@ -280,13 +280,15 @@ printf '%s' "$claude_skills" | grep -q . || claude_skills=$'\n'
 if [ -n "$dup_unread" ]; then
   result UNVERIFIED dup-skills "$dup_unread"
 else
-  printf '%s' "$claude_skills" | grep . | report_dups dup-skills \
-    "keep one copy: stop bridging a vendored Skill through its owning CLI, or disable the plugin or bundle that offers the other (never edit a vendored Skill); a synced plugin or bundle turned off may leave its files on disk, so this line may not clear: read it as known"
+  report_dups dup-skills \
+    "keep one copy: remove the vendored Skill (a reviewed Git change; see docs/maintenance.md#remove), delete its now-dangling bridge links by hand (a resync reports them, it does not remove them) and rerun sync-personal-skills.sh, or disable the plugin or bundle that offers the other (never edit a vendored Skill); a synced plugin or bundle turned off may leave its files on disk, so this line may not clear: read it as known" < <(printf '%s' "$claude_skills" | grep .)
 fi
 
 if [ -d "$codex_home/skills" ]; then
-  { skills_in personal "$codex_home/skills"; skills_in "Codex system Skill" "$codex_home/skills/.system"; } |
-    report_dups dup-codex "keep one copy: stop bridging the Skill through its owning CLI, or remove the other" "Codex plugin Skills not read"
+  report_dups dup-codex "keep one copy: remove the vendored Skill (a reviewed Git change; see docs/maintenance.md#remove), delete its now-dangling bridge links by hand and rerun sync-personal-skills.sh, or remove the other" "Codex plugin Skills not read" < <(
+    skills_in personal "$codex_home/skills"
+    skills_in "Codex system Skill" "$codex_home/skills/.system"
+  )
 else
   result skipped dup-codex "Codex is not set up ($codex_home/skills does not exist)"
 fi
