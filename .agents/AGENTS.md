@@ -71,6 +71,11 @@ report format, ending with exactly one of `DONE`, `BLOCKED: <blocker>` or
 `UNVERIFIED: <what and why>`. A subagent's report is a claim: check it against
 the criteria before calling the work done.
 
+Split or parallel work, whether you or the user starts it, goes to these
+subagents, even where the `orchestration` Skill says Orca workers. Use Orca
+only when the user names Orca workers, another agent (Codex, or Claude from
+Codex), or `/orchestration`.
+
 When a delegated task comes back wrong or blocked twice, take it over here
 with the whole trail of attempts. When it cannot be solved here either, ask
 the user whether to escalate to `fable`; never dispatch `fable` unasked.
