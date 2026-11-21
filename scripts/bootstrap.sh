@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Set up this machine in the staged order of docs/setup-new-machine.md: every step a script can do,
+# Set up this machine in the staged order of docs/setup-new-machine.md: every scriptable step of stages 1 and 2,
 # and a clear stop at each step only a person can do.
 #
 #   stage 1  instructions and Skills   Git hooks path, the bridge (sync-personal-skills.sh)
@@ -40,7 +40,10 @@ if [ "$check" = 1 ]; then
   exec bash "$here/scripts/doctor.sh"
 fi
 
-resume="bash $here/scripts/bootstrap.sh"
+# The command that resumes: shell-quoted, and carrying the two homes when they were set for this run.
+resume="bash $(printf '%q' "$here/scripts/bootstrap.sh")"
+[ -z "${CODEX_HOME:-}" ] || resume="CODEX_HOME=$(printf '%q' "$CODEX_HOME") $resume"
+[ -z "${CLAUDE_CONFIG_DIR:-}" ] || resume="CLAUDE_CONFIG_DIR=$(printf '%q' "$CLAUDE_CONFIG_DIR") $resume"
 claude_home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 codex_home="${CODEX_HOME:-$HOME/.codex}"
 
@@ -60,17 +63,20 @@ stop() {
   exit 3
 }
 
-# run_quiet <label> <command...>: run a step script, show its last line, and show all of it on failure.
+# run_quiet <label> <command...>: run a step script; sets $out to what it printed, and shows all of
+# it on failure.
 run_quiet() {
-  local label=$1 out rc
+  local label=$1 rc
   shift
   out=$("$@" 2>&1 </dev/null); rc=$?
   if [ "$rc" != 0 ]; then
     printf '%s\n' "$out" >&2
     fail "$label failed (exit $rc); fix what it reports, then run $resume again"
   fi
-  did "$label: $(printf '%s\n' "$out" | grep . | tail -1)"
 }
+
+# show_warnings: the warning lines of the last step, which its summary line would hide.
+show_warnings() { printf '%s\n' "$out" | grep -i 'warn' | sed 's/^/      /' || true; }
 
 say "bootstrap: staged setup of this machine (stage 3, the agent identity, is optional and not done here)"
 
@@ -92,11 +98,35 @@ say "== stage 1: instructions and Skills"
     "$claude_home exists"
 ok "Claude Code home exists ($claude_home)"
 
-hp=$(git -C "$here" config --get core.hooksPath 2>/dev/null || true)
+# An existing ~/.claude/CLAUDE.md is the bridge's CONFLICT: a real file, or a live link that does not
+# lead to the Jarvis rules (the rule of link_rules in sync-personal-skills.sh, which is the reference).
+# It is found before anything is written, so the stop changes nothing.
+rules="$HOME/.Jarvis/.agents/AGENTS.md"
+claude_md="$HOME/.claude/CLAUDE.md"
+leads_to_rules() {
+  local dest
+  dest=$(cd -P "$(dirname "$1")" 2>/dev/null && cd -P "$(dirname "$(readlink "$1")")" 2>/dev/null && pwd -P) || return 1
+  [ "$dest/$(basename "$(readlink "$1")")" = "$(cd -P "$(dirname "$rules")" && pwd -P)/AGENTS.md" ]
+}
+if [ -f "$rules" ]; then
+  conflict=""
+  if [ -L "$claude_md" ]; then
+    if [ -e "$claude_md" ] && ! leads_to_rules "$claude_md"; then conflict="a link to $(readlink "$claude_md"), not to $rules"; fi
+  elif [ -e "$claude_md" ]; then
+    conflict="a real file"
+  fi
+  [ -z "$conflict" ] ||
+    stop "decide what the existing $claude_md keeps" \
+      "$claude_md is $conflict, so the bridge will not replace it. Move what it should keep into $rules, move $claude_md away, then resume. Nothing has been changed." \
+      "your own terminal and editor" \
+      "$claude_md is gone, and the resumed run links it to $rules"
+fi
+
+hp=$(git -C "$here" config --local --get core.hooksPath 2>/dev/null || true)
 if [ "$hp" = .githooks ]; then
   ok "Git hooks are on (core.hooksPath = .githooks)"
 elif [ -z "$hp" ]; then
-  git -C "$here" config core.hooksPath .githooks || fail "could not set core.hooksPath"
+  git -C "$here" config --local core.hooksPath .githooks || fail "could not set core.hooksPath"
   did "Git hooks turned on (core.hooksPath = .githooks)"
 else
   say "note  core.hooksPath is '$hp', not .githooks; left as it is (see docs/git-hooks.md)"
@@ -106,6 +136,7 @@ if bash "$here/sync-personal-skills.sh" --check >/dev/null 2>&1; then
   ok "Skills are bridged"
 else
   run_quiet "Skills bridge" bash "$here/sync-personal-skills.sh"
+  did "Skills bridge: $(printf '%s\n' "$out" | grep . | tail -1)"
 fi
 [ -d "$codex_home" ] || say "note  Codex is not set up ($codex_home absent): skipped. Install and start Codex, then run this again."
 
@@ -114,36 +145,67 @@ say ""
 say "== stage 2: the guard"
 
 # jq and python3 are system packages: this script does not install them.
-missing=""
-command -v jq >/dev/null 2>&1 || missing="jq"
-command -v python3 >/dev/null 2>&1 || missing="${missing:+$missing, }python3 (3.11 or newer)"
-if [ -z "$missing" ] && [ -d "$codex_home" ]; then
-  python3 -c 'import tomllib' >/dev/null 2>&1 || missing="python3 3.11 or newer (Codex's trust is read with tomllib)"
+missing="" worked=""
+if ! command -v jq >/dev/null 2>&1; then
+  missing="jq"; worked="command -v jq succeeds"
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+  missing="${missing:+$missing, }python3 (3.11 or newer)"; worked="${worked:+$worked, and }command -v python3 succeeds"
+fi
+if [ -d "$codex_home" ] && ! python3 -c 'import tomllib' >/dev/null 2>&1; then
+  case "$missing" in
+    *python3*) worked="${worked%command -v python3 succeeds}python3 -c 'import tomllib' succeeds" ;;
+    *) missing="${missing:+$missing, }python3 3.11 or newer (Codex's trust is read with tomllib)"
+       worked="${worked:+$worked, and }python3 -c 'import tomllib' succeeds" ;;
+  esac
 fi
 [ -z "$missing" ] ||
   stop "install what the guard needs: $missing" \
     "install $missing with your system's package manager" \
     "your own terminal; this script installs no system package" \
-    "command -v jq and python3 -c 'import tomllib' both succeed"
+    "$worked"
 
 if bash "$here/scripts/apply-claude-guard.sh" --check >/dev/null 2>&1; then
   ok "Claude Code guard is installed"
 else
   run_quiet "Claude Code guard" bash "$here/scripts/apply-claude-guard.sh"
+  did "Claude Code guard: applied"
+  show_warnings
   say "      it is active in the next Claude Code session"
 fi
 
 if [ -d "$codex_home" ]; then
-  if bash "$here/scripts/apply-codex-guard.sh" --check >/dev/null 2>&1; then
+  codex_guard="$here/scripts/apply-codex-guard.sh"
+  if check_out=$(bash "$codex_guard" --check 2>&1 </dev/null); then
     ok "Codex guard is installed and Codex trusts it"
   else
-    run_quiet "Codex guard" bash "$here/scripts/apply-codex-guard.sh"
-    bash "$here/scripts/apply-codex-guard.sh" --trust >/dev/null 2>&1 ||
-      stop "trust the guard in Codex" \
-        "start Codex, open /hooks, and trust the Jarvis guard (trust is by hash: do it again after any change to the hook)" \
-        "inside Codex; this script only reads the trust, it never writes it" \
-        "bash $here/scripts/apply-codex-guard.sh --trust prints 'trust: OK - Codex trusts the Jarvis guard entry'"
-    ok "Codex trusts the guard"
+    # Only the trust is open when the files already carry the guard: then there is nothing to apply.
+    if ! printf '%s\n' "$check_out" | grep -q 'already carry the guard'; then
+      run_quiet "Codex guard" bash "$codex_guard"
+      did "Codex guard: applied"
+      show_warnings
+    fi
+    if trust_out=$(bash "$codex_guard" --trust 2>&1 </dev/null); then
+      ok "Codex trusts the guard"
+    else
+      state=$(printf '%s\n' "$trust_out" | sed -n 's/^apply-codex-guard: trust: \([A-Z-]*\) - .*/\1/p' | head -1)
+      reason=$(printf '%s\n' "$trust_out" | sed -n 's/^apply-codex-guard: trust: [A-Z-]* - //p' | head -1)
+      fix=$(printf '%s\n' "$trust_out" | sed -n 's/^apply-codex-guard: fix: //p' | head -1)
+      [ -n "$state" ] || fail "could not read Codex's trust state from $codex_guard --trust; run it by hand: $trust_out"
+      worked="bash $(printf '%q' "$codex_guard") --trust prints 'trust: OK - Codex trusts the Jarvis guard entry'"
+      case "$state" in
+        UNTRUSTED|NOT-INSTALLED)
+          stop "trust the guard in Codex" \
+            "$fix ($reason; trust is by hash: do it again after any change to the hook)" \
+            "inside Codex; this script only reads the trust, it never writes it" \
+            "$worked" ;;
+        *)
+          stop "make the Jarvis guard runnable in Codex ($state)" \
+            "$fix ($reason)" \
+            "your own terminal and Codex's config under $codex_home; this script never writes the trust or the switches" \
+            "$worked" ;;
+      esac
+    fi
   fi
 fi
 

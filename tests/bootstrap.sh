@@ -64,7 +64,7 @@ sandbox() {
 # run <name> [args]: the script in that sandbox; sets $code and $log.
 run() {
   log="$root/$1.log"
-  HOME="$h" bash "$h/.Jarvis/scripts/bootstrap.sh" ${2:+"$2"} >"$log" 2>&1 </dev/null
+  HOME="$h" PATH="${RUNPATH:-$PATH}" bash "$h/.Jarvis/scripts/bootstrap.sh" ${2:+"$2"} >"$log" 2>&1 </dev/null
   code=$?
 }
 
@@ -78,6 +78,7 @@ stopped()   { [ "$code" = 3 ] && grep -q '^STOP  a person has to do this step: '
 stopline()  { grep -q "^STOP .*$1" "$log"; }
 has()       { grep -q -- "$1" "$log"; }
 hasnot()    { ! grep -q -- "$1" "$log"; }
+nobefore()  { ! grep -q BEFORE-BRIDGE "$root/guard-calls.log"; }
 # A stop says what, where, how to know it worked, and the command to resume.
 complete_stop() { has '^      what:  ' && has '^      where: ' && has '^      worked: ' && has "^      resume: bash $h/.Jarvis/scripts/bootstrap.sh\$"; }
 
@@ -113,6 +114,8 @@ echo "== running again while the person step is still open changes nothing and s
 before=$(state "$h")
 run clean2
 expect "same stop" stopline 'trust the guard in Codex'
+expect "the unchanged guard is not reported as done again" hasnot '^done  Codex guard'
+expect "the stop shows Codex's own reason" has 'no trusted_hash'
 after=$(state "$h")
 expect "nothing changed (byte-compare)" test "$before" = "$after"
 
@@ -170,6 +173,103 @@ log="$root/elsewhere.log"
 HOME="$h" bash "$h/Jarvis-copy/scripts/bootstrap.sh" >"$log" 2>&1 </dev/null; code=$?
 refused() { [ "$code" = 1 ] && grep -q 'needs it at' "$log"; }
 expect "exit 1 with the reason" refused
+
+# ---- person-only stops and what they must not do -----------------------------------------------
+
+echo "== jq missing: stops, naming only jq"
+nojq="$root/nojq"; mkdir -p "$nojq"
+for t in bash git sed grep find dirname basename cksum sort tr wc mktemp ln mkdir cp mv rm chmod diff env cat head tail readlink \
+  cut python3 awk uname ls id date cmp touch tee xargs perl realpath sleep true false; do
+  p=$(command -v "$t" 2>/dev/null) && [ -x "$p" ] && ln -sf "$p" "$nojq/$t"
+done
+sandbox nojq
+mkdir -p "$h/.claude"
+RUNPATH="$nojq" run nojq
+expect "exit 3 with the four fields" complete_stop
+expect "it names jq" stopline 'install what the guard needs: jq'
+expect "worked: names jq and not tomllib" has '^      worked: command -v jq succeeds$'
+
+echo "== Codex present, python3 without tomllib: the stop names tomllib"
+sandbox notoml
+mkdir -p "$h/.claude" "$cx"
+stub="$root/notoml-bin"; mkdir -p "$stub"
+printf '#!/bin/sh\nexit 1\n' >"$stub/python3"; chmod +x "$stub/python3"
+RUNPATH="$stub:$PATH" run notoml
+expect "exit 3 at the tool stop" stopped
+expect "it names tomllib" stopline 'tomllib'
+expect "worked: names tomllib" has "^      worked: python3 -c 'import tomllib' succeeds\$"
+
+echo "== core.hooksPath: a LOCAL value elsewhere is kept, with a note"
+sandbox hplocal
+mkdir -p "$h/.claude"
+git -C "$h/.Jarvis" config --local core.hooksPath /elsewhere
+run hplocal
+expect "the note is printed" has "^note  core.hooksPath is '/elsewhere'"
+expect "the value is unchanged" test "$(git -C "$h/.Jarvis" config --local --get core.hooksPath)" = /elsewhere
+expect "the run still completes" test "$code" = 0
+
+echo "== core.hooksPath: a GLOBAL value elsewhere does not stop the clone from getting .githooks"
+sandbox hpglobal
+mkdir -p "$h/.claude"
+printf '[core]\n\thooksPath = /elsewhere\n' >"$h/.gitconfig"
+run hpglobal
+expect "the local value is .githooks" test "$(git -C "$h/.Jarvis" config --local --get core.hooksPath)" = .githooks
+expect "the run completes" test "$code" = 0
+
+echo "== stage order: no guard is applied or checked before the bridge has linked the Skills"
+sandbox order
+mkdir -p "$h/.claude" "$cx"
+for g in apply-claude-guard apply-codex-guard; do
+  mv "$h/.Jarvis/scripts/$g.sh" "$h/.Jarvis/scripts/$g.real.sh"
+  {
+    echo '#!/usr/bin/env bash'
+    echo "if [ -L \"$h/.claude/skills/tdd\" ]; then echo \"bridged $g \$*\" >>\"$root/guard-calls.log\"; else echo \"BEFORE-BRIDGE $g \$*\" >>\"$root/guard-calls.log\"; fi"
+    echo "exec bash \"$h/.Jarvis/scripts/$g.real.sh\" \"\$@\""
+  } >"$h/.Jarvis/scripts/$g.sh"
+done
+rm -f "$root/guard-calls.log"
+run order
+expect "the guards were reached" test -s "$root/guard-calls.log"
+expect "every guard call came after the bridge" nobefore
+
+echo "== an existing ~/.claude/CLAUDE.md is a stop, found before anything is written"
+sandbox conflict
+mkdir -p "$h/.claude" "$cx"
+printf 'my rules\n' >"$h/.claude/CLAUDE.md"
+before=$(state "$h")
+run conflict
+after=$(state "$h")
+expect "exit 3 with what, where, worked and resume" complete_stop
+expect "it names the CLAUDE.md step" stopline 'existing .*CLAUDE.md'
+expect "the HOME and the clone are byte-identical" test "$before" = "$after"
+expect "the file is untouched" test "$(cat "$h/.claude/CLAUDE.md")" = 'my rules'
+sandbox conflict2
+mkdir -p "$h/.claude"
+printf 'other\n' >"$h/other.md"; ln -s "$h/other.md" "$h/.claude/CLAUDE.md"
+before=$(state "$h")
+run conflict2
+after=$(state "$h")
+expect "a live link elsewhere is the same stop" complete_stop
+expect "nothing was written for the link either" test "$before" = "$after"
+
+echo "== Codex's hooks = false: the stop gives the real fix, not '/hooks'"
+sandbox nohooks
+mkdir -p "$h/.claude" "$cx"
+run nohooks
+printf '\n[features]\nhooks = false\n' >>"$cx/config.toml"
+run nohooks2
+expect "exit 3 with the four fields" complete_stop
+expect "it is not the trust-in-/hooks step" hasnot 'STOP .*trust the guard in Codex'
+expect "what carries --trust's fix" has 'what: .*remove hooks = false from \[features\]'
+
+echo "== the resume command is shell-quoted and carries the homes that were set"
+sandbox "sp ace"
+log="$root/space.log"
+HOME="$h" CLAUDE_CONFIG_DIR="$h/cl aude" CODEX_HOME="$h/cx home" bash "$h/.Jarvis/scripts/bootstrap.sh" >"$log" 2>&1 </dev/null; code=$?
+resumeline=$(grep '^      resume: ' "$log")
+want="      resume: CLAUDE_CONFIG_DIR=$(printf '%q' "$h/cl aude") CODEX_HOME=$(printf '%q' "$h/cx home") bash $(printf '%q' "$h/.Jarvis/scripts/bootstrap.sh")"
+expect "the path with a space is escaped and the homes are carried" test "$resumeline" = "$want"
+expect "the escaped line has a backslash-space" grep -qF '\ ' "$log"
 
 echo "== usage"
 log="$root/usage.log"

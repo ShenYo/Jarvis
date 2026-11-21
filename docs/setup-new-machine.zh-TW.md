@@ -30,7 +30,7 @@
 如果你是 fork 了 Jarvis，而不是 clone owner 的副本，請先讀 [fork 清單](./fork-checklist.md)
 （只有英文）。
 
-clone 之後（第 2 步），`bash ~/.Jarvis/scripts/bootstrap.sh` 會依 stage 的順序，做完下面每一個腳本做得到的步驟，
+clone 之後（第 2 步），`bash ~/.Jarvis/scripts/bootstrap.sh` 會依 stage 的順序，做完 stage 1 與 stage 2 裡每一個腳本做得到的步驟，
 並在每個標著 **Person-only** 的步驟停下來，說明要做什麼、在哪裡做、怎麼知道做成了，以及繼續的指令（就是再執行一次
 同一個指令）。它可以安全地重複執行：已經做完的步驟不會有任何變動。它只做 stage 1 與 stage 2：stage 3 是選用的，
 而且需要你親自做。它絕不安裝系統套件。`bash ~/.Jarvis/scripts/bootstrap.sh --check` 印出的內容和 `doctor.sh`
@@ -100,7 +100,7 @@ git -C ~/.Jarvis config core.hooksPath .githooks
 檢查：`git -C ~/.Jarvis config --get core.hooksPath` 印出 `.githooks`。
 
 **Person-only，只做一次：** clone 是你自己輸入的那一個指令，因為 `bootstrap.sh` 就在 clone 裡面。它會檢查
-checkout 是不是 `~/.Jarvis`，然後自己設定上面的 hooks 路徑，並做第 3 步。
+checkout 是不是 `~/.Jarvis`，然後在 hooks 路徑尚未設定時自己設定上面的路徑，並做第 3 步。
 
 ## 3. 建立 Skills 的 bridge
 
@@ -137,8 +137,8 @@ Claude/Codex bridge 目錄。
 機器上採用這個 link，先把要保留的內容搬進 `.agents/AGENTS.md`，移除原檔，再重跑
 腳本。
 
-**Person-only，遇到時才需要：** 決定既有的 `~/.claude/CLAUDE.md` 要保留什麼。`bootstrap.sh` 會以 bridge 的
-`CONFLICT` 訊息失敗，而且什麼都不改。
+**Person-only，遇到時才需要：** 決定既有的 `~/.claude/CLAUDE.md` 要保留什麼。`bootstrap.sh` 會在寫入任何東西之前發現這個衝突，然後以 exit 3 停下來，
+說明該怎麼做。它什麼都不改。
 
 安裝了 Codex 時，`${CODEX_HOME:-$HOME/.codex}/AGENTS.md` 也會得到同樣的 link 與同樣
 的拒絕規則，所以兩個工具讀的是同一份檔案，沒有需要同步的副本。Codex 的 home 裡若有
@@ -319,7 +319,7 @@ bash ~/.Jarvis/scripts/apply-agent-identity.sh --require
 
 ## 7. 驗證整台機器
 
-只要執行一個指令：`bash ~/.Jarvis/scripts/doctor.sh`，或 `bootstrap.sh --check`，兩者印出的內容相同。它會跑下面這些檢查，但不含 `core.hooksPath` 那一列；
+只要執行一個指令：`bash ~/.Jarvis/scripts/doctor.sh`，或 `bash ~/.Jarvis/scripts/bootstrap.sh --check`，兩者印出的內容相同。它會跑下面這些檢查，但不含 `core.hooksPath` 那一列；
 它什麼都不修，每項檢查印一行（`ok`、`PROBLEM`、`skipped`、`UNVERIFIED`，檢查本身跑不起來時是 `ERROR`），
 有問題的附上修正指令；沒有問題時以 0 離開。
 如果你沒做第 5 步（identity 是選用的：沒有 config 檔、沒有開關、也沒有套用紀錄），identity 那行顯示
