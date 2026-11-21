@@ -49,6 +49,8 @@ jobs:
         run: bash tests/sync-personal-skills.sh
       - name: The doctor aggregates the checks, reports each fault, and writes nothing
         run: bash tests/doctor.sh
+      - name: The bootstrap runs the scriptable setup steps, stops at each person-only one, and --check writes nothing
+        run: bash tests/bootstrap.sh
       - name: The two READMEs agree
         run: python3 scripts/check-readme-parity.py README.md README.zh-TW.md scripts/readme-stale-terms.txt
       - name: The two setup guides agree

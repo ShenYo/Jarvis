@@ -35,6 +35,16 @@ Adoption has three stages. Do them in order, and stop after any of them:
 If you forked Jarvis rather than cloning the owner's copy, read the
 [fork checklist](./fork-checklist.md) first.
 
+Once you have cloned (step 2), `bash ~/.Jarvis/scripts/bootstrap.sh` does every
+step below that a script can do, in the order of the stages, and stops at each
+step marked **Person-only** with what to do, where, how to know it worked, and
+the command to resume, which is the same command again. It is safe to repeat:
+a step already done changes nothing. It does stages 1 and 2 only: stage 3 is
+optional and needs you. It never installs a system package. `bash
+~/.Jarvis/scripts/bootstrap.sh --check` prints exactly what `doctor.sh` prints
+and changes nothing. The steps below are what the script does, and what to do
+by hand.
+
 ## 1. Prerequisites
 
 Prerequisites are Git, Bash, and access to the configured Jarvis remote. Choose
@@ -73,6 +83,10 @@ Every line should start with `ok`, with two exceptions: `jq` and `python3` may
 be missing if you stop after stage 1, and `gh`, `ssh` and `ssh-keygen` if you
 stop before stage 3.
 
+**Person-only:** installing these programs, and installing and starting Claude
+Code and Codex. `bootstrap.sh` stops, naming what is missing, when Claude Code
+has not been started or `jq` or `python3` is absent.
+
 ## 2. Clone Jarvis
 
 Stage 1.
@@ -101,6 +115,10 @@ git -C ~/.Jarvis config core.hooksPath .githooks
 ```
 
 Check: `git -C ~/.Jarvis config --get core.hooksPath` prints `.githooks`.
+
+**Person-only, once:** the clone is the one command you type yourself, because
+`bootstrap.sh` is inside the clone. It checks that the checkout is
+`~/.Jarvis`, then sets the hooks path above and does step 3 itself.
 
 ## 3. Bridge the Skills
 
@@ -142,6 +160,10 @@ file, because that file holds instructions someone wrote, or a live link
 elsewhere, because that link was put there on purpose. To adopt the link on a
 machine that already has a `~/.claude/CLAUDE.md`, move what it should keep into
 `.agents/AGENTS.md`, remove it, and run the script again.
+
+**Person-only, when it applies:** deciding what an existing
+`~/.claude/CLAUDE.md` should keep. `bootstrap.sh` fails with the bridge's
+`CONFLICT` message and changes nothing.
 
 When Codex is installed, `${CODEX_HOME:-$HOME/.codex}/AGENTS.md` gets the same
 link and the same refusals, so both tools read one file and there is no copy to
@@ -188,7 +210,10 @@ bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust
 Check: both scripts exit 0 with `--check`, and `--trust` prints
 `trust: OK - Codex trusts the Jarvis guard entry` and exits 0.
 
-Optional: tell Claude Code's auto-mode classifier which repositories this
+**Person-only:** trusting the hook in Codex's `/hooks`. `bootstrap.sh` applies
+both guards, then stops here until `--trust` succeeds.
+
+Optional, and person-only: tell Claude Code's auto-mode classifier which repositories this
 machine trusts. Run `/auto-mode-setup` in Claude Code from inside the Jarvis
 checkout (`~/.Jarvis`); run from the home directory, it describes a directory
 with no remotes. It first asks whether to add to the existing environment list
@@ -224,6 +249,11 @@ services, so do not copy it from another machine. It is not stored in
 ## 5. Set up the agent identity
 
 Stage 3, optional.
+
+**Person-only:** everything in this section except the `--check` runs and the
+plain `apply-agent-identity.sh` runs that write the identity: the machine
+account and its invitation, answering `--setup`, adding the public key on
+GitHub, signing in with `gh`, and restarting. `bootstrap.sh` does none of it.
 
 To let agents act on GitHub as an account of their own, set up the [agent
 identity](./agent-identity.md) after the guards, in this order:
@@ -324,6 +354,9 @@ Check: `bash ~/.Jarvis/scripts/apply-agent-identity.sh --check --codex` prints
 
 Stage 3, optional.
 
+**Person-only:** the choice to turn it on, and trusting the hook again in
+Codex's `/hooks`. `bootstrap.sh` does not run `--require`.
+
 With the switch on, the guard refuses every GitHub write from a runtime whose
 identity is not applied, in Claude Code and Codex together. It is off until you
 turn it on. What it does is in
@@ -345,7 +378,8 @@ again.
 
 ## 7. Verify the whole machine
 
-Run one command: `bash ~/.Jarvis/scripts/doctor.sh`. It runs the checks below
+Run one command: `bash ~/.Jarvis/scripts/doctor.sh`, or `bootstrap.sh --check`,
+which prints the same. It runs the checks below
 except the `core.hooksPath` row, repairs nothing, prints one line per check
 (`ok`, `PROBLEM`, `skipped`, `UNVERIFIED`, or `ERROR` when a check could not
 run) with the fix command for each problem, and exits 0 when there is no
