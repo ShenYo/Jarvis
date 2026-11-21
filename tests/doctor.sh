@@ -428,6 +428,104 @@ expect "a Skill entry whose name holds an escape character: doctor reports it wi
 expect "a Skill entry whose name holds a C1 control character (UTF-8 U+009B): doctor reports it without that character" bash -c "
   grep -q 'DANGLING' '$log' && ! LC_ALL=C grep -q \"\$(printf '\\302\\233')\" '$log'"
 
+# --- the same Skill name offered by two providers ----------------------------
+# A name the bridge links into ~/.claude/skills and a plugin, a synced bundle or Codex's .system tree offers too.
+fixture dup-ok
+run dup-ok
+expect "no duplicate Skill name on a bridged machine: dup-skills and dup-codex are ok, exit 0" bash -c "
+  test '$code' = 0 && grep -Eq '^ok +dup-skills +no Skill name is offered by more than one provider' '$log' &&
+  grep -Eq '^ok +dup-codex ' '$log'"
+
+# plugin_with <home> <key> <enabled> <skill dir name> <name:>: an installed plugin that offers one Skill.
+plugin_with() {
+  local home=$1 key=$2 on=$3 dir=$4 nm=$5 ip="$1/plugins-src/$2"
+  put "$ip/skills/$dir/SKILL.md" $'---\nname: '"$nm"$'\ndescription: seeded\n---\nbody\n'
+  put "$home/.claude/plugins/installed_plugins.json" "$(jq -n --arg k "$key" --arg p "$ip" '{version: 2, plugins: {($k): [{scope: "user", installPath: $p}]}}')"
+  jq --arg k "$key" --argjson on "$on" '.enabledPlugins = ((.enabledPlugins // {}) + {($k): $on})' "$home/.claude/settings.json" >"$home/s.new" &&
+    cat "$home/s.new" >"$home/.claude/settings.json"
+}
+skill_a=$(ls "$repo/.agents/skills" | head -1)
+
+fixture dup-plugin; plugin_with "$h" demo@market true "$skill_a" "$skill_a"; run dup-plugin
+expect "an enabled plugin offers a bridged Skill's name: dup-skills is UNVERIFIED naming both providers, exit 0" bash -c "
+  test '$code' = 0 && grep -Eq '^UNVERIFIED +dup-skills +1 Skill name' '$log' &&
+  grep -Eq '\| $skill_a: personal, plugin demo@market' '$log' && ! grep -q '^PROBLEM' '$log'"
+expect "an enabled plugin offers a bridged Skill's name: the Codex line is not affected" grep -Eq '^ok +dup-codex ' "$log"
+expect "the summary counts equal the result lines of each kind (a dup finding and a dup ok included)" bash -c "
+  for w in ok skipped UNVERIFIED; do
+    n=\$(grep -Ec \"^\$w +\" '$log'); grep -Eq \"\\(?\$n \$w[,)]\" <(grep '^doctor:' '$log') || { echo \"\$w: \$n lines, summary: \$(grep '^doctor:' '$log')\"; exit 1; }
+  done"
+
+fixture dup-plugin-off; plugin_with "$h" demo@market false "$skill_a" "$skill_a"; run dup-plugin-off
+expect "a disabled plugin with the same name is not offered: dup-skills is ok" grep -Eq '^ok +dup-skills ' "$log"
+
+fixture dup-plugin-name; plugin_with "$h" demo@market true other-dir "$skill_a"; run dup-plugin-name
+expect "the name comes from the frontmatter, not the directory: a plugin directory named otherwise still collides" grep -Eq "\| $skill_a: personal, plugin demo@market" "$log"
+
+fixture dup-plugin-versions; plugin_with "$h" demo@market true "$skill_a" other-name
+put "$h/plugins-src/demo@market-v2/skills/other-name/SKILL.md" $'---\nname: other-name\n---\n'
+jq -n --arg p1 "$h/plugins-src/demo@market" --arg p2 "$h/plugins-src/demo@market-v2" \
+  '{version: 2, plugins: {"demo@market": [{installPath: $p1}, {installPath: $p2}]}}' >"$h/.claude/plugins/installed_plugins.json"
+run dup-plugin-versions
+expect "two installed versions of one plugin are one provider: not a duplicate" grep -Eq '^ok +dup-skills ' "$log"
+
+fixture dup-two-plugins; plugin_with "$h" one@market true shared shared
+put "$h/plugins-src/two@market/skills/shared/SKILL.md" $'---\nname: shared\n---\n'
+jq -n --arg p1 "$h/plugins-src/one@market" --arg p2 "$h/plugins-src/two@market" \
+  '{version: 2, plugins: {"one@market": [{installPath: $p1}], "two@market": [{installPath: $p2}]}}' >"$h/.claude/plugins/installed_plugins.json"
+jq '.enabledPlugins["two@market"] = true' "$h/.claude/settings.json" >"$h/s.new" && cat "$h/s.new" >"$h/.claude/settings.json"
+run dup-two-plugins
+expect "two enabled plugins offering one name: UNVERIFIED, exit 0, not a PROBLEM" bash -c "
+  test '$code' = 0 && grep -Eq '\| shared: plugin one@market, plugin two@market' '$log' && ! grep -q '^PROBLEM' '$log'"
+
+fixture dup-synced
+put "$h/.claude/skills/synced/bucket/$skill_a/SKILL.md" $'---\nname: '"$skill_a"$'\n---\n'
+put "$h/.claude/plugins/synced/bucket/eng/skills/$skill_a/SKILL.md" $'---\nname: '"$skill_a"$'\n---\n'
+run dup-synced
+expect "Skills Anthropic syncs, as a bundle and inside a plugin, collide with a bridged name" bash -c "
+  grep -Eq '\| $skill_a: Anthropic synced Skill, Anthropic synced plugin eng, personal' '$log'"
+
+fixture dup-codex
+put "$cx/skills/.system/$skill_a/SKILL.md" $'---\nname: '"$skill_a"$'\n---\n'
+run dup-codex
+expect "a Codex system Skill with a bridged name: dup-codex is UNVERIFIED naming both, dup-skills is not affected" bash -c "
+  test '$code' = 0 && grep -Eq '^UNVERIFIED +dup-codex ' '$log' && grep -Eq '\| $skill_a: Codex system Skill, personal' '$log' &&
+  grep -Eq '^ok +dup-skills ' '$log'"
+
+fixture dup-nocodex nocodex; run dup-nocodex
+expect "no Codex home: dup-codex is skipped" grep -Eq '^skipped +dup-codex ' "$log"
+
+fixture dup-badjson; plugin_with "$h" demo@market true "$skill_a" "$skill_a"; printf 'not json\n' >"$h/.claude/settings.json"; run dup-badjson
+expect "settings.json that is not JSON: dup-skills is UNVERIFIED saying plugins went unchecked, not ok" grep -Eq '^UNVERIFIED +dup-skills .*plugin Skills went unchecked' "$log"
+
+fixture dup-badplugins; plugin_with "$h" demo@market true "$skill_a" "$skill_a"; printf 'not json\n' >"$h/.claude/plugins/installed_plugins.json"; run dup-badplugins
+expect "installed_plugins.json that is not JSON: dup-skills is UNVERIFIED saying plugins went unchecked, not ok" grep -Eq '^UNVERIFIED +dup-skills .*installed_plugins.json.*plugin Skills went unchecked' "$log"
+
+fixture dup-space
+plugin_with "$h" demo@market true "$skill_a" "$skill_a"
+mkdir -p "$h/plugins src/demo market"
+cp -R "$h/plugins-src/demo@market/skills" "$h/plugins src/demo market/skills"
+jq -n --arg p "$h/plugins src/demo market" '{version: 2, plugins: {"demo@market": [{installPath: $p}]}}' >"$h/.claude/plugins/installed_plugins.json"
+run dup-space
+expect "a plugin install path with a space is read whole: its duplicate name is found" grep -Eq "\| $skill_a: personal, plugin demo@market" "$log"
+
+fixture dup-crlf; plugin_with "$h" demo@market true other-dir "$skill_a"
+printf -- '---\r\nname: %s\r\ndescription: seeded\r\n---\r\nbody\r\n' "$skill_a" >"$h/plugins-src/demo@market/skills/other-dir/SKILL.md"
+run dup-crlf
+expect "a CRLF frontmatter name that differs from its directory name still collides" grep -Eq "\| $skill_a: personal, plugin demo@market" "$log"
+
+fixture dup-body-name; plugin_with "$h" demo@market true other-dir other-name
+printf -- '---\ndescription: no name here\n---\nname: %s\n' "$skill_a" >"$h/plugins-src/demo@market/skills/other-dir/SKILL.md"
+run dup-body-name
+expect "a name: line in the body, after the frontmatter, is ignored" grep -Eq '^ok +dup-skills ' "$log"
+
+fixture dup-second-version; plugin_with "$h" demo@market true v1dir v1name
+put "$h/plugins-src/demo@market-v2/skills/$skill_a/SKILL.md" $'---\nname: '"$skill_a"$'\n---\n'
+jq -n --arg p1 "$h/plugins-src/demo@market" --arg p2 "$h/plugins-src/demo@market-v2" \
+  '{version: 2, plugins: {"demo@market": [{installPath: $p1}, {installPath: $p2}]}}' >"$h/.claude/plugins/installed_plugins.json"
+run dup-second-version
+expect "only the second installed version offers the duplicated name: it is still found" grep -Eq "\| $skill_a: personal, plugin demo@market" "$log"
+
 # --- read-only ---------------------------------------------------------------
 # A passing machine, a machine with every kind of fault, and one that was never
 # set up (where a bridge run that is not a check would create every link).

@@ -9,6 +9,9 @@
 #                   and in the working tree (git status of .agents/skills is empty)
 #   claude-guard    apply-claude-guard.sh --check     the installed guard is the repo's
 #   codex-guard     apply-codex-guard.sh --check      same for Codex, and Codex trusts it
+#   dup-skills      Skill names this machine offers Claude Code from more than one provider: personal
+#                   Skills, enabled plugins, and the Skills Anthropic syncs to ~/.claude (read from disk)
+#   dup-codex       the same for Codex: ~/.codex/skills and its .system Skills
 #   identity        apply-agent-identity.sh --check   optional; includes SSH and gh (network);
 #                   only "state: applied" is ok
 #   identity-codex  apply-agent-identity.sh --check --codex
@@ -19,7 +22,9 @@
 #   ok          the check passed
 #   PROBLEM     the check failed; the lines after it name the fix
 #   skipped     not applicable here (Codex not installed; identity not configured: optional)
-#   UNVERIFIED  could not be established by a static check, or passed with a warning
+#   UNVERIFIED  could not be established by a static check, or passed with a warning; also a Skill name
+#               offered twice, which a static check cannot prove the agent shows twice, and which only a
+#               person can resolve (remove the vendored Skill, or disable a plugin)
 #   ERROR       the check itself could not run (it exited 2); doctor then exits 2
 # Only PROBLEM makes the exit status 1. UNVERIFIED does not: read those lines.
 #
@@ -212,6 +217,80 @@ if [ -d "$codex_home" ]; then
     bash "$here/scripts/apply-codex-guard.sh" --check
 else
   result skipped codex-guard "Codex is not set up ($codex_home does not exist)"
+fi
+
+# A Skill name offered by two providers costs context twice and lets the wrong copy trigger. The name is the
+# `name:` of the SKILL.md frontmatter, else its directory name. Only what is on disk is read: personal Skills,
+# the plugins enabled in the user settings.json (every installed version of one plugin counts once), and the
+# Skills Anthropic syncs under ~/.claude/{skills,plugins}/synced. Project Skills and enabled-plugin settings
+# in a project's own settings are not read. Codex plugin Skills under ~/.codex/plugins are not read either, so
+# dup-codex says so in its ok text. Everything on disk counts: turning off a synced plugin or bundle may leave its
+# files on disk, so the line may not clear, and a person then reads it as known. A finding is UNVERIFIED, never PROBLEM.
+skills_in() { # <provider> <dir>: one "<name><TAB><provider>" line per <dir>/*/SKILL.md
+  local f n
+  for f in "$2"/*/SKILL.md; do
+    [ -f "$f" ] || continue
+    n=$(awk '{ sub(/\r$/, "") } NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } /^name:/ { sub(/^name:[ \t]*/, ""); gsub(/["\047]/, ""); print; exit }' "$f")
+    [ -n "$n" ] || n=$(basename "$(dirname "$f")")
+    printf '%s\t%s\n' "$(printf '%s' "$n" | LC_ALL=C tr -d '\t\r')" "$1"
+  done
+}
+# report_dups <check name> <fix text> [<ok note>]: reads the "<name><TAB><provider>" lines on stdin
+report_dups() {
+  local lines dups total
+  lines=$(LC_ALL=C sort -u)
+  total=$(printf '%s\n' "$lines" | cut -f1 | LC_ALL=C sort -u | grep -c .)
+  dups=$(printf '%s\n' "$lines" | awk -F'\t' '
+    $1 == n { ps = ps ", " $2; c++; next }
+    { if (c > 1) print n ": " ps; n = $1; ps = $2; c = 1 }
+    END { if (c > 1) print n ": " ps }')
+  if [ -z "$dups" ]; then
+    result ok "$1" "no Skill name is offered by more than one provider ($total names${3:+; $3})"
+    return
+  fi
+  result UNVERIFIED "$1" "$(printf '%s\n' "$dups" | grep -c .) Skill name(s) offered by more than one provider"
+  detail "$dups"
+  printf '%-11s %-15s %s\n' "" "" "next: $2"
+}
+
+claude_skills="$(skills_in personal "$claude_home/skills")"$'\n'
+for d in "$claude_home"/skills/synced/*/; do
+  [ -d "$d" ] && claude_skills="$claude_skills$(skills_in "Anthropic synced Skill" "${d%/}")"$'\n'
+done
+for d in "$claude_home"/plugins/synced/*/*/; do
+  [ -d "${d}skills" ] && claude_skills="$claude_skills$(skills_in "Anthropic synced plugin $(basename "$d")" "${d}skills")"$'\n'
+done
+dup_unread=""
+if [ -f "$claude_home/plugins/installed_plugins.json" ] && [ -f "$claude_home/settings.json" ]; then
+  if ! enabled=$(jq -r '(.enabledPlugins // {}) | to_entries[] | select(.value == true) | .key' "$claude_home/settings.json" 2>/dev/null); then
+    dup_unread="settings.json could not be read (jq missing or not JSON), so plugin Skills went unchecked"
+  elif ! jq -e . "$claude_home/plugins/installed_plugins.json" >/dev/null 2>&1; then
+    dup_unread="installed_plugins.json could not be read (jq missing or not JSON), so plugin Skills went unchecked"
+  else
+    while IFS= read -r key; do
+      [ -n "$key" ] || continue
+      while IFS= read -r ip; do
+        [ -n "$ip" ] || continue
+        claude_skills="$claude_skills$(skills_in "plugin $key" "$ip/skills")"$'\n'
+      done < <(jq -r --arg k "$key" '.plugins[$k][]?.installPath // empty' "$claude_home/plugins/installed_plugins.json")
+    done <<<"$enabled"
+  fi
+fi
+printf '%s' "$claude_skills" | grep -q . || claude_skills=$'\n'
+if [ -n "$dup_unread" ]; then
+  result UNVERIFIED dup-skills "$dup_unread"
+else
+  report_dups dup-skills \
+    "keep one copy: remove the vendored Skill (a reviewed Git change; see docs/maintenance.md#remove), delete its now-dangling bridge links by hand (a resync reports them, it does not remove them) and rerun sync-personal-skills.sh, or disable the plugin or bundle that offers the other (never edit a vendored Skill); a synced plugin or bundle turned off may leave its files on disk, so this line may not clear: read it as known" < <(printf '%s' "$claude_skills" | grep .)
+fi
+
+if [ -d "$codex_home/skills" ]; then
+  report_dups dup-codex "keep one copy: remove the vendored Skill (a reviewed Git change; see docs/maintenance.md#remove), delete its now-dangling bridge links by hand and rerun sync-personal-skills.sh, or remove the other" "Codex plugin Skills not read" < <(
+    skills_in personal "$codex_home/skills"
+    skills_in "Codex system Skill" "$codex_home/skills/.system"
+  )
+else
+  result skipped dup-codex "Codex is not set up ($codex_home/skills does not exist)"
 fi
 
 # The identity is optional only when nothing of it exists: no config file, no switch, no applied record.
