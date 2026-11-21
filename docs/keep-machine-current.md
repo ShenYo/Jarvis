@@ -141,7 +141,20 @@ This machine is current when all three hold:
   give `python3` the `tomllib` module, or settle the warnings, and run it again.
   A switch that is on in one runtime and off in the other, or a stale switch
   record, is a `PROBLEM`, not `UNVERIFIED`. The `live-callback` line is always
-  `UNVERIFIED`, and only a probe in a new session settles it.
+  `UNVERIFIED`, and only a probe in a new session settles it. A `dup-skills` or
+  `dup-codex` `UNVERIFIED` lists each Skill name offered by more than one provider
+  (personal Skills, enabled plugins, Skills Anthropic syncs; Codex's `.system`
+  Skills): two descriptions of one name cost context and let the wrong copy
+  trigger. Keep one: disable the plugin or bundle, or remove the vendored Skill
+  (a reviewed Git change, see [Remove](./maintenance.md#remove)), delete its
+  now-dangling bridge links by hand (a resync reports them, it does not remove
+  them) and rerun `sync-personal-skills.sh`; never edit a vendored Skill. The check reads only
+  what is on disk and does not read project Skills, plugins enabled in a project's
+  own settings, or Codex plugin Skills under `~/.codex/plugins`. It counts every
+  file on disk: turning off a synced plugin or bundle may leave its files there, so
+  the line may not clear; read it as known. If `settings.json` or
+  `installed_plugins.json` is not JSON (or `jq` is missing), the line is
+  `UNVERIFIED` and says plugin Skills went unchecked.
 
 Otherwise do [A](#a-routine-update).
 
