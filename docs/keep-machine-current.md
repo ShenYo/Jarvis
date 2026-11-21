@@ -146,7 +146,13 @@ This machine is current when all three hold:
   (personal Skills, enabled plugins, Skills Anthropic syncs; Codex's `.system`
   Skills): two descriptions of one name cost context and let the wrong copy
   trigger. Keep one: disable the plugin or bundle, or stop bridging a vendored
-  Skill through its owning CLI; never edit a vendored Skill.
+  Skill through its owning CLI; never edit a vendored Skill. The check reads only
+  what is on disk and does not read project Skills, plugins enabled in a project's
+  own settings, or Codex plugin Skills under `~/.codex/plugins`. It counts every
+  file on disk: turning off a synced plugin or bundle may leave its files there, so
+  the line may not clear; read it as known. If `settings.json` or
+  `installed_plugins.json` is not JSON (or `jq` is missing), the line is
+  `UNVERIFIED` and says plugin Skills went unchecked.
 
 Otherwise do [A](#a-routine-update).
 

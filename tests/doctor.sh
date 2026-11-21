@@ -494,6 +494,34 @@ expect "no Codex home: dup-codex is skipped" grep -Eq '^skipped +dup-codex ' "$l
 fixture dup-badjson; plugin_with "$h" demo@market true "$skill_a" "$skill_a"; printf 'not json\n' >"$h/.claude/settings.json"; run dup-badjson
 expect "settings.json that is not JSON: dup-skills is UNVERIFIED saying plugins went unchecked, not ok" grep -Eq '^UNVERIFIED +dup-skills .*plugin Skills went unchecked' "$log"
 
+fixture dup-badplugins; plugin_with "$h" demo@market true "$skill_a" "$skill_a"; printf 'not json\n' >"$h/.claude/plugins/installed_plugins.json"; run dup-badplugins
+expect "installed_plugins.json that is not JSON: dup-skills is UNVERIFIED saying plugins went unchecked, not ok" grep -Eq '^UNVERIFIED +dup-skills .*installed_plugins.json.*plugin Skills went unchecked' "$log"
+
+fixture dup-space
+plugin_with "$h" demo@market true "$skill_a" "$skill_a"
+mkdir -p "$h/plugins src/demo market"
+cp -R "$h/plugins-src/demo@market/skills" "$h/plugins src/demo market/skills"
+jq -n --arg p "$h/plugins src/demo market" '{version: 2, plugins: {"demo@market": [{installPath: $p}]}}' >"$h/.claude/plugins/installed_plugins.json"
+run dup-space
+expect "a plugin install path with a space is read whole: its duplicate name is found" grep -Eq "\| $skill_a: personal, plugin demo@market" "$log"
+
+fixture dup-crlf; plugin_with "$h" demo@market true other-dir "$skill_a"
+printf -- '---\r\nname: %s\r\ndescription: seeded\r\n---\r\nbody\r\n' "$skill_a" >"$h/plugins-src/demo@market/skills/other-dir/SKILL.md"
+run dup-crlf
+expect "a CRLF frontmatter name that differs from its directory name still collides" grep -Eq "\| $skill_a: personal, plugin demo@market" "$log"
+
+fixture dup-body-name; plugin_with "$h" demo@market true other-dir other-name
+printf -- '---\ndescription: no name here\n---\nname: %s\n' "$skill_a" >"$h/plugins-src/demo@market/skills/other-dir/SKILL.md"
+run dup-body-name
+expect "a name: line in the body, after the frontmatter, is ignored" grep -Eq '^ok +dup-skills ' "$log"
+
+fixture dup-second-version; plugin_with "$h" demo@market true v1dir v1name
+put "$h/plugins-src/demo@market-v2/skills/$skill_a/SKILL.md" $'---\nname: '"$skill_a"$'\n---\n'
+jq -n --arg p1 "$h/plugins-src/demo@market" --arg p2 "$h/plugins-src/demo@market-v2" \
+  '{version: 2, plugins: {"demo@market": [{installPath: $p1}, {installPath: $p2}]}}' >"$h/.claude/plugins/installed_plugins.json"
+run dup-second-version
+expect "only the second installed version offers the duplicated name: it is still found" grep -Eq "\| $skill_a: personal, plugin demo@market" "$log"
+
 # --- read-only ---------------------------------------------------------------
 # A passing machine, a machine with every kind of fault, and one that was never
 # set up (where a bridge run that is not a check would create every link).

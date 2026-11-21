@@ -223,17 +223,19 @@ fi
 # `name:` of the SKILL.md frontmatter, else its directory name. Only what is on disk is read: personal Skills,
 # the plugins enabled in the user settings.json (every installed version of one plugin counts once), and the
 # Skills Anthropic syncs under ~/.claude/{skills,plugins}/synced. Project Skills and enabled-plugin settings
-# in a project's own settings are not read. A finding is UNVERIFIED, never PROBLEM.
+# in a project's own settings are not read. Codex plugin Skills under ~/.codex/plugins are not read either, so
+# dup-codex says so in its ok text. Everything on disk counts: turning off a synced plugin or bundle may leave its
+# files on disk, so the line may not clear, and a person then reads it as known. A finding is UNVERIFIED, never PROBLEM.
 skills_in() { # <provider> <dir>: one "<name><TAB><provider>" line per <dir>/*/SKILL.md
   local f n
   for f in "$2"/*/SKILL.md; do
     [ -f "$f" ] || continue
-    n=$(awk 'NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } /^name:/ { sub(/^name:[ \t]*/, ""); gsub(/["\047]/, ""); print; exit }' "$f")
+    n=$(awk '{ sub(/\r$/, "") } NR == 1 && $0 != "---" { exit } NR > 1 && $0 == "---" { exit } /^name:/ { sub(/^name:[ \t]*/, ""); gsub(/["\047]/, ""); print; exit }' "$f")
     [ -n "$n" ] || n=$(basename "$(dirname "$f")")
     printf '%s\t%s\n' "$(printf '%s' "$n" | LC_ALL=C tr -d '\t\r')" "$1"
   done
 }
-# report_dups <check name> <fix text>: reads the "<name><TAB><provider>" lines on stdin
+# report_dups <check name> <fix text> [<ok note>]: reads the "<name><TAB><provider>" lines on stdin
 report_dups() {
   local lines dups total
   lines=$(LC_ALL=C sort -u)
@@ -243,7 +245,7 @@ report_dups() {
     { if (c > 1) print n ": " ps; n = $1; ps = $2; c = 1 }
     END { if (c > 1) print n ": " ps }')
   if [ -z "$dups" ]; then
-    result ok "$1" "no Skill name is offered by more than one provider ($total names)"
+    result ok "$1" "no Skill name is offered by more than one provider ($total names${3:+; $3})"
     return
   fi
   result UNVERIFIED "$1" "$(printf '%s\n' "$dups" | grep -c .) Skill name(s) offered by more than one provider"
@@ -260,14 +262,18 @@ for d in "$claude_home"/plugins/synced/*/*/; do
 done
 dup_unread=""
 if [ -f "$claude_home/plugins/installed_plugins.json" ] && [ -f "$claude_home/settings.json" ]; then
-  if enabled=$(jq -r '(.enabledPlugins // {}) | to_entries[] | select(.value == true) | .key' "$claude_home/settings.json" 2>/dev/null); then
-    for key in $enabled; do
-      for ip in $(jq -r --arg k "$key" '.plugins[$k][]?.installPath // empty' "$claude_home/plugins/installed_plugins.json" 2>/dev/null); do
-        claude_skills="$claude_skills$(skills_in "plugin $key" "$ip/skills")"$'\n'
-      done
-    done
+  if ! enabled=$(jq -r '(.enabledPlugins // {}) | to_entries[] | select(.value == true) | .key' "$claude_home/settings.json" 2>/dev/null); then
+    dup_unread="settings.json could not be read (jq missing or not JSON), so plugin Skills went unchecked"
+  elif ! jq -e . "$claude_home/plugins/installed_plugins.json" >/dev/null 2>&1; then
+    dup_unread="installed_plugins.json could not be read (jq missing or not JSON), so plugin Skills went unchecked"
   else
-    dup_unread="settings.json could not be read as JSON, so plugin Skills went unchecked"
+    while IFS= read -r key; do
+      [ -n "$key" ] || continue
+      while IFS= read -r ip; do
+        [ -n "$ip" ] || continue
+        claude_skills="$claude_skills$(skills_in "plugin $key" "$ip/skills")"$'\n'
+      done < <(jq -r --arg k "$key" '.plugins[$k][]?.installPath // empty' "$claude_home/plugins/installed_plugins.json")
+    done <<<"$enabled"
   fi
 fi
 printf '%s' "$claude_skills" | grep -q . || claude_skills=$'\n'
@@ -275,12 +281,12 @@ if [ -n "$dup_unread" ]; then
   result UNVERIFIED dup-skills "$dup_unread"
 else
   printf '%s' "$claude_skills" | grep . | report_dups dup-skills \
-    "keep one copy: stop bridging a vendored Skill through its owning CLI, or disable the plugin or bundle that offers the other (never edit a vendored Skill)"
+    "keep one copy: stop bridging a vendored Skill through its owning CLI, or disable the plugin or bundle that offers the other (never edit a vendored Skill); a synced plugin or bundle turned off may leave its files on disk, so this line may not clear: read it as known"
 fi
 
 if [ -d "$codex_home/skills" ]; then
   { skills_in personal "$codex_home/skills"; skills_in "Codex system Skill" "$codex_home/skills/.system"; } |
-    report_dups dup-codex "keep one copy: stop bridging the Skill through its owning CLI, or remove the other"
+    report_dups dup-codex "keep one copy: stop bridging the Skill through its owning CLI, or remove the other" "Codex plugin Skills not read"
 else
   result skipped dup-codex "Codex is not set up ($codex_home/skills does not exist)"
 fi
