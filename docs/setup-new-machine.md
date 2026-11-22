@@ -155,20 +155,26 @@ them.
 
 The script also links `~/.claude/CLAUDE.md` to the personal instructions in
 `.agents/AGENTS.md`. It creates that link when it is missing and replaces it when
-it dangles. It refuses, and changes nothing, when `~/.claude/CLAUDE.md` is a real
+it dangles. It refuses, and replaces nothing, when `~/.claude/CLAUDE.md` is a real
 file, because that file holds instructions someone wrote, or a live link
 elsewhere, because that link was put there on purpose. To adopt the link on a
 machine that already has a `~/.claude/CLAUDE.md`, move what it should keep into
 `.agents/AGENTS.md`, remove it, and run the script again.
 
-**Person-only, when it applies:** deciding what an existing
-`~/.claude/CLAUDE.md` should keep. `bootstrap.sh` finds the conflict before it
-writes anything and stops, with exit 3, saying what to do. It changes nothing.
+**Person-only, when it applies:** deciding what an existing instruction file or
+Skill entry should keep. `bootstrap.sh` asks the bridge first, with
+`sync-personal-skills.sh --check`, which changes nothing. When the bridge reports
+any `CONFLICT` or `SHADOWED` line, `bootstrap.sh` stops with exit 3 before it
+writes anything, and shows the bridge's own lines. A missing or dangling link is
+not a stop: a normal run creates or replaces it.
 
 When Codex is installed, `${CODEX_HOME:-$HOME/.codex}/AGENTS.md` gets the same
 link and the same refusals, so both tools read one file and there is no copy to
 keep in step. Codex reads `AGENTS.override.md` in its home instead of
-`AGENTS.md` when that file is not empty, so the script fails while one exists.
+`AGENTS.md` when that file is not empty, so the script fails while one exists
+(the bridge calls it `SHADOWED`). A Skill name that already exists under
+`~/.claude/skills` or `${CODEX_HOME:-$HOME/.codex}/skills` and is not a link to
+that Skill is refused the same way.
 
 The script creates `~/.agents` if it is missing, ensures the Claude bridge
 directory exists, and creates or replaces a canonical-name entry only when it

@@ -131,19 +131,22 @@ Claude/Codex bridge 目錄。
 也能運作。
 
 這支腳本也會把 `~/.claude/CLAUDE.md` 連結到 `.agents/AGENTS.md` 的個人指示：link
-不存在時建立，懸空時替換。在兩種情況下它會拒絕，而且什麼都不改：一是
+不存在時建立，懸空時替換。在兩種情況下它會拒絕，而且不會替換它：一是
 `~/.claude/CLAUDE.md` 是一個真正的檔案，因為那裡有人寫好的指示；二是它是一個指向
 別處、仍然有效的 link，因為那是刻意的設定。若要在已經有 `~/.claude/CLAUDE.md` 的
 機器上採用這個 link，先把要保留的內容搬進 `.agents/AGENTS.md`，移除原檔，再重跑
 腳本。
 
-**Person-only，遇到時才需要：** 決定既有的 `~/.claude/CLAUDE.md` 要保留什麼。`bootstrap.sh` 會在寫入任何東西之前發現這個衝突，然後以 exit 3 停下來，
-說明該怎麼做。它什麼都不改。
+**Person-only，遇到時才需要：** 決定既有的指示檔或 Skill entry 要保留什麼。
+`bootstrap.sh` 會先用 `sync-personal-skills.sh --check` 問 bridge，這個指令什麼都不改。
+只要 bridge 回報任何 `CONFLICT` 或 `SHADOWED` 的行，`bootstrap.sh` 就會在寫入任何東西之前以 exit 3
+停下來，並原樣列出 bridge 自己的那些行。缺失或 dangling 的 link 不是 stop：正常執行會建立或替換它。
 
 安裝了 Codex 時，`${CODEX_HOME:-$HOME/.codex}/AGENTS.md` 也會得到同樣的 link 與同樣
 的拒絕規則，所以兩個工具讀的是同一份檔案，沒有需要同步的副本。Codex 的 home 裡若有
 非空的 `AGENTS.override.md`，Codex 會改讀它而不讀 `AGENTS.md`，所以只要它存在，腳本
-就會失敗。
+就會失敗（bridge 稱之為 `SHADOWED`）。`~/.claude/skills` 或 `${CODEX_HOME:-$HOME/.codex}/skills`
+底下若已有同名、但不是指向該 Skill 的 link 的 entry，也以同樣方式拒絕。
 
 這支腳本會在 `~/.agents` 不存在時建立它、確保 Claude bridge 目錄存在，並且只
 在某個 canonical-name entry 缺失或 dangling 時才建立或替換它。當

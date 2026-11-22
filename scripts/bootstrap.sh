@@ -76,7 +76,7 @@ run_quiet() {
 }
 
 # show_warnings: the warning lines of the last step, which its summary line would hide.
-show_warnings() { printf '%s\n' "$out" | grep -i 'warn' | sed 's/^/      /' || true; }
+show_warnings() { printf '%s\n' "${1-$out}" | grep -i 'warn' | sed 's/^/      /' || true; }
 
 say "bootstrap: staged setup of this machine (stage 3, the agent identity, is optional and not done here)"
 
@@ -98,29 +98,34 @@ say "== stage 1: instructions and Skills"
     "$claude_home exists"
 ok "Claude Code home exists ($claude_home)"
 
-# An existing ~/.claude/CLAUDE.md is the bridge's CONFLICT: a real file, or a live link that does not
-# lead to the Jarvis rules (the rule of link_rules in sync-personal-skills.sh, which is the reference).
-# It is found before anything is written, so the stop changes nothing.
-rules="$HOME/.Jarvis/.agents/AGENTS.md"
-claude_md="$HOME/.claude/CLAUDE.md"
-leads_to_rules() {
-  local dest
-  dest=$(cd -P "$(dirname "$1")" 2>/dev/null && cd -P "$(dirname "$(readlink "$1")")" 2>/dev/null && pwd -P) || return 1
-  [ "$dest/$(basename "$(readlink "$1")")" = "$(cd -P "$(dirname "$rules")" && pwd -P)/AGENTS.md" ]
-}
-if [ -f "$rules" ]; then
-  conflict=""
-  if [ -L "$claude_md" ]; then
-    if [ -e "$claude_md" ] && ! leads_to_rules "$claude_md"; then conflict="a link to $(readlink "$claude_md"), not to $rules"; fi
-  elif [ -e "$claude_md" ]; then
-    conflict="a real file"
-  fi
-  [ -z "$conflict" ] ||
-    stop "decide what the existing $claude_md keeps" \
-      "$claude_md is $conflict, so the bridge will not replace it. Move what it should keep into $rules, move $claude_md away, then resume. Nothing has been changed." \
-      "your own terminal and editor" \
-      "$claude_md is gone, and the resumed run links it to $rules"
+# What the bridge will not replace is the bridge's own verdict, asked before anything is written:
+# sync-personal-skills.sh --check changes nothing, and a normal run fails on the same CONFLICT and
+# SHADOWED conditions (a real file or a live link elsewhere at ~/.claude/CLAUDE.md or
+# ${CODEX_HOME}/AGENTS.md, a non-empty AGENTS.override.md, an existing non-matching entry under a
+# skills directory). MISSING and DANGLING are not stops: a normal run repairs them.
+# Without ~/.agents, --check ends at once on that one, before it looks at anything else, so it is
+# run in a stand-in HOME that has ~/.agents and links to the real ~/.Jarvis, ~/.claude and ~/.codex.
+bridge="$here/sync-personal-skills.sh"
+if [ -e "$HOME/.agents" ] || [ -L "$HOME/.agents" ]; then
+  bridge_out=$(bash "$bridge" --check 2>&1 </dev/null); bridge_rc=$?
+else
+  fake=$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-home.XXXXXX") || fail "could not make a temporary directory"
+  ln -s "$HOME/.Jarvis" "$fake/.Jarvis"; ln -s .Jarvis/.agents "$fake/.agents"
+  for d in .claude .codex; do [ ! -e "$HOME/$d" ] || ln -s "$HOME/$d" "$fake/$d"; done
+  bridge_out=$(HOME="$fake" bash "$bridge" --check 2>&1 </dev/null); bridge_rc=$?
+  rm -rf "$fake"
+  bridge_out=${bridge_out//"$fake"/$HOME}
 fi
+conflicts=$(printf '%s\n' "$bridge_out" | awk '
+  /^(CONFLICT|SHADOWED) / { if (e != "") list = list (list == "" ? "" : " / ") e; e = $0; p = 1; next }
+  p && /^ +/ { sub(/^ +/, ""); e = e " " $0; next }
+  { p = 0 }
+  END { if (e != "") list = list (list == "" ? "" : " / ") e; print list }')
+[ -z "$conflicts" ] ||
+  stop "decide what the Skills bridge reports as a conflict" \
+    "the bridge reports: $conflicts -- these may be there on purpose, so nothing has been changed; resolve each one as the bridge says, then resume." \
+    "your own terminal and editor" \
+    "bash $(printf '%q' "$bridge") --check prints no CONFLICT or SHADOWED line, and the resumed run links the entries"
 
 hp=$(git -C "$here" config --local --get core.hooksPath 2>/dev/null || true)
 if [ "$hp" = .githooks ]; then
@@ -132,7 +137,7 @@ else
   say "note  core.hooksPath is '$hp', not .githooks; left as it is (see docs/git-hooks.md)"
 fi
 
-if bash "$here/sync-personal-skills.sh" --check >/dev/null 2>&1; then
+if [ "$bridge_rc" = 0 ]; then
   ok "Skills are bridged"
 else
   run_quiet "Skills bridge" bash "$here/sync-personal-skills.sh"
@@ -149,15 +154,14 @@ missing="" worked=""
 if ! command -v jq >/dev/null 2>&1; then
   missing="jq"; worked="command -v jq succeeds"
 fi
+have_py=1
 if ! command -v python3 >/dev/null 2>&1; then
+  have_py=0
   missing="${missing:+$missing, }python3 (3.11 or newer)"; worked="${worked:+$worked, and }command -v python3 succeeds"
 fi
 if [ -d "$codex_home" ] && ! python3 -c 'import tomllib' >/dev/null 2>&1; then
-  case "$missing" in
-    *python3*) worked="${worked%command -v python3 succeeds}python3 -c 'import tomllib' succeeds" ;;
-    *) missing="${missing:+$missing, }python3 3.11 or newer (Codex's trust is read with tomllib)"
-       worked="${worked:+$worked, and }python3 -c 'import tomllib' succeeds" ;;
-  esac
+  [ "$have_py" = 0 ] || missing="${missing:+$missing, }python3 3.11 or newer (Codex's trust is read with tomllib)"
+  worked="${worked:+$worked, and }python3 -c 'import tomllib' succeeds"
 fi
 [ -z "$missing" ] ||
   stop "install what the guard needs: $missing" \
@@ -198,6 +202,20 @@ if [ -d "$codex_home" ]; then
           stop "trust the guard in Codex" \
             "$fix ($reason; trust is by hash: do it again after any change to the hook)" \
             "inside Codex; this script only reads the trust, it never writes it" \
+            "$worked" ;;
+        DISABLED)
+          # Two kinds, told apart by --trust's reason: the entry switched off (enabled = false), which
+          # /hooks turns back on, and every hook switched off in config.toml, which only an edit fixes.
+          case "$reason" in
+            *"enabled = false"*)
+              stop "enable the guard in Codex" \
+                "$fix ($reason; trust is by hash: do it again after any change to the hook)" \
+                "inside Codex; this script only reads the trust, it never writes it" \
+                "$worked" ;;
+          esac
+          stop "make the Jarvis guard runnable in Codex ($state)" \
+            "$fix ($reason)" \
+            "your own terminal and Codex's config under $codex_home; this script never writes the trust or the switches" \
             "$worked" ;;
         *)
           stop "make the Jarvis guard runnable in Codex ($state)" \

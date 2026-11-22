@@ -232,25 +232,67 @@ run order
 expect "the guards were reached" test -s "$root/guard-calls.log"
 expect "every guard call came after the bridge" nobefore
 
+# What the bridge refuses (sync-personal-skills.sh --check says CONFLICT or SHADOWED) is a stop, found
+# before anything is written. MISSING and DANGLING are not: a normal run repairs them.
+conflict_case() { # <name> <what the HOME holds, as a function name>; sets $before/$after around the run
+  sandbox "$1"
+  mkdir -p "$h/.claude" "$cx"
+  "$2"
+  before=$(state "$h")
+  run "$1"
+  after=$(state "$h")
+}
+untouched() { test "$before" = "$after"; }
+
 echo "== an existing ~/.claude/CLAUDE.md is a stop, found before anything is written"
-sandbox conflict
-mkdir -p "$h/.claude" "$cx"
-printf 'my rules\n' >"$h/.claude/CLAUDE.md"
-before=$(state "$h")
-run conflict
-after=$(state "$h")
+real_claude() { printf 'my rules\n' >"$h/.claude/CLAUDE.md"; }
+conflict_case conflict real_claude
 expect "exit 3 with what, where, worked and resume" complete_stop
-expect "it names the CLAUDE.md step" stopline 'existing .*CLAUDE.md'
-expect "the HOME and the clone are byte-identical" test "$before" = "$after"
+expect "it names the bridge's conflict step" stopline 'Skills bridge reports as a conflict'
+expect "what carries the bridge's own CONFLICT line" has 'what: .*CONFLICT .*CLAUDE.md is a real file'
+expect "the HOME and the clone are byte-identical" untouched
 expect "the file is untouched" test "$(cat "$h/.claude/CLAUDE.md")" = 'my rules'
-sandbox conflict2
-mkdir -p "$h/.claude"
-printf 'other\n' >"$h/other.md"; ln -s "$h/other.md" "$h/.claude/CLAUDE.md"
-before=$(state "$h")
-run conflict2
-after=$(state "$h")
+other_claude() { printf 'other\n' >"$h/other.md"; ln -s "$h/other.md" "$h/.claude/CLAUDE.md"; }
+conflict_case conflict2 other_claude
 expect "a live link elsewhere is the same stop" complete_stop
-expect "nothing was written for the link either" test "$before" = "$after"
+expect "nothing was written for the link either" untouched
+
+echo "== a directory at ~/.claude/CLAUDE.md is a stop, nothing written"
+dir_claude() { mkdir "$h/.claude/CLAUDE.md"; }
+conflict_case cdir dir_claude
+expect "exit 3 with the four fields" complete_stop
+expect "nothing was written" untouched
+
+echo "== an existing ~/.codex/AGENTS.md is a stop, nothing written"
+real_codex() { printf 'codex rules\n' >"$cx/AGENTS.md"; }
+conflict_case cxconf real_codex
+expect "exit 3 with the four fields" complete_stop
+expect "what carries the bridge's CONFLICT line for Codex" has 'what: .*CONFLICT .*[.]codex/AGENTS.md is a real file'
+expect "the HOME and the clone are byte-identical" untouched
+expect "the file is untouched" test "$(cat "$cx/AGENTS.md")" = 'codex rules'
+
+echo "== a non-empty ~/.codex/AGENTS.override.md is a stop (SHADOWED), nothing written"
+override() { printf 'override\n' >"$cx/AGENTS.override.md"; }
+conflict_case shadow override
+expect "exit 3 with the four fields" complete_stop
+expect "what carries the bridge's SHADOWED line" has 'what: .*SHADOWED .*AGENTS.override.md'
+expect "the HOME and the clone are byte-identical" untouched
+
+echo "== a pre-existing real directory where the bridge would link a Skill is a stop, nothing written"
+skill_dir() { mkdir -p "$h/.claude/skills/tdd"; ln -s .Jarvis/.agents "$h/.agents"; }   # with ~/.agents present, the other way in
+conflict_case cskill skill_dir
+expect "exit 3 with the four fields" complete_stop
+expect "what carries the bridge's CONFLICT line for the Skill" has 'what: .*CONFLICT Claude Code: .*skills/tdd is not a symlink'
+expect "the HOME and the clone are byte-identical" untouched
+
+echo "== a dangling ~/.claude/CLAUDE.md is not a stop: it is relinked"
+sandbox dangling
+mkdir -p "$h/.claude"
+ln -s /nonexistent/rules.md "$h/.claude/CLAUDE.md"
+run dangling
+expect "exit 0" test "$code" = 0
+expect "no stop" hasnot '^STOP'
+expect "the link now leads to the personal instructions" test "$(cat "$h/.claude/CLAUDE.md")" = "$(cat "$h/.Jarvis/.agents/AGENTS.md")"
 
 echo "== Codex's hooks = false: the stop gives the real fix, not '/hooks'"
 sandbox nohooks
@@ -261,6 +303,37 @@ run nohooks2
 expect "exit 3 with the four fields" complete_stop
 expect "it is not the trust-in-/hooks step" hasnot 'STOP .*trust the guard in Codex'
 expect "what carries --trust's fix" has 'what: .*remove hooks = false from \[features\]'
+
+echo "== Codex's entry switched off with enabled = false: the stop sends the person to /hooks"
+sandbox disabled
+mkdir -p "$h/.claude" "$cx"
+run disabled
+trust "$cx"
+printf 'enabled = false\n' >>"$cx/config.toml"   # in the entry's own table, the last one trust() wrote
+run disabled2
+expect "exit 3 with the four fields" complete_stop
+expect "it is the /hooks step" stopline 'enable the guard in Codex'
+expect "where: inside Codex" has 'where: .*inside Codex'
+expect "it is not the config step" hasnot 'make the Jarvis guard runnable'
+
+echo "== Claude Code's identity switch on: Codex's 'not covered' warning is shown"
+sandbox swon
+mkdir -p "$h/.claude" "$cx"
+JARVIS_REQUIRE_AGENT_IDENTITY=1 run swon
+expect "the first run shows the warning" has 'Codex GitHub writes are not covered'
+JARVIS_REQUIRE_AGENT_IDENTITY=1 run swon2
+echo "     (a re-run, guard applied and trust open: warning shown = $(grep -c 'not covered' "$log"))"
+
+echo "== python3 missing with Codex present: worked names python3 and tomllib"
+nopy="$root/nopy"; mkdir -p "$nopy"
+for t in "$nojq"/*; do [ "$(basename "$t")" = python3 ] || ln -sf "$(readlink "$t")" "$nopy/$(basename "$t")"; done
+ln -sf "$(command -v jq)" "$nopy/jq"
+sandbox nopy
+mkdir -p "$h/.claude" "$cx"
+RUNPATH="$nopy" run nopy
+expect "exit 3 at the tool stop" stopped
+expect "it names python3" stopline 'python3'
+expect "worked: names python3 and tomllib" has "^      worked: command -v python3 succeeds, and python3 -c 'import tomllib' succeeds\$"
 
 echo "== the resume command is shell-quoted and carries the homes that were set"
 sandbox "sp ace"
