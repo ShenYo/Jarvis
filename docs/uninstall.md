@@ -10,7 +10,8 @@ person's act: an agent writes and tests the script, and you run it, after
 reading what the dry run lists.
 
 ```bash
-bash ~/.Jarvis/scripts/uninstall.sh            # dry run: prints every path it would change, and why
+bash ~/.Jarvis/scripts/uninstall.sh            # the same as --dry-run: prints every path it would change, and why
+bash ~/.Jarvis/scripts/uninstall.sh --dry-run  # the flag spelled out
 bash ~/.Jarvis/scripts/uninstall.sh --remove   # does it
 ```
 
@@ -23,8 +24,8 @@ switch's record.
 
 | Installer | Adds | `uninstall.sh --remove` |
 | --- | --- | --- |
-| `scripts/apply-claude-guard.sh` | The guard's rules in `$CLAUDE_CONFIG_DIR/settings.json` (default `~/.claude`); the record `claude-guard.applied.json`; `settings.json.guard-backup`; the hooks `claude-guard.py`, `jarvis-session-notes.py`, `jarvis-shell-syntax.py` in `hooks/` | Takes out exactly the entries the record lists (a rule you wrote stays, even one equal to a guard rule), after copying the file to `settings.json.uninstall-backup`; removes the record and the three hooks. Keeps the backup and reports it. Keeps `permissions.disableBypassPermissionsMode`, which the record does not track, and says so |
-| `sync-personal-skills.sh` | `~/.agents`; `~/.claude/skills/<name>`; `~/.claude/CLAUDE.md`; when Codex is installed, `$CODEX_HOME/skills/<name>` and `$CODEX_HOME/AGENTS.md` (default `~/.codex`) | Removes each of these only when it is a link that resolves into the Jarvis checkout, and `~/.agents` last. A link that points elsewhere, dangles, or is a real file is reported as `left` and not touched. The `skills` directories stay |
+| `scripts/apply-claude-guard.sh` | The guard's rules in `$CLAUDE_CONFIG_DIR/settings.json` (default `~/.claude`); the record `claude-guard.applied.json`; `settings.json.guard-backup`; the hooks `claude-guard.py`, `jarvis-session-notes.py`, `jarvis-shell-syntax.py` in `hooks/` | Takes out the entries the record lists, one occurrence of each (a rule you wrote stays, even one equal to a guard rule), after copying the file to `settings.json.uninstall-backup`. Then removes the record and each hook that is byte-identical to the copy this checkout installs and that no settings entry still names. Keeps `permissions.disableBypassPermissionsMode`, which the record does not track, and says so. A record from before ownership was tracked (no `owned`) counts the whole guard as owned. If the record is missing or unreadable, `settings.json` is not JSON, or `settings.json.uninstall-backup` already exists, it removes none of the guard, reports each piece as `left`, and exits 1 |
+| `sync-personal-skills.sh` | `~/.agents`; `~/.claude/skills/<name>`; `~/.claude/CLAUDE.md`; when Codex is installed, `$CODEX_HOME/skills/<name>` and `$CODEX_HOME/AGENTS.md` (default `~/.codex`) | Removes each of these only when it is a link that resolves into the Jarvis checkout, and `~/.agents` last. A link that points elsewhere, dangles, or a real file or directory (in `skills/` too) is reported as `left` and not touched. The `skills` directories stay |
 | `scripts/apply-agent-identity.sh` | The identity's `env` keys in `settings.json` and its record (and, with `--codex`, a block in `config.toml`, a gitconfig and a record) | Runs `--unapply` for Claude Code, and `--unapply --codex`, only where `agent-identity.applied.json` exists |
 | `scripts/apply-codex-guard.sh` | `$CODEX_HOME/hooks/jarvis-guard.py` and an entry in `$CODEX_HOME/hooks.json` | Nothing: it has no inverse. See below |
 
@@ -39,8 +40,9 @@ the Jarvis checkout.
 - **The Codex guard:** delete `$CODEX_HOME/hooks/jarvis-guard.py`, and the Jarvis entry
   (the group whose command names `hooks/jarvis-guard.py`) from `$CODEX_HOME/hooks.json`,
   and its `[hooks.state."…"]` trust entry from `$CODEX_HOME/config.toml`.
-- **The backups** the installers left: `settings.json.guard-backup`,
-  `settings.json.agent-identity-backup` and `settings.json.uninstall-backup`.
+- **The backups** the installers and the script left, which it reports as `left` and never
+  deletes: `settings.json.guard-backup`, `settings.json.agent-identity-backup` and
+  `settings.json.uninstall-backup`.
 - **The checkout:** `~/.Jarvis`. After the script has run nothing links into it.
 - **The machine account and its keys:** the account, its SSH keys on GitHub
   (Settings, SSH and GPG keys), its collaborator access to your repositories, and

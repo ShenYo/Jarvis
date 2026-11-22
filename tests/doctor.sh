@@ -181,6 +181,39 @@ run partial
 expect "partial (only the guard record): still exit 1 with PROBLEM, not the not-installed line" bash -c "
   [ '$code' = 1 ] && grep -Eq '^PROBLEM +bridge ' '$log' && ! grep -q 'is not installed' '$log'"
 
+# partial <name> <what is left>: a machine with only that left is an install, so doctor judges it: exit 1, no
+# not-installed line. bare <name> makes the sandbox (HOME with ~/.Jarvis); $cfg is its Claude config dir.
+bare() { h="$root/$1"; cx="$h/.codex"; cfg="$h/.claude"; mkdir -p "$h"; ln -s "$repo" "$h/.Jarvis"; runenv=""; }
+inst_guard() { HOME="$h" CODEX_HOME="$cx" ${runenv:+env $runenv} bash "$repo/scripts/apply-claude-guard.sh" >>"$h.setup" 2>&1; }
+inst_bridge() { HOME="$h" CODEX_HOME="$cx" bash "$repo/sync-personal-skills.sh" >>"$h.setup" 2>&1; }
+partial() { # <name> <what>
+  run "$1"
+  expect "partial, $2: exit 1 and not reported as not installed" bash -c "[ '$code' = 1 ] && ! grep -q 'is not installed' '$log'"
+}
+bare unrelated; mkdir "$h/.agents"; run unrelated
+expect "not installed: an unrelated ~/.agents directory is not evidence" bash -c "[ '$code' = 0 ] && grep -q 'is not installed' '$log'"
+bare unrelated-file; : >"$h/.agents"; run unrelated-file
+expect "not installed: an unrelated ~/.agents file is not evidence" bash -c "[ '$code' = 0 ] && grep -q 'is not installed' '$log'"
+bare foreign-link; mkdir -p "$h/.claude/skills" "$h/other"; ln -s "$h/other" "$h/.claude/skills/theirs"; ln -s "$h/other" "$h/.claude/CLAUDE.md"; run foreign-link
+expect "not installed: a person's own links elsewhere are not evidence" bash -c "[ '$code' = 0 ] && grep -q 'is not installed' '$log'"
+bare idcfg-only; printf 'login=x\n' >"$h/cfgfile"; identity="$h/cfgfile"; run idcfg-only; identity=""
+expect "not installed: an identity config file alone is not evidence" bash -c "[ '$code' = 0 ] && grep -q 'is not installed' '$log'"
+
+bare p-norecord; inst_guard; rm -f "$cfg/claude-guard.applied.json"; partial p-norecord "guard entries and hooks without the record"
+bare p-links; inst_bridge; rm "$h/.agents"; partial p-links "skill links and CLAUDE.md without ~/.agents"
+bare p-hooks; inst_guard; rm -f "$cfg/claude-guard.applied.json"; echo '{}' >"$cfg/settings.json"; partial p-hooks "hook copies only"
+bare p-entries; inst_guard; rm -f "$cfg/claude-guard.applied.json" "$cfg"/hooks/*.py; partial p-entries "settings hook entries only"
+bare p-claudeid; mkdir -p "$cfg"; echo '{}' >"$cfg/agent-identity.applied.json"; partial p-claudeid "a Claude identity record"
+bare p-codexid; mkdir -p "$cx"; echo '{}' >"$cx/agent-identity.applied.json"; partial p-codexid "a Codex identity record"
+bare p-dangling; ln -s "$h/nowhere" "$h/.agents"; partial p-dangling "a dangling ~/.agents link"
+bare p-md; mkdir -p "$cfg"; ln -s ../.agents/AGENTS.md "$cfg/CLAUDE.md"; partial p-md "a dangling CLAUDE.md link into ~/.agents"
+bare p-skill; mkdir -p "$cfg/skills"; ln -s ../../.agents/skills/x "$cfg/skills/x"; partial p-skill "one dangling skill link"
+bare p-require; mkdir -p "$cfg"; echo '{}' >"$cfg/agent-identity.require.json"; partial p-require "an identity switch record"
+bare p-switch; mkdir -p "$cfg"; echo '{"env":{"JARVIS_REQUIRE_AGENT_IDENTITY":"1"}}' >"$cfg/settings.json"; partial p-switch "the switch in settings"
+bare p-cfgdir; mkdir -p "$h/elsewhere"; runenv="CLAUDE_CONFIG_DIR=$h/elsewhere"; cfg="$h/elsewhere"; inst_guard; rm -f "$cfg/hooks/"*.py; echo '{}' >"$cfg/settings.json"
+partial p-cfgdir "the guard record under CLAUDE_CONFIG_DIR"
+runenv=""
+
 # --- stale guard -------------------------------------------------------------
 fixture stale-guard
 printf '# drift\n' >>"$h/.claude/hooks/claude-guard.py"

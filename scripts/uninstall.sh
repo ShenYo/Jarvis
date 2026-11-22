@@ -5,8 +5,13 @@
 # apply-agent-identity.sh, in this order:
 #   1  the guard: the entries the record claude-guard.applied.json lists leave
 #      settings.json (rules the person wrote stay, even one equal to a guard
-#      rule), then the record and the copied hooks (claude-guard.py,
-#      jarvis-session-notes.py, jarvis-shell-syntax.py)
+#      rule: one occurrence of each listed entry goes), then the record and the
+#      copied hooks (claude-guard.py, jarvis-session-notes.py,
+#      jarvis-shell-syntax.py), each hook only if it is byte-identical to the
+#      copy this checkout installs and no settings entry still names it. When the
+#      record is missing or unreadable, settings.json is not JSON, or the backup
+#      path is taken, none of the guard is removed: every piece is reported as
+#      "left" and the run exits 1
 #   2  the bridge: ~/.claude/skills/<name>, ~/.claude/CLAUDE.md, and under
 #      $CODEX_HOME (default ~/.codex) skills/<name> and AGENTS.md, then ~/.agents
 #      -- each only when it is a link that resolves into this checkout
@@ -22,7 +27,8 @@
 #
 # Usage: uninstall.sh [--dry-run | --remove]
 #   --dry-run  the default: change nothing, print each path it would change and why
-#   --remove   do it. settings.json is first copied to settings.json.uninstall-backup
+#   --remove   do it. settings.json is first copied to settings.json.uninstall-backup,
+#              which must not exist yet
 # Exit 0 when done (or when the dry run finished), 1 when a step failed, 2 on usage.
 set -euo pipefail
 
@@ -83,7 +89,7 @@ bridge_link() {
   elif [ "$got" = "$root" ] || [[ "$got" == "$root"/* ]]; then
     do_rm "$l" "link into $here"
   else
-    left "$l" "points at $got, outside $here"
+    left "$l" "points at $got, outside $root"
   fi
 }
 
@@ -99,64 +105,121 @@ while [ -L "$real_settings" ]; do
   case $t in /*) real_settings=$t ;; *) real_settings="$(dirname "$real_settings")/$t" ;; esac
 done
 
-if [ ! -e "$record" ]; then
-  echo "no $record: the guard was not applied here (or already removed); settings.json is not touched"
-elif ! jq -e 'type == "object"' "$record" >/dev/null 2>&1; then
-  echo "PROBLEM  $record is not a JSON object; fix it by hand. The guard is left in place." >&2
-  fail=1
-else
-  # What the guard added, by list path. A record from before ownership was
-  # tracked (no "owned") is a copy of the guard it applied: all of it counts.
-  owned=$(jq -c '. as $r | if has("owned") then .owned
-    else [["permissions","deny"],["permissions","ask"],["autoMode","hard_deny"],["autoMode","soft_deny"],
-          ["hooks","PreToolUse"],["hooks","UserPromptSubmit"],["hooks","SessionStart"],["hooks","PostToolUse"]]
-         | map({key: join("."), value: ($r | getpath(.) // [])}) | map(select(.value | length > 0)) | from_entries end' "$record" 2>/dev/null) ||
-    owned=''
-  if [ -z "$owned" ]; then
-    echo "PROBLEM  $record cannot be read as a guard record; fix it by hand. The guard is left in place." >&2
-    fail=1
-  elif [ ! -e "$real_settings" ]; then
-    echo "no $settings: nothing to take entries out of"
-  elif ! jq -e 'type == "object"' "$real_settings" >/dev/null 2>&1; then
-    echo "PROBLEM  $real_settings is not a JSON object; fix it by hand. The guard is left in place." >&2
-    fail=1
+# The lists the guard manages, read from the installer so the two cannot drift.
+managed=$(sed -n '/def lists:/,/;$/p' "$here/scripts/apply-claude-guard.sh" |
+  grep -o '\["[A-Za-z_]*","[A-Za-z_]*"\]' | jq -sc 'map(join("."))') || managed='[]'
+[ "$managed" != '[]' ] || die "cannot read the managed lists from $here/scripts/apply-claude-guard.sh"
+# The hook copies apply-claude-guard.sh makes: name under hooks/, source in the checkout.
+hook_names=(claude-guard.py jarvis-session-notes.py jarvis-shell-syntax.py)
+hook_srcs=(bash-guard.py session-notes.py shell-syntax.py)
+ref_re='hooks/(claude-guard|jarvis-session-notes|jarvis-shell-syntax)\.py'
+refs_in() { jq --arg re "$ref_re" '[.. | strings | select(test($re))] | length' <<<"$1"; }
+names_hook() { jq -e --arg n "hooks/$2" '[.. | strings | select(contains($n))] | length > 0' <<<"$1" >/dev/null; }
+
+guard_stop=0
+guard_problem() { printf 'PROBLEM  %s\n' "$1" >&2; fail=1; guard_stop=1; }
+
+cur='' refs_now=0
+if [ -e "$real_settings" ]; then
+  if jq -e 'type == "object"' "$real_settings" >/dev/null 2>&1; then
+    cur=$(cat "$real_settings"); refs_now=$(refs_in "$cur")
   else
-    cur=$(cat "$real_settings")
-    new=$(jq --argjson o "$owned" '
-      reduce ($o | keys[]) as $k (.;
-        ($k | split(".")) as $p |
-        if (getpath($p) | type) == "array"
-        then setpath($p; getpath($p) | map(select(. as $e | ($o[$k] | index([$e])) == null)))
-             | if (getpath($p) | length) == 0 or ($p[0] == "autoMode" and getpath($p) == ["$defaults"])
-               then delpaths([$p]) else . end
-        else . end)
-      | reduce ["hooks","autoMode","permissions"][] as $k (.; if .[$k] == {} then del(.[$k]) else . end)' <<<"$cur")
-    if [ "$(jq -S . <<<"$cur")" = "$(jq -S . <<<"$new")" ]; then
-      echo "no guard entry from the record is in $real_settings; nothing to take out"
-    else
+    guard_problem "$real_settings is not a JSON object; fix it by hand. The guard's record, hooks and settings entries are left in place."
+  fi
+fi
+present=()
+for i in "${!hook_names[@]}"; do
+  if [ -e "$claude_home/hooks/${hook_names[$i]}" ] || [ -L "$claude_home/hooks/${hook_names[$i]}" ]; then present+=("$i"); fi
+done
+
+owned='' have_record=0
+if [ "$guard_stop" = 0 ]; then
+  if [ -e "$record" ] || [ -L "$record" ]; then
+    have_record=1
+    # A record from before ownership was tracked (no "owned") is a copy of the
+    # guard it applied: all of it counts. Otherwise "owned" must be an object of
+    # arrays, under the paths the installer manages.
+    if ! owned=$(jq -c --argjson m "$managed" '
+        if type != "object" then error("record")
+        elif has("owned") then
+          .owned as $o |
+          if ($o | type) != "object" then error("owned")
+          elif (($o | keys) - $m | length) > 0 then error("path")
+          elif ([$o[] | type == "array"] | all | not) then error("values")
+          else $o end
+        else . as $r | $m | map({key: ., value: ($r | getpath(split(".")) // [])})
+             | map(select(.value | type == "array" and length > 0)) | from_entries end' "$record" 2>/dev/null); then
+      guard_problem "$record cannot be read as a guard record (it must be a JSON object whose owned map is an object of arrays under the lists apply-claude-guard.sh manages); fix it by hand. The guard's record, hooks and settings entries are left in place."
+    fi
+  elif [ "${#present[@]}" -gt 0 ] || [ "$refs_now" -gt 0 ]; then
+    guard_problem "no $record, but the guard's hooks or settings entries are here: nothing shows Jarvis added them, so they are left in place."
+  else
+    echo "no $record: the guard was not applied here (or already removed)"
+  fi
+fi
+
+new="$cur" backup="$real_settings.uninstall-backup" edit=0
+if [ "$guard_stop" = 0 ] && [ "$have_record" = 1 ] && [ -n "$cur" ]; then
+  new=$(jq --argjson o "$owned" '
+    def drop_last($e): (to_entries | map(select(.value == $e)) | last | .key) as $i
+                       | if $i == null then . else .[:$i] + .[$i + 1:] end;
+    reduce ($o | keys[]) as $k (.;
+      ($k | split(".")) as $p |
+      if (getpath($p) | type) == "array"
+      then setpath($p; reduce $o[$k][] as $e (getpath($p); drop_last($e)))
+           | if (getpath($p) | length) == 0 or ($p[0] == "autoMode" and getpath($p) == ["$defaults"])
+             then delpaths([$p]) else . end
+      else . end)
+    | reduce ["hooks","autoMode","permissions"][] as $k (.; if .[$k] == {} then del(.[$k]) else . end)' <<<"$cur")
+  [ "$(jq -S . <<<"$cur")" = "$(jq -S . <<<"$new")" ] || edit=1
+  if [ "$edit" = 1 ] && { [ -e "$backup" ] || [ -L "$backup" ]; }; then
+    guard_problem "$backup already exists; this run would overwrite it (or write through it). Move it away, then run this again. The guard's record, hooks and settings entries are left in place."
+  fi
+fi
+
+if [ "$guard_stop" = 0 ]; then
+  if [ "$have_record" = 1 ]; then
+    if [ "$edit" = 1 ]; then
       if [ "$act" = 1 ]; then
-        cp -p "$real_settings" "$real_settings.uninstall-backup"
+        cp -p "$real_settings" "$backup"
         tmp=$(mktemp "$real_settings.XXXXXX")
         jq . <<<"$new" >"$tmp"
         mv "$tmp" "$real_settings"
-        printf 'edited   %s  (guard entries from %s taken out; previous copy: %s)\n' "$real_settings" "$record" "$real_settings.uninstall-backup"
+        printf 'edited   %s  (guard entries from %s taken out; previous copy: %s)\n' "$real_settings" "$record" "$backup"
       else
-        printf 'would edit  %s  (take out the guard entries listed in %s; every other entry stays)\n' "$real_settings" "$record"
+        printf 'would edit  %s  (take out the guard entries listed in %s, one occurrence of each; every other entry stays; previous copy would go to %s)\n' "$real_settings" "$record" "$backup"
       fi
+    elif [ -n "$cur" ]; then
+      echo "no guard entry from the record is in $real_settings; nothing to take out"
+    else
+      echo "no $settings: nothing to take entries out of"
     fi
-    if jq -e '.permissions.disableBypassPermissionsMode != null' "$real_settings" >/dev/null 2>&1; then
+    if [ -n "$new" ] && jq -e '.permissions.disableBypassPermissionsMode != null' <<<"$new" >/dev/null 2>&1; then
       left "$real_settings permissions.disableBypassPermissionsMode" "the guard sets it but does not record whether you had it; remove it by hand if you want it gone"
     fi
     do_rm "$record" "the guard's record of what it added"
   fi
+  for i in ${present[@]+"${present[@]}"}; do
+    h="$claude_home/hooks/${hook_names[$i]}"
+    if [ -n "$new" ] && names_hook "$new" "${hook_names[$i]}"; then
+      left "$h" "an entry in $real_settings still names it (not one the record lists); removing it would break that entry"
+    elif [ -f "$h" ] && [ ! -L "$h" ] && cmp -s "$h" "$here/.agents/claude-guard/${hook_srcs[$i]}"; then
+      do_rm "$h" "hook copied by apply-claude-guard.sh, identical to this checkout's ${hook_srcs[$i]}"
+    else
+      left "$h" "not byte-identical to this checkout's ${hook_srcs[$i]}: edited or not copied by the installer"
+    fi
+  done
+else
+  [ ! -e "$record" ] && [ ! -L "$record" ] || left "$record" "guard left whole, see PROBLEM above"
+  [ ! -e "$real_settings" ] || left "$real_settings" "guard left whole, see PROBLEM above"
+  for i in ${present[@]+"${present[@]}"}; do left "$claude_home/hooks/${hook_names[$i]}" "guard left whole, see PROBLEM above"; done
 fi
-for f in claude-guard.py jarvis-session-notes.py jarvis-shell-syntax.py; do
-  if [ -e "$claude_home/hooks/$f" ] || [ -L "$claude_home/hooks/$f" ]; then do_rm "$claude_home/hooks/$f" "hook copied by apply-claude-guard.sh"; fi
-done
-for b in "$settings.guard-backup" "$real_settings.guard-backup" "$settings.agent-identity-backup" "$real_settings.agent-identity-backup"; do
-  [ "$b" = "${prev_b-}" ] && continue
+prev_b=''
+for b in "$settings.guard-backup" "$real_settings.guard-backup" "$settings.agent-identity-backup" "$real_settings.agent-identity-backup" \
+         "$settings.uninstall-backup" "$backup"; do
+  [ "$b" = "$prev_b" ] && continue
   prev_b=$b
-  [ -e "$b" ] && left "$b" "backup kept; delete it yourself when you no longer need it"
+  if [ -e "$b" ] || [ -L "$b" ]; then left "$b" "backup kept; delete it yourself when you no longer need it"; fi
 done
 
 # --- 2. the bridge ---------------------------------------------------------------
@@ -164,12 +227,18 @@ echo ""
 echo "== bridge =="
 skills_root="$here/.agents/skills"
 bridge_dir() { # <dir> <label>
-  local d=$1 l
+  local d=$1 listing l
   [ -d "$d" ] || { echo "no $d: nothing to unlink"; return 0; }
+  # -H: the directory itself may be a link (a dotfiles checkout); its entries are what count.
+  if ! listing=$(find -H "$d" -mindepth 1 -maxdepth 1 2>&1 | sort); then
+    printf 'PROBLEM  %s cannot be scanned (%s); its links are left in place.\n' "$d" "$(printf '%s' "$listing" | head -1)" >&2
+    fail=1
+    return 0
+  fi
   while IFS= read -r l; do
     [ -n "$l" ] || continue
     bridge_link "$l" "$skills_root"
-  done < <(find "$d" -mindepth 1 -maxdepth 1 -type l | sort)
+  done <<<"$listing"
 }
 bridge_dir "$HOME/.claude/skills" "Claude Code"
 bridge_link "$HOME/.claude/CLAUDE.md" "$here/.agents/AGENTS.md"
@@ -186,19 +255,23 @@ bridge_link "$HOME/.agents" "$here/.agents"
 echo ""
 echo "== agent identity =="
 ident="$here/scripts/apply-agent-identity.sh"
-unapply() { # <label> <record> <args...>
-  local label=$1 rec=$2; shift 2
+unapply() { # <label> <record> <detail> <args...>
+  local label=$1 rec=$2 detail=$3; shift 3
   if [ ! -e "$rec" ] && [ ! -L "$rec" ]; then
     echo "$label: not applied (no $rec); skipped"
   elif [ "$act" = 1 ]; then
     echo "$label: bash $ident $*"
     bash "$ident" "$@" || { echo "PROBLEM  $label: apply-agent-identity.sh $* failed; see above" >&2; fail=1; }
   else
-    printf 'would run  bash %s %s  (%s is applied: %s)\n' "$ident" "$*" "$label" "$rec"
+    printf 'would run  bash %s %s  (%s is applied; %s; record %s)\n' "$ident" "$*" "$label" "$detail" "$rec"
   fi
 }
-unapply "Claude Code" "$claude_home/agent-identity.applied.json" --unapply
-unapply "Codex" "$codex_home/agent-identity.applied.json" --unapply --codex
+cl_keys=$(jq -r '(.env // {}) | keys | join(", ")' "$claude_home/agent-identity.applied.json" 2>/dev/null) || cl_keys=''
+cx_git=$(jq -r '.gitconfig // empty' "$codex_home/agent-identity.applied.json" 2>/dev/null) || cx_git=''
+unapply "Claude Code" "$claude_home/agent-identity.applied.json" \
+  "it takes the env keys ${cl_keys:-the record lists} out of $real_settings and deletes the record" --unapply
+unapply "Codex" "$codex_home/agent-identity.applied.json" \
+  "it takes its block out of $codex_home/config.toml, deletes ${cx_git:-the gitconfig the record names} and the record" --unapply --codex
 if [ -e "$claude_home/agent-identity.require.json" ]; then
   echo "NOTE     the identity switch is on ($claude_home/agent-identity.require.json): --unapply leaves it on, so GitHub writes stay refused."
   echo "         Turn it off first with: bash $ident --unrequire"
