@@ -64,7 +64,8 @@ sandbox() {
 # run <name> [args]: the script in that sandbox; sets $code and $log.
 run() {
   log="$root/$1.log"
-  HOME="$h" PATH="${RUNPATH:-$PATH}" bash "$h/.Jarvis/scripts/bootstrap.sh" ${2:+"$2"} >"$log" 2>&1 </dev/null
+  mkdir -p "$root/tmp"
+  HOME="$h" TMPDIR="$root/tmp" PATH="${RUNPATH:-$PATH}" bash "$h/.Jarvis/scripts/bootstrap.sh" ${2:+"$2"} >"$log" 2>&1 </dev/null
   code=$?
 }
 
@@ -270,6 +271,8 @@ expect "exit 3 with the four fields" complete_stop
 expect "what carries the bridge's CONFLICT line for Codex" has 'what: .*CONFLICT .*[.]codex/AGENTS.md is a real file'
 expect "the HOME and the clone are byte-identical" untouched
 expect "the file is untouched" test "$(cat "$cx/AGENTS.md")" = 'codex rules'
+expect "what names the real HOME, not the stand-in" has "what: .*$h/.codex/AGENTS.md"
+expect "no stand-in HOME is left behind" test -z "$(ls -A "$root/tmp")"
 
 echo "== a non-empty ~/.codex/AGENTS.override.md is a stop (SHADOWED), nothing written"
 override() { printf 'override\n' >"$cx/AGENTS.override.md"; }

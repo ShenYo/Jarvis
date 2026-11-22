@@ -76,7 +76,7 @@ run_quiet() {
 }
 
 # show_warnings: the warning lines of the last step, which its summary line would hide.
-show_warnings() { printf '%s\n' "${1-$out}" | grep -i 'warn' | sed 's/^/      /' || true; }
+show_warnings() { printf '%s\n' "$out" | grep -i 'warn' | sed 's/^/      /' || true; }
 
 say "bootstrap: staged setup of this machine (stage 3, the agent identity, is optional and not done here)"
 
@@ -110,10 +110,11 @@ if [ -e "$HOME/.agents" ] || [ -L "$HOME/.agents" ]; then
   bridge_out=$(bash "$bridge" --check 2>&1 </dev/null); bridge_rc=$?
 else
   fake=$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-home.XXXXXX") || fail "could not make a temporary directory"
+  trap 'rm -rf "$fake"' EXIT; trap 'exit 130' INT TERM
   ln -s "$HOME/.Jarvis" "$fake/.Jarvis"; ln -s .Jarvis/.agents "$fake/.agents"
   for d in .claude .codex; do [ ! -e "$HOME/$d" ] || ln -s "$HOME/$d" "$fake/$d"; done
   bridge_out=$(HOME="$fake" bash "$bridge" --check 2>&1 </dev/null); bridge_rc=$?
-  rm -rf "$fake"
+  rm -rf "$fake"; trap - EXIT INT TERM
   bridge_out=${bridge_out//"$fake"/$HOME}
 fi
 conflicts=$(printf '%s\n' "$bridge_out" | awk '

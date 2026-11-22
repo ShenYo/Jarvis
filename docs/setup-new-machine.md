@@ -171,7 +171,7 @@ not a stop: a normal run creates or replaces it.
 When Codex is installed, `${CODEX_HOME:-$HOME/.codex}/AGENTS.md` gets the same
 link and the same refusals, so both tools read one file and there is no copy to
 keep in step. Codex reads `AGENTS.override.md` in its home instead of
-`AGENTS.md` when that file is not empty, so the script fails while one exists
+`AGENTS.md` when that file is not empty, so the script stops while one exists
 (the bridge calls it `SHADOWED`). A Skill name that already exists under
 `~/.claude/skills` or `${CODEX_HOME:-$HOME/.codex}/skills` and is not a link to
 that Skill is refused the same way.
