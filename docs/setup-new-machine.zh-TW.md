@@ -30,6 +30,12 @@
 如果你是 fork 了 Jarvis，而不是 clone owner 的副本，請先讀 [fork 清單](./fork-checklist.md)
 （只有英文）。
 
+clone 之後（第 2 步），`bash ~/.Jarvis/scripts/bootstrap.sh` 會依 stage 的順序，做完 stage 1 與 stage 2 裡每一個腳本做得到的步驟，
+並在每個標著 **Person-only** 的步驟停下來，說明要做什麼、在哪裡做、怎麼知道做成了，以及繼續的指令（就是再執行一次
+同一個指令）。它可以安全地重複執行：已經做完的步驟不會有任何變動。它只做 stage 1 與 stage 2：stage 3 是選用的，
+而且需要你親自做。它絕不安裝系統套件。`bash ~/.Jarvis/scripts/bootstrap.sh --check` 印出的內容和 `doctor.sh`
+完全一樣，而且什麼都不改。下面的步驟就是腳本所做的事，以及需要手動做的事。
+
 ## 1. 前置條件
 
 前置條件是 Git、Bash，以及對設定好的 Jarvis remote 的存取權。只有在
@@ -63,6 +69,9 @@ python3 -c 'import tomllib' && echo "ok       python3 has tomllib"
 每一行都應該以 `ok` 開頭，有兩個例外：只做到 stage 1 的話，`jq` 與 `python3` 可以缺少；
 在 stage 3 之前停下來的話，`gh`、`ssh` 與 `ssh-keygen` 可以缺少。
 
+**Person-only：** 安裝這些程式，以及安裝並啟動 Claude Code 與 Codex。Claude Code 還沒啟動過，或缺少 `jq` 或
+`python3` 時，`bootstrap.sh` 會停下來，並指出缺了什麼。
+
 ## 2. Clone Jarvis
 
 Stage 1。
@@ -89,6 +98,9 @@ git -C ~/.Jarvis config core.hooksPath .githooks
 ```
 
 檢查：`git -C ~/.Jarvis config --get core.hooksPath` 印出 `.githooks`。
+
+**Person-only，只做一次：** clone 是你自己輸入的那一個指令，因為 `bootstrap.sh` 就在 clone 裡面。它會檢查
+checkout 是不是 `~/.Jarvis`，然後在 hooks 路徑尚未設定時自己設定上面的路徑，並做第 3 步。
 
 ## 3. 建立 Skills 的 bridge
 
@@ -119,16 +131,22 @@ Claude/Codex bridge 目錄。
 也能運作。
 
 這支腳本也會把 `~/.claude/CLAUDE.md` 連結到 `.agents/AGENTS.md` 的個人指示：link
-不存在時建立，懸空時替換。在兩種情況下它會拒絕，而且什麼都不改：一是
+不存在時建立，懸空時替換。在兩種情況下它會拒絕，而且不會替換它：一是
 `~/.claude/CLAUDE.md` 是一個真正的檔案，因為那裡有人寫好的指示；二是它是一個指向
 別處、仍然有效的 link，因為那是刻意的設定。若要在已經有 `~/.claude/CLAUDE.md` 的
 機器上採用這個 link，先把要保留的內容搬進 `.agents/AGENTS.md`，移除原檔，再重跑
 腳本。
 
+**Person-only，遇到時才需要：** 決定既有的指示檔或 Skill entry 要保留什麼。
+`bootstrap.sh` 會先用 `sync-personal-skills.sh --check` 問 bridge，這個指令什麼都不改。
+只要 bridge 回報任何 `CONFLICT` 或 `SHADOWED` 的行，`bootstrap.sh` 就會在寫入任何東西之前以 exit 3
+停下來，並原樣列出 bridge 自己的那些行。缺失或 dangling 的 link 不是 stop：正常執行會建立或替換它。
+
 安裝了 Codex 時，`${CODEX_HOME:-$HOME/.codex}/AGENTS.md` 也會得到同樣的 link 與同樣
 的拒絕規則，所以兩個工具讀的是同一份檔案，沒有需要同步的副本。Codex 的 home 裡若有
 非空的 `AGENTS.override.md`，Codex 會改讀它而不讀 `AGENTS.md`，所以只要它存在，腳本
-就會失敗。
+就會停下來（bridge 稱之為 `SHADOWED`）。`~/.claude/skills` 或 `${CODEX_HOME:-$HOME/.codex}/skills`
+底下若已有同名、但不是指向該 Skill 的 link 的 entry，也以同樣方式拒絕。
 
 這支腳本會在 `~/.agents` 不存在時建立它、確保 Claude bridge 目錄存在，並且只
 在某個 canonical-name entry 缺失或 dangling 時才建立或替換它。當
@@ -169,7 +187,10 @@ bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust
 檢查：兩支腳本加 `--check` 都以 0 離開，而 `--trust` 印出
 `trust: OK - Codex trusts the Jarvis guard entry` 並以 0 離開。
 
-選用：告訴 Claude Code 的 auto-mode classifier 這台機器信任哪些 repository。在 Claude Code 裡，從
+**Person-only：** 在 Codex 的 `/hooks` 裡信任這支 hook。`bootstrap.sh` 會套用兩個 guard，然後停在這裡，直到
+`--trust` 成功。
+
+選用，而且 person-only：告訴 Claude Code 的 auto-mode classifier 這台機器信任哪些 repository。在 Claude Code 裡，從
 Jarvis checkout（`~/.Jarvis`）內執行 `/auto-mode-setup`；從 home 目錄執行的話，它描述的是沒有 remote 的
 目錄。它會先問要加到現有的 environment 清單還是取代：選加入，因為取代會丟掉手動補上的 repository 和
 `"$defaults"` 項目。接著它會提供兩個選用的掃描；接受讀取 home 目錄下各 repository 的那一個，其他
@@ -194,6 +215,10 @@ repository 與受信任服務，所以不要從別台機器複製。它不存在
 ## 5. 設定 agent identity
 
 Stage 3，選用。
+
+**Person-only：** 這一節裡除了 `--check` 與寫入 identity 的單純 `apply-agent-identity.sh` 之外的全部：
+machine account 與它的邀請、回答 `--setup`、在 GitHub 加入 public key、用 `gh` 登入，以及重新啟動。
+`bootstrap.sh` 一樣都不做。
 
 要讓 agent 以自己的帳號操作 GitHub，在 guard 之後依下列順序設定 [agent
 identity](./agent-identity.md)：
@@ -279,6 +304,8 @@ Codex：執行中的 session 仍用舊的環境。
 
 Stage 3，選用。
 
+**Person-only：** 決定要不要打開，以及在 Codex 的 `/hooks` 再信任一次 hook。`bootstrap.sh` 不會執行 `--require`。
+
 開關打開時，identity 沒有套用的 runtime 寫入 GitHub，一律被 guard 拒絕，Claude Code 與 Codex 一起。在你打開
 之前它都是關的。它的作用見[打開開關](./guard.md#turning-the-switch-on)（只有英文）。請在第 5 步兩個 runtime
 都完成、Codex 信任 guard hook、而且兩個 `--check` 都乾淨之後才做：
@@ -295,7 +322,7 @@ bash ~/.Jarvis/scripts/apply-agent-identity.sh --require
 
 ## 7. 驗證整台機器
 
-只要執行一個指令：`bash ~/.Jarvis/scripts/doctor.sh`。它會跑下面這些檢查，但不含 `core.hooksPath` 那一列；
+只要執行一個指令：`bash ~/.Jarvis/scripts/doctor.sh`，或 `bash ~/.Jarvis/scripts/bootstrap.sh --check`，兩者印出的內容相同。它會跑下面這些檢查，但不含 `core.hooksPath` 那一列；
 它什麼都不修，每項檢查印一行（`ok`、`PROBLEM`、`skipped`、`UNVERIFIED`，檢查本身跑不起來時是 `ERROR`），
 有問題的附上修正指令；沒有問題時以 0 離開。
 如果你沒做第 5 步（identity 是選用的：沒有 config 檔、沒有開關、也沒有套用紀錄），identity 那行顯示
