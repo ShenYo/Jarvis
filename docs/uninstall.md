@@ -1,0 +1,55 @@
+# Uninstalling Jarvis
+
+> **中文摘要**：`scripts/uninstall.sh` 是三個安裝腳本的反向操作：預設 dry run，只列出會動的路徑與原因；
+> 加 `--remove` 才真的做。它只移除紀錄檔說 Jarvis 加進去的東西（guard 條目、複製的 hook、指向 checkout
+> 的連結、已套用的 identity），不碰 checkout、備份檔、指向別處的連結，以及你自己寫的規則。
+> checkout、machine account、GitHub 上的 SSH key 與 Codex guard 需要你自己手動處理。
+
+A person trying Jarvis, or a fork, can leave with one command. Deletion is the
+person's act: an agent writes and tests the script, and you run it, after
+reading what the dry run lists.
+
+```bash
+bash ~/.Jarvis/scripts/uninstall.sh            # dry run: prints every path it would change, and why
+bash ~/.Jarvis/scripts/uninstall.sh --remove   # does it
+```
+
+If you turned the agent-identity switch on, turn it off first
+(`bash ~/.Jarvis/scripts/apply-agent-identity.sh --unrequire`): `--unapply` leaves
+it on, so every GitHub write stays refused. The script says so when it sees the
+switch's record.
+
+## What each installer adds, and what the script removes
+
+| Installer | Adds | `uninstall.sh --remove` |
+| --- | --- | --- |
+| `scripts/apply-claude-guard.sh` | The guard's rules in `$CLAUDE_CONFIG_DIR/settings.json` (default `~/.claude`); the record `claude-guard.applied.json`; `settings.json.guard-backup`; the hooks `claude-guard.py`, `jarvis-session-notes.py`, `jarvis-shell-syntax.py` in `hooks/` | Takes out exactly the entries the record lists (a rule you wrote stays, even one equal to a guard rule), after copying the file to `settings.json.uninstall-backup`; removes the record and the three hooks. Keeps the backup and reports it. Keeps `permissions.disableBypassPermissionsMode`, which the record does not track, and says so |
+| `sync-personal-skills.sh` | `~/.agents`; `~/.claude/skills/<name>`; `~/.claude/CLAUDE.md`; when Codex is installed, `$CODEX_HOME/skills/<name>` and `$CODEX_HOME/AGENTS.md` (default `~/.codex`) | Removes each of these only when it is a link that resolves into the Jarvis checkout, and `~/.agents` last. A link that points elsewhere, dangles, or is a real file is reported as `left` and not touched. The `skills` directories stay |
+| `scripts/apply-agent-identity.sh` | The identity's `env` keys in `settings.json` and its record (and, with `--codex`, a block in `config.toml`, a gitconfig and a record) | Runs `--unapply` for Claude Code, and `--unapply --codex`, only where `agent-identity.applied.json` exists |
+| `scripts/apply-codex-guard.sh` | `$CODEX_HOME/hooks/jarvis-guard.py` and an entry in `$CODEX_HOME/hooks.json` | Nothing: it has no inverse. See below |
+
+The bridge is always under `~/.claude`, as `sync-personal-skills.sh` makes it;
+only the guard and the identity follow `CLAUDE_CONFIG_DIR`. The script reads the
+same variables as the installers and writes nothing outside the paths above. It
+removes named files and links, never a directory tree, and never anything inside
+the Jarvis checkout.
+
+## What you remove by hand
+
+- **The Codex guard:** delete `$CODEX_HOME/hooks/jarvis-guard.py`, and the Jarvis entry
+  (the group whose command names `hooks/jarvis-guard.py`) from `$CODEX_HOME/hooks.json`,
+  and its `[hooks.state."…"]` trust entry from `$CODEX_HOME/config.toml`.
+- **The backups** the installers left: `settings.json.guard-backup`,
+  `settings.json.agent-identity-backup` and `settings.json.uninstall-backup`.
+- **The checkout:** `~/.Jarvis`. After the script has run nothing links into it.
+- **The machine account and its keys:** the account, its SSH keys on GitHub
+  (Settings, SSH and GPG keys), its collaborator access to your repositories, and
+  the key files and `gh` login directory on disk
+  ([agent identity](./agent-identity.md)). The script touches none of them.
+- **Anything it reports as `left`:** a link that points elsewhere was not made by
+  Jarvis, or was moved on purpose.
+
+Afterwards `bash ~/.Jarvis/scripts/doctor.sh` prints `Jarvis is not installed on this machine` and exits 0. With any record or link still there (a Codex guard left on purpose shows as a note), it judges as it always does.
+
+Before you run `--remove`, check the dry run's list. Each `would remove` line is
+one file or link; nothing is recursive.

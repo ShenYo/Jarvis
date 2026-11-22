@@ -163,6 +163,24 @@ expect "correct setup: live callback is UNVERIFIED" live
 expect "correct setup: the last line is a summary with a next step" bash -c "tail -1 '$log' | grep -q '^doctor: no problem found.*Next:'"
 expect "correct setup: no network call was made" test ! -e "$root/net.log"
 
+# --- not installed, and partial ----------------------------------------------
+h="$root/empty"; cx="$h/.codex"; mkdir -p "$h"
+run empty
+expect "not installed: exit 0, one summary line with the setup guide, no PROBLEM and no check line" bash -c "
+  grep -q '^doctor: Jarvis is not installed on this machine.*Next: see docs/setup-new-machine.md' '$log' &&
+  ! grep -Eq '^(PROBLEM|ok|ERROR) ' '$log' && [ '$code' = 0 ]"
+mkdir -p "$cx/hooks"; : >"$cx/hooks/jarvis-guard.py"
+run empty
+expect "not installed: a Codex guard left behind is a note, not a failure" bash -c "
+  [ '$code' = 0 ] && grep -q '^note: the Codex guard is still installed' '$log'"
+
+h="$root/partial"; cx="$h/.codex"; mkdir -p "$h"
+ln -s "$repo" "$h/.Jarvis"
+HOME="$h" CODEX_HOME="$cx" bash "$repo/scripts/apply-claude-guard.sh" >"$h.setup" 2>&1
+run partial
+expect "partial (only the guard record): still exit 1 with PROBLEM, not the not-installed line" bash -c "
+  [ '$code' = 1 ] && grep -Eq '^PROBLEM +bridge ' '$log' && ! grep -q 'is not installed' '$log'"
+
 # --- stale guard -------------------------------------------------------------
 fixture stale-guard
 printf '# drift\n' >>"$h/.claude/hooks/claude-guard.py"

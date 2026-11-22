@@ -34,8 +34,13 @@
 # the environment of the scripts it runs (HOME, CODEX_HOME, CLAUDE_CONFIG_DIR,
 # JARVIS_AGENT_IDENTITY_FILE).
 #
+# Not installed is a state of its own: when no ~/.agents link, no claude-guard.applied.json and no
+# agent-identity.applied.json (Claude Code or Codex) exists, doctor prints one line saying so, with the
+# setup guide, and exits 0, without running a check. Any one of them present is a partial install, and the
+# checks run as usual.
+#
 # Usage: doctor.sh
-#   Exit: 0 no problem; 1 at least one PROBLEM; 2 usage or internal error.
+#   Exit: 0 no problem, or not installed; 1 at least one PROBLEM; 2 usage or internal error.
 set -uo pipefail
 
 usage() { sed -n '/^# Usage:/,/2 usage or internal error/s/^# \{0,1\}//p' "$0"; }
@@ -56,6 +61,22 @@ done
 codex_home="${CODEX_HOME:-$HOME/.codex}"
 claude_home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 identity_file="${JARVIS_AGENT_IDENTITY_FILE:-$HOME/.Jarvis/config-local/agent-identity}"
+
+# Not installed: none of Jarvis's own records or links is here (the ~/.agents link, the guard's record,
+# either identity record). Every check below would only say "absent", so say that once and stop. Any one of
+# them present is a partial install, which the checks below judge as they always have.
+installed=0
+for p in "$HOME/.agents" "$claude_home/claude-guard.applied.json" "$claude_home/agent-identity.applied.json" \
+         "$codex_home/agent-identity.applied.json"; do
+  { [ -e "$p" ] || [ -L "$p" ]; } && installed=1
+done
+if [ "$installed" = 0 ]; then
+  echo "doctor: Jarvis is not installed on this machine (no ~/.agents link, guard record or identity record). Next: see docs/setup-new-machine.md"
+  if [ -e "$codex_home/hooks/jarvis-guard.py" ]; then
+    echo "note: the Codex guard is still installed ($codex_home/hooks/jarvis-guard.py); it has no uninstaller, see docs/uninstall.md"
+  fi
+  exit 0
+fi
 
 n_ok=0 n_problem=0 n_skipped=0 n_unverified=0 n_error=0
 first_fix="" first_error=""
