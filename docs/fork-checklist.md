@@ -125,3 +125,8 @@ commits elsewhere are references, not instructions, and can stay too. The
   on `main`. Recreate what you want (section 2).
 - **Support promises.** See the audience and support statement in the
   [README](../README.md).
+
+## 6. Leaving
+
+`scripts/uninstall.sh` removes what the installers added and nothing else, as a dry run first.
+What it removes and what stays for you to do by hand: [Uninstalling Jarvis](./uninstall.md).

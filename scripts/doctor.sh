@@ -34,8 +34,13 @@
 # the environment of the scripts it runs (HOME, CODEX_HOME, CLAUDE_CONFIG_DIR,
 # JARVIS_AGENT_IDENTITY_FILE).
 #
+# Not installed is a state of its own: when nothing of Jarvis is here (no ~/.agents link, guard or identity
+# record, switch, guard hook copy or hook entry, or bridge link; the list is at "Not installed means" below),
+# doctor prints one line saying so, with the setup guide, and exits 0, without running a check. Any one of
+# them present is an install, whole or partial, and the checks run as usual.
+#
 # Usage: doctor.sh
-#   Exit: 0 no problem; 1 at least one PROBLEM; 2 usage or internal error.
+#   Exit: 0 no problem, or not installed; 1 at least one PROBLEM; 2 usage or internal error.
 set -uo pipefail
 
 usage() { sed -n '/^# Usage:/,/2 usage or internal error/s/^# \{0,1\}//p' "$0"; }
@@ -56,6 +61,73 @@ done
 codex_home="${CODEX_HOME:-$HOME/.codex}"
 claude_home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 identity_file="${JARVIS_AGENT_IDENTITY_FILE:-$HOME/.Jarvis/config-local/agent-identity}"
+
+# Not installed means nothing of Jarvis is here. Every check below would only say "absent", so say that
+# once and stop. Any one of these present is an install, partial or whole, which the checks below judge
+# as they always have:
+#   the ~/.agents link (dangling or not; a real directory or file there is not ours), the guard's record,
+#   either identity record, the identity switch (its record, the environment, the settings env, the Codex
+#   hook's --require-identity), a guard hook copy in the Claude config directory, a settings.json hook
+#   command naming one, ~/.claude/CLAUDE.md or $CODEX_HOME/AGENTS.md as a link into a Jarvis checkout,
+#   and any link in ~/.claude/skills or $CODEX_HOME/skills that resolves, or dangles, into one.
+# The identity config file is the person's own and is not evidence. The link spelling alone counts only when
+# ~/.agents is absent or a link; with a real ~/.agents the link must resolve into a Jarvis checkout. Without jq the settings cannot be
+# read, so doctor does not claim "not installed" and runs the checks, which report the missing jq.
+here_p=$(cd -P "$here" 2>/dev/null && pwd -P) || here_p=$here
+jarvis_link() { # <path> <glob a bridge link's target text matches>
+  local t base r
+  [ -L "$1" ] || return 1
+  t=$(readlink "$1")
+  # The spelling of the bridge's targets counts only while ~/.agents is Jarvis's (absent, or a link). A real
+  # ~/.agents is another tool's, say a skills CLI's, and its links are judged by where they lead.
+  if [ -L "$HOME/.agents" ] || [ ! -e "$HOME/.agents" ]; then case $t in $2) return 0 ;; esac; fi
+  case $t in /*) base=$t ;; *) base="$(dirname "$1")/$t" ;; esac
+  r="$(cd -P "$(dirname "$base")" 2>/dev/null && pwd -P)/$(basename "$base")"
+  case $r in "$here_p"/*) return 0 ;; esac
+  return 1
+}
+installed=0
+if ! command -v jq >/dev/null; then installed=1; fi
+for p in "$claude_home/claude-guard.applied.json" "$claude_home/agent-identity.applied.json" \
+         "$codex_home/agent-identity.applied.json" "$claude_home/agent-identity.require.json" \
+         "$HOME/.claude/agent-identity.require.json" \
+         "$claude_home/hooks/claude-guard.py" "$claude_home/hooks/jarvis-session-notes.py" \
+         "$claude_home/hooks/jarvis-shell-syntax.py"; do
+  { [ -e "$p" ] || [ -L "$p" ]; } && installed=1
+done
+[ -L "$HOME/.agents" ] && installed=1
+[ "${JARVIS_REQUIRE_AGENT_IDENTITY:-}" = 1 ] && installed=1
+jarvis_link "$HOME/.claude/CLAUDE.md" '*.agents/AGENTS.md' && installed=1
+jarvis_link "$codex_home/AGENTS.md" '*.agents/AGENTS.md' && installed=1
+if [ "$installed" = 0 ]; then
+  for d in "$HOME/.claude/skills" "$codex_home/skills"; do
+    [ -d "$d" ] || continue
+    while IFS= read -r l; do
+      jarvis_link "$l" '*.agents/skills/*' && { installed=1; break; }
+    done < <(find -H "$d" -mindepth 1 -maxdepth 1 -type l 2>/dev/null)
+  done
+fi
+if [ "$installed" = 0 ] && [ -f "$claude_home/settings.json" ]; then
+  jq -e '(.env.JARVIS_REQUIRE_AGENT_IDENTITY == "1") or
+         ([.. | strings | select(test("hooks/(claude-guard|jarvis-session-notes|jarvis-shell-syntax)\\.py"))] | length > 0)' \
+    "$claude_home/settings.json" >/dev/null 2>&1 && installed=1
+fi
+if [ "$installed" = 0 ] && [ -e "$codex_home/hooks.json" ] && [ "$(jq -r '
+    def own_h: (.command? // "") | contains("/hooks/jarvis-guard.py");
+    [(.hooks.PreToolUse // [])[] | .hooks[]? | select(own_h)] | first
+    | if . == null then "none"
+      elif ((.command // "") | [splits("[ \t]+")] as $w | ($w | index("--codex")) as $i
+            | $i != null and (($w[$i + 1:]) | index("--require-identity") != null)) then "on"
+      else "off" end' "$codex_home/hooks.json" 2>/dev/null)" = on ]; then
+  installed=1
+fi
+if [ "$installed" = 0 ]; then
+  echo "doctor: Jarvis is not installed on this machine (no ~/.agents link, guard, bridge link, hook copy or identity record). Next: see docs/setup-new-machine.md"
+  if [ -e "$codex_home/hooks/jarvis-guard.py" ]; then
+    echo "note: the Codex guard is still installed ($codex_home/hooks/jarvis-guard.py); it has no uninstaller, see docs/uninstall.md"
+  fi
+  exit 0
+fi
 
 n_ok=0 n_problem=0 n_skipped=0 n_unverified=0 n_error=0
 first_fix="" first_error=""

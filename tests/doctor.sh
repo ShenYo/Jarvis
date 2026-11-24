@@ -163,6 +163,87 @@ expect "correct setup: live callback is UNVERIFIED" live
 expect "correct setup: the last line is a summary with a next step" bash -c "tail -1 '$log' | grep -q '^doctor: no problem found.*Next:'"
 expect "correct setup: no network call was made" test ! -e "$root/net.log"
 
+# --- not installed, and partial ----------------------------------------------
+h="$root/empty"; cx="$h/.codex"; mkdir -p "$h"
+run empty
+expect "not installed: exit 0, one summary line with the setup guide, no PROBLEM and no check line" bash -c "
+  grep -q '^doctor: Jarvis is not installed on this machine.*Next: see docs/setup-new-machine.md' '$log' &&
+  ! grep -Eq '^(PROBLEM|ok|ERROR) ' '$log' && [ '$code' = 0 ]"
+mkdir -p "$cx/hooks"; : >"$cx/hooks/jarvis-guard.py"
+run empty
+expect "not installed: a Codex guard left behind is a note, not a failure" bash -c "
+  [ '$code' = 0 ] && grep -q '^note: the Codex guard is still installed' '$log'"
+
+h="$root/partial"; cx="$h/.codex"; mkdir -p "$h"
+ln -s "$repo" "$h/.Jarvis"
+HOME="$h" CODEX_HOME="$cx" bash "$repo/scripts/apply-claude-guard.sh" >"$h.setup" 2>&1
+run partial
+expect "partial (only the guard record): still exit 1 with PROBLEM, not the not-installed line" bash -c "
+  [ '$code' = 1 ] && grep -Eq '^PROBLEM +bridge ' '$log' && ! grep -q 'is not installed' '$log'"
+
+# partial <name> <what is left>: a machine with only that left is an install, so doctor judges it: exit 1, no
+# not-installed line. bare <name> makes the sandbox (HOME with ~/.Jarvis); $cfg is its Claude config dir.
+bare() { h="$root/$1"; cx="$h/.codex"; cfg="$h/.claude"; mkdir -p "$h"; ln -s "$repo" "$h/.Jarvis"; runenv=""; }
+inst_guard() { HOME="$h" CODEX_HOME="$cx" ${runenv:+env $runenv} bash "$repo/scripts/apply-claude-guard.sh" >>"$h.setup" 2>&1; }
+inst_bridge() { HOME="$h" CODEX_HOME="$cx" bash "$repo/sync-personal-skills.sh" >>"$h.setup" 2>&1; }
+partial() { # <name> <what>
+  run "$1"
+  expect "partial, $2: exit 1 and not reported as not installed" bash -c "[ '$code' = 1 ] && ! grep -q 'is not installed' '$log'"
+}
+bare unrelated; mkdir "$h/.agents"; run unrelated
+expect "not installed: an unrelated ~/.agents directory is not evidence" bash -c "[ '$code' = 0 ] && grep -q 'is not installed' '$log'"
+bare unrelated-file; : >"$h/.agents"; run unrelated-file
+expect "not installed: an unrelated ~/.agents file is not evidence" bash -c "[ '$code' = 0 ] && grep -q 'is not installed' '$log'"
+bare foreign-link; mkdir -p "$h/.claude/skills" "$h/other"; ln -s "$h/other" "$h/.claude/skills/theirs"; ln -s "$h/other" "$h/.claude/CLAUDE.md"; run foreign-link
+expect "not installed: a person's own links elsewhere are not evidence" bash -c "[ '$code' = 0 ] && grep -q 'is not installed' '$log'"
+bare idcfg-only; printf 'login=x\n' >"$h/cfgfile"; identity="$h/cfgfile"; run idcfg-only; identity=""
+expect "not installed: an identity config file alone is not evidence" bash -c "[ '$code' = 0 ] && grep -q 'is not installed' '$log'"
+
+bare p-norecord; inst_guard; rm -f "$cfg/claude-guard.applied.json"; partial p-norecord "guard entries and hooks without the record"
+bare p-links; inst_bridge; rm "$h/.agents"; partial p-links "skill links and CLAUDE.md without ~/.agents"
+bare p-hooks; inst_guard; rm -f "$cfg/claude-guard.applied.json"; echo '{}' >"$cfg/settings.json"; partial p-hooks "hook copies only"
+bare p-entries; inst_guard; rm -f "$cfg/claude-guard.applied.json" "$cfg"/hooks/*.py; partial p-entries "settings hook entries only"
+bare p-claudeid; mkdir -p "$cfg"; echo '{}' >"$cfg/agent-identity.applied.json"; partial p-claudeid "a Claude identity record"
+bare p-codexid; mkdir -p "$cx"; echo '{}' >"$cx/agent-identity.applied.json"; partial p-codexid "a Codex identity record"
+bare p-dangling; ln -s "$h/nowhere" "$h/.agents"; partial p-dangling "a dangling ~/.agents link"
+bare p-md; mkdir -p "$cfg"; ln -s ../.agents/AGENTS.md "$cfg/CLAUDE.md"; partial p-md "a dangling CLAUDE.md link into ~/.agents"
+bare p-skill; mkdir -p "$cfg/skills"; ln -s ../../.agents/skills/x "$cfg/skills/x"; partial p-skill "one dangling skill link"
+bare p-require; mkdir -p "$cfg"; echo '{}' >"$cfg/agent-identity.require.json"; partial p-require "an identity switch record"
+bare p-switch; mkdir -p "$cfg"; echo '{"env":{"JARVIS_REQUIRE_AGENT_IDENTITY":"1"}}' >"$cfg/settings.json"; partial p-switch "the switch in settings"
+bare p-cfgdir; mkdir -p "$h/elsewhere"; runenv="CLAUDE_CONFIG_DIR=$h/elsewhere"; cfg="$h/elsewhere"; inst_guard; rm -f "$cfg/hooks/"*.py; echo '{}' >"$cfg/settings.json"
+partial p-cfgdir "the guard record under CLAUDE_CONFIG_DIR"
+runenv=""
+
+# A skills-CLI layout, with no Jarvis anywhere: a real ~/.agents holding the person's own skills, and links
+# that spell the same text as Jarvis's bridge. They resolve into that directory, not into a Jarvis checkout.
+bare cli-layout; mkdir -p "$h/.agents/skills/foo" "$h/.claude/skills" "$cx/skills"; : >"$h/.agents/AGENTS.md"
+ln -s ../../.agents/skills/foo "$h/.claude/skills/foo"; ln -s ../.agents/AGENTS.md "$h/.claude/CLAUDE.md"
+ln -s ../../.agents/skills/foo "$cx/skills/foo"; ln -s ../.agents/AGENTS.md "$cx/AGENTS.md"
+run cli-layout
+expect "not installed: a skills CLI's own ~/.agents with links of the same spelling is not evidence" bash -c "
+  [ '$code' = 0 ] && grep -q 'is not installed' '$log'"
+
+bare p-envswitch; runenv="JARVIS_REQUIRE_AGENT_IDENTITY=1"; partial p-envswitch "the switch in the environment"; runenv=""
+bare p-cxmd; mkdir -p "$cx"; ln -s ../.agents/AGENTS.md "$cx/AGENTS.md"; partial p-cxmd "a Codex AGENTS.md link into ~/.agents"
+bare p-linkdir; mkdir -p "$h/real" "$h/.claude"; ln -s "$h/real" "$h/.claude/skills"
+ln -s "$(find "$repo/.agents/skills" -mindepth 1 -maxdepth 2 -name SKILL.md | head -1 | xargs dirname)" "$h/real/x"
+partial p-linkdir "a Jarvis skill link inside a skills directory that is itself a link"
+hooks_json='{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"python3 /x/hooks/jarvis-guard.py --codex%s"}]}]}}'
+bare p-reqid; mkdir -p "$cx"; printf "$hooks_json" ' --require-identity' >"$cx/hooks.json"; partial p-reqid "the Codex hook with --require-identity"
+bare c-reqoff; mkdir -p "$cx"; printf "$hooks_json" '' >"$cx/hooks.json"; run c-reqoff
+expect "not installed: a Codex hook entry without --require-identity is not evidence" bash -c "[ '$code' = 0 ] && grep -q 'is not installed' '$log'"
+bare p-alias; ln -s "$repo" "$h/jv-checkout"; ln -s "$repo/.agents" "$h/alias"; mkdir -p "$h/.claude/skills"
+ln -s "$h/alias/skills/$(find "$repo/.agents/skills" -mindepth 1 -maxdepth 2 -name SKILL.md | head -1 | xargs dirname | xargs basename)" "$h/.claude/skills/x"
+doctor_was=$doctor; doctor="$h/jv-checkout/scripts/doctor.sh"; partial p-alias "a link by another spelling, doctor run through a linked checkout path"; doctor=$doctor_was
+nojq="$root/nojq"; mkdir -p "$nojq"
+for t in bash sh env git sed grep egrep awk cat cksum cmp diff find sort tr head tail mktemp cp mv rm dirname basename \
+         readlink wc shasum sha256sum stat ls mkdir ln cut date uname tee true false test xargs rmdir chmod pwd; do
+  p=$(command -v "$t" 2>/dev/null) && [ -x "$p" ] && ln -sf "$p" "$nojq/$t"
+done
+bare p-nojq; runpath=$nojq; run p-nojq; runpath=""
+expect "no jq: doctor does not claim not installed; the checks report the missing jq (exit 2)" bash -c "
+  [ '$code' = 2 ] && ! grep -q 'is not installed' '$log' && grep -q '^ERROR' '$log'"
+
 # --- stale guard -------------------------------------------------------------
 fixture stale-guard
 printf '# drift\n' >>"$h/.claude/hooks/claude-guard.py"

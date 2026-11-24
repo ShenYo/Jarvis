@@ -49,6 +49,8 @@ jobs:
         run: bash tests/sync-personal-skills.sh
       - name: The doctor aggregates the checks, reports each fault, and writes nothing
         run: bash tests/doctor.sh
+      - name: The uninstaller removes only what the records say, is a dry run by default, and leaves the person's rules and links
+        run: bash tests/uninstall.sh
       - name: The bootstrap runs the scriptable setup steps, stops at each person-only one, and --check writes nothing
         run: bash tests/bootstrap.sh
       - name: The two READMEs agree
