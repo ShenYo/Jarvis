@@ -60,8 +60,8 @@ offers. Run it only where a project wants its own copy of that guard.
 ## The Git hooks are this repository's own
 
 `.githooks/` holds three hooks maintained here, independently of Friday's. To
-change a rule, change the hook and [`docs/git-guideline/`](docs/git-guideline/) in the same
-commit, and add a case to [`tests/githooks.sh`](tests/githooks.sh). Done when
+change a rule, change the hook and its rule under [`docs/git.md`](docs/git.md)
+in the same commit, and add a case to [`tests/githooks.sh`](tests/githooks.sh). Done when
 that case fails against the old hook and `bash tests/githooks.sh` reports
 `all … passed`.
 
@@ -98,11 +98,13 @@ already loads. These five are this repository's own:
 
 ### Git
 
-Read [`docs/git-guideline/`](docs/git-guideline/) before a Git operation here: [`safety-boundary.md`](docs/git-guideline/safety-boundary.md) and [`git-commit.md`](docs/git-guideline/git-commit.md). They set out:
+Read [`docs/git-guideline/safety-boundary.md`](docs/git-guideline/safety-boundary.md)
+and [`docs/git-guideline/git-commit.md`](docs/git-guideline/git-commit.md)
+before a Git operation here. They set out:
 
 - which operations are the agent's own call
 - which are reserved for a person
 - which are prohibited even when explicitly asked
 - the commit format the hooks enforce
 
-It is the authority on Git in this repository.
+They are the authority on Git in this repository.

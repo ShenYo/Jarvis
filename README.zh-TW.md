@@ -142,7 +142,7 @@ Codex。接下來是 guard 與 agent identity；[在新機器上設定](./docs/s
 | [Maintenance](./docs/maintenance.md) | 新增、更新、移除或驗證 Skill，或 bridge 出了問題。 |
 | [Local Git hooks](./docs/git-hooks.md) | hook 拒絕了某件事，或你要修改其中一個。 |
 | [Releases](./docs/releases.md) | 要選版本號或發佈 release。 |
-| [Git rules](./docs/git-guideline/) | 要在這裡執行 Git 操作之前。 |
+| [Git rules](./docs/git.md) | 要在這裡執行 Git 操作之前。 |
 | [History](./docs/history.md) | 想看某條規則背後的來歷與量測。 |
 | [Dispatch policy](./docs/dispatch/policy.md) | 要把工作交給另一個 model。 |
 | [Session notes](./docs/session-notes.md) | 想知道什麼時候該壓縮 session，或 session-notes Skill 和它的 hook 做什麼。 |

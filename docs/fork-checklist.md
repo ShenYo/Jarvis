@@ -73,7 +73,7 @@ grep -n '<!-- \(PERSONAL\|MIXED\):' ~/.Jarvis/.agents/AGENTS.md
   section and the Git pointer section. Keep what fits and review the rest.
 
 Sections without a marker are generic. If you change a rule that
-[`docs/git-guideline/`](./git-guideline/) or a hook also states, change them together.
+[`docs/git.md`](./git.md) or a hook also states, change them together.
 
 ## 4. Owner references: change the live ones, leave the history
 
