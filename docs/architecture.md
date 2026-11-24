@@ -25,7 +25,7 @@ replace a project's own guards if run in the wrong place, and the Git hooks
 are this repository's own. It keeps only the working rules specific to this
 repository. The general ones, how any agent should work, are in the personal
 instructions, so they apply in every session, not only here. The Git rules
-are [`docs/git.md`](./git.md).
+are [`docs/git-guideline/`](./git-guideline/).
 
 **Two files are called `AGENTS.md`, and they have different scopes.** The one
 at the root is for an agent working *in this repository*. The one in

@@ -814,30 +814,30 @@ check "the stub saw the Codex record's login and no token, on the first call and
 am_probe none 'gh pr merge https://github.com/other/repo/pull/12 --auto' "$feat"
 am_probe none 'gh pr merge 12 --disable-auto' "$feat"
 am_probe deny 'gh pr merge 12' "$feat" "$cp_pat"
-am_probe deny 'gh pr merge 12 --auto --admin -R example/shared' "$feat" 'Codex guard: *the flag --admin*docs/git.md*Codex cannot ask*'
+am_probe deny 'gh pr merge 12 --auto --admin -R example/shared' "$feat" 'Codex guard: *the flag --admin*docs/git-guideline/safety-boundary.md*Codex cannot ask*'
 am_probe deny 'gh pr merge 12 --auto --delete-branch -R example/shared' "$feat" "$pro"
 am_probe deny 'gh pr merge 12 --auto' "$feat" 'Codex guard: *-R owner/repo*Codex cannot ask*'
-am_probe deny 'GIT_DIR=/x gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *starts with an assignment*docs/git.md*'
-am_probe deny 'cd /tmp && gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *not the only command*docs/git.md*'
+am_probe deny 'GIT_DIR=/x gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *starts with an assignment*docs/git-guideline/safety-boundary.md*'
+am_probe deny 'cd /tmp && gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *not the only command*docs/git-guideline/safety-boundary.md*'
 am_probe deny 'echo --delete-branch | xargs gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *not the only command*'
 am_probe deny 'gh pr edit 12 --base release' "$feat" 'Codex guard: *base branch*armed auto-merge*Codex cannot ask*'
 am_probe deny 'gh api -X PATCH repos/o/r/pulls/12 -f base=release' "$feat" 'Codex guard: *base branch*armed auto-merge*'
 echo '{"id":1,"enforcement":"active","current_user_can_bypass":"exempt"}' >"$am/ruleset.json"
-am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *current_user_can_bypass*exempt*docs/git.md*Codex cannot ask*'
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *current_user_can_bypass*exempt*docs/git-guideline/safety-boundary.md*Codex cannot ask*'
 echo '{"id":1,"enforcement":"evaluate","current_user_can_bypass":"never"}' >"$am/ruleset.json"
-am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *enforcement = '"'"'evaluate'"'"'*docs/git.md*'
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *enforcement = '"'"'evaluate'"'"'*docs/git-guideline/safety-boundary.md*'
 echo '{"id":1,"enforcement":"active","current_user_can_bypass":"never"}' >"$am/ruleset.json"
 codeowners '* @ShenYo @agent-codex'
-am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *@agent-codex is the agent'"'"'s own login*docs/git.md*'
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *@agent-codex is the agent'"'"'s own login*docs/git-guideline/safety-boundary.md*'
 codeowners '/docs/ @ShenYo'
-am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *line 1*not the `*` rule*docs/git.md*'
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *line 1*not the `*` rule*docs/git-guideline/safety-boundary.md*'
 codeowners '* @ShenYo'
 echo '{"message":"Not Found"}' >"$am/contents.json"
-am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *no CODEOWNERS file*docs/git.md*'
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *no CODEOWNERS file*docs/git-guideline/safety-boundary.md*'
 codeowners '* @ShenYo'
-GH_TOKEN=secret am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *GH_TOKEN is set*docs/git.md*'
+GH_TOKEN=secret am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *GH_TOKEN is set*docs/git-guideline/safety-boundary.md*'
 rules '{"require_code_owner_review":false}' >"$am/rules.json"
-am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *gh pr merge --auto/--disable-auto is refused*require_code_owner_review*docs/git.md*Codex cannot ask*'
+am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *gh pr merge --auto/--disable-auto is refused*require_code_owner_review*docs/git-guideline/safety-boundary.md*Codex cannot ask*'
 rules '{}' >"$am/rules.json"
 STUB_SLEEP=31 am_probe deny 'gh pr merge 12 --auto -R example/shared' "$feat" 'Codex guard: *gh pr merge --auto/--disable-auto is refused*'
 unset GH_CONFIG_DIR

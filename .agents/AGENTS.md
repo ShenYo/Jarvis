@@ -129,7 +129,7 @@ involved.
 
 <!-- Responsibility: formats other people and tools read: documents,
 handoffs, commit messages, pull requests, and commands handed to the user to
-run. Short rules are written out; the Git contract is in docs/git.md, behind
+run. Short rules are written out; the Git contract is in docs/git-guideline/, behind
 the pointer below. -->
 
 ### Documents: English, opened by a Chinese summary
@@ -187,6 +187,6 @@ outside any repository.
 <!-- MIXED: generic method, owner's style; a fork reviews this. -->
 
 A repository's own Git guideline always wins. Where a repository has none,
-follow [`~/.Jarvis/docs/git.md`](../docs/git.md): it says whose call each
-operation is, lists the operations that are never an agent's even when asked,
-and gives the commit message format.
+follow [`~/.Jarvis/docs/git-guideline/safety-boundary.md`](../docs/git-guideline/safety-boundary.md) and [`git-commit.md`](../docs/git-guideline/git-commit.md): they say whose call each
+operation is, list the operations that are never an agent's even when asked,
+and give the commit message format.

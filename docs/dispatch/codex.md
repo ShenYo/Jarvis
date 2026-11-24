@@ -67,7 +67,7 @@ commits, pushes, opens pull requests, writes to GitHub, deletes files or
 changes other external state
 ([workspace ownership](./policy.md#workspace-ownership)); the Commander does
 what the task needs, after checking the report, under the repository's own
-Git rules, or [`~/.Jarvis/docs/git.md`](../git.md) where it has none.
+Git rules, or [`~/.Jarvis/docs/git-guideline/`](../git-guideline/) where it has none.
 
 ## CLI fallback
 

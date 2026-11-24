@@ -32,12 +32,12 @@ to another directory, and replace the upstream URL in the clone command of the
 [`.github/CODEOWNERS`](../.github/CODEOWNERS) holds one rule, `* @ShenYo`.
 Replace the login with yours. Until you do, the code-owner rule cannot be
 satisfied in your fork, and the guard refuses to arm auto-merge (see
-[Arming auto-merge](./git.md#arming-auto-merge) in `docs/git.md`: it requires a
+[Arming auto-merge](./git-guideline/safety-boundary.md#arming-auto-merge) in `docs/git-guideline/safety-boundary.md`: it requires a
 CODEOWNERS file that GitHub reports no errors for).
 
 The file is only half of it. A fork does not inherit repository settings. The
 authority is the list headed "The owner applies these settings" in
-[`docs/git.md`](./git.md); recreate it in your own repository. That list covers
+[`docs/git-guideline/safety-boundary.md`](./git-guideline/safety-boundary.md); recreate it in your own repository. That list covers
 four fields of the `pull_request` rule, the ones auto-merge depends on. The
 ruleset on `main` upstream has four rules:
 
@@ -51,8 +51,8 @@ ruleset on `main` upstream has four rules:
 The ruleset is the file [`.github/rulesets/main.json`](../.github/rulesets/main.json).
 The commands that apply it, the repository settings (`allow_auto_merge`,
 `delete_branch_on_merge`) and how to update an existing ruleset are in
-[Applying the ruleset and settings](./git.md#applying-the-ruleset-and-settings)
-in `docs/git.md`.
+[Applying the ruleset and settings](./git-guideline/safety-boundary.md#applying-the-ruleset-and-settings)
+in `docs/git-guideline/safety-boundary.md`.
 
 Enable GitHub Actions on your fork, or the required checks never report and
 nothing can merge.
@@ -73,7 +73,7 @@ grep -n '<!-- \(PERSONAL\|MIXED\):' ~/.Jarvis/.agents/AGENTS.md
   section and the Git pointer section. Keep what fits and review the rest.
 
 Sections without a marker are generic. If you change a rule that
-[`docs/git.md`](./git.md) or a hook also states, change them together.
+[`docs/git-guideline/`](./git-guideline/) or a hook also states, change them together.
 
 ## 4. Owner references: change the live ones, leave the history
 
@@ -95,7 +95,7 @@ upstream:
 - The upstream Releases link in
   [`docs/keep-machine-current.md`](./keep-machine-current.md) and its zh-TW
   twin, which checks your tag against upstream's.
-- [`docs/git.md`](./git.md), which names the owner in its CODEOWNERS
+- [`docs/git-guideline/safety-boundary.md`](./git-guideline/safety-boundary.md), which names the owner in its CODEOWNERS
   setting.
 
 History, which records what happened upstream and can stay:

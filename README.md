@@ -159,7 +159,7 @@ step in order, with a check after each.
 | [Maintenance](./docs/maintenance.md) | You are adding, updating, removing or verifying a Skill, or the bridge misbehaves. |
 | [Local Git hooks](./docs/git-hooks.md) | A hook refused something, or you are changing one. |
 | [Releases](./docs/releases.md) | You are choosing a version or cutting a release. |
-| [Git rules](./docs/git.md) | You are about to run a Git operation here. |
+| [Git rules](./docs/git-guideline/) | You are about to run a Git operation here. |
 | [History](./docs/history.md) | You want the story and the measurements behind a rule. |
 | [Dispatch policy](./docs/dispatch/policy.md) | You are handing work to another model. |
 | [Session notes](./docs/session-notes.md) | You want to know when to compact a session, or what the session-notes Skill and its hooks do. |

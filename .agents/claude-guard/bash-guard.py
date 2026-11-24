@@ -1627,7 +1627,7 @@ def analyze_gh_api(args, o, res, ctx, stdin=()):
 
 # --- gh pr merge --auto -------------------------------------------------------
 
-AUTO_MERGE_DOC = "~/.Jarvis/docs/git.md (Arming auto-merge)"
+AUTO_MERGE_DOC = "~/.Jarvis/docs/git-guideline/safety-boundary.md (Arming auto-merge)"
 NAME = r"[A-Za-z0-9_.-]+"
 PR_NUMBER = re.compile(r"^[1-9][0-9]{0,8}$")
 PR_URL = re.compile(r"^https://github\.com/(%s)/(%s)/pull/([1-9][0-9]{0,8})$" % (NAME, NAME))

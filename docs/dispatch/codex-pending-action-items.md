@@ -24,7 +24,7 @@ reason; never infer one. Read [`codex.md`](./codex.md) first, and
    [`../agent-identity.md`](../agent-identity.md) or
    [`../architecture.md`](../architecture.md), correct that document in the same
    PR and say so.
-4. Commit following [`../git.md`](../git.md), push, and open one pull request
+4. Commit following [`../git-guideline/git-commit.md`](../git-guideline/git-commit.md), push, and open one pull request
    for the whole run. Then add the PR's link to each Status you set, in a
    second commit on the same branch. Ask the owner to **Approve as ShenYo**
    before it merges.
@@ -39,8 +39,8 @@ Stop and report instead of working around anything the guard refuses.
 
 - **Blocked by:** [#56](https://github.com/ShenYo/Jarvis/issues/56). Wait until
   its pull request has merged and the owner has applied the GitHub settings in
-  [`../git.md`](../git.md).
-- **Why:** Once #56 lands, [`../git.md`](../git.md) makes arming auto-merge with
+  [`../git-guideline/safety-boundary.md`](../git-guideline/safety-boundary.md).
+- **Why:** Once #56 lands, [`../git-guideline/safety-boundary.md`](../git-guideline/safety-boundary.md) makes arming auto-merge with
   `gh pr merge <n> --auto -R owner/repo` the agent's own call, but only where the
   base branch requires the code owner's approval. The guard checks that before
   it allows the command. The owner's Approve still decides the merge. Until #56

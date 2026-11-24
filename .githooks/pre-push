@@ -12,7 +12,7 @@
 #
 # Scope: this refuses, it does not ask. Everything here is either permanently
 # prohibited or reserved for a person by
-# docs/git.md.
+# docs/git-guideline/safety-boundary.md.
 
 set -uo pipefail
 
@@ -20,7 +20,7 @@ set -uo pipefail
 # ships to projects and are maintained here on their own since 2026-10-24, so
 # a refusal points at this repository's rules, not at another repository's.
 doc_of() {
-  printf '%s\n' "docs/git.md"
+  printf '%s\n' "docs/git-guideline/safety-boundary.md"
 }
 
 
