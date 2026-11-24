@@ -45,7 +45,7 @@ the Jarvis checkout.
   `agent-identity-backup` files (`settings.json` and `$CODEX_HOME/config.toml`) are written by
   the identity step's `--unapply`, which replaces any earlier copy, so they are not listed;
   delete them yourself when you no longer need them.
-- **The checkout:** `~/.Jarvis`. After the script has run nothing links into it.
+- **The checkout:** `~/.Jarvis`. After the script exits 0, nothing links into it.
 - **The machine account and its keys:** the account, its SSH keys on GitHub
   (Settings, SSH and GPG keys), its collaborator access to your repositories, and
   the key files and `gh` login directory on disk
