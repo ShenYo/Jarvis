@@ -2,9 +2,9 @@
 
 How a commit is made in this repository: the format the hooks enforce. Where
 the agent's calls end and a person's begin is in
-[`safety-boundary.md`](./safety-boundary.md). The three hooks in
-[`.githooks/`](../../.githooks) enforce the mechanical part and point here
-when they refuse something.
+[`safety-boundary.md`](./safety-boundary.md). The hooks in
+[`.githooks/`](../../.githooks) enforce the mechanical part; `commit-msg`
+and `pre-commit` point here when they refuse something.
 
 ## Commits
 

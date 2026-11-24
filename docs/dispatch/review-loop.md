@@ -43,8 +43,8 @@ Size the review to what the PR changes:
 | Configuration or rules | The change checked against every rule it touches. |
 
 Whatever the row, check the PR against the repository's own rules: its
-`AGENTS.md` and `docs/git-guideline/`, and in a Friday consumer also the rules Friday
-installs (`.agents/docs/`, among them the Git safety boundary).
+`AGENTS.md` and `docs/git-guideline/`, and in a Friday consumer also the rules
+Friday installs (`.agents/docs/`, among them the Git safety boundary).
 
 ## Who reviews
 
@@ -150,9 +150,9 @@ where the repository has none, the coding agent arms auto-merge with
 branch requires the code owner's approval; the guard verifies it. The
 repository's own rules decide whether the agent arms it. A Friday consumer's
 shipped safety boundary still makes enabling auto-merge a person's checkpoint,
-so there it never does until
-[ShenYo/Friday#96](https://github.com/ShenYo/Friday/issues/96) ships a check;
-after that, only where that check passes.
+so there it never does until its installed Friday release includes the check
+from [ShenYo/Friday#96](https://github.com/ShenYo/Friday/issues/96); after
+that, only where that check passes.
 It arms it even when a thread is left open for the owner: the merge then waits
 until the owner resolves that thread, which the owner does when deciding.
 Finally the coding agent tells the owner that the PR is ready for their review.

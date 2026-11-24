@@ -3,8 +3,8 @@
 Whose call each Git operation is, which operations are never an agent's, and
 how the owner arms auto-merge and applies the settings it depends on. The
 [Claude Code guard](../guard.md#claude-code-guard) enforces the operation
-boundaries for Claude Code sessions on this machine, and the hooks in
-[`.githooks/`](../../.githooks) point here when they refuse something. The
+boundaries for Claude Code sessions on this machine, and the `pre-push` hook in
+[`.githooks/`](../../.githooks) points here when it refuses something. The
 commit rules are in [`git-commit.md`](./git-commit.md).
 
 ## Whose call an operation is

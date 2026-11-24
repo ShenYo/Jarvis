@@ -190,5 +190,5 @@ A repository's own Git guideline always wins. Where a repository has none,
 follow
 [`~/.Jarvis/docs/git-guideline/safety-boundary.md`](../docs/git-guideline/safety-boundary.md)
 and [`~/.Jarvis/docs/git-guideline/git-commit.md`](../docs/git-guideline/git-commit.md):
-they say whose call each operation is, list the operations that are never an agent's even when asked,
-and give the commit message format.
+they say whose call each operation is, list the operations that are never an
+agent's even when asked, and give the commit message format.

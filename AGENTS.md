@@ -60,9 +60,10 @@ offers. Run it only where a project wants its own copy of that guard.
 ## The Git hooks are this repository's own
 
 `.githooks/` holds three hooks maintained here, independently of Friday's. To
-change a rule, change the hook and its rule under [`docs/git.md`](docs/git.md)
-in the same commit, and add a case to [`tests/githooks.sh`](tests/githooks.sh). Done when
-that case fails against the old hook and `bash tests/githooks.sh` reports
+change a rule, change the hook and its rule in
+[`docs/git-guideline/`](docs/git-guideline/) (see the
+[`docs/git.md`](docs/git.md) index) in the same commit, and add a case to
+[`tests/githooks.sh`](tests/githooks.sh). Done when that case fails against the old hook and `bash tests/githooks.sh` reports
 `all … passed`.
 
 Do not reach for `--no-verify`; the Claude Code guard refuses that flag.
