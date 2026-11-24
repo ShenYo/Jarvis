@@ -134,6 +134,9 @@ expect "dry run: it names the settings edit, the hooks, a skill link, ~/.agents 
 expect "dry run: it says what it would not touch" bash -c "
   grep -q 'left     $H/.claude/skills/foreign' '$log' && grep -q 'left     $H/.claude/skills/$skill' '$log' &&
   grep -q 'left     $CFG/settings.json.guard-backup' '$log'"
+expect "dry run: both identity backups, the Claude settings one and the Codex config.toml one, are named" bash -c "
+  grep -q 'copying it to $CFG/settings.json.agent-identity-backup first' '$log' &&
+  grep -q 'copying it to $CX/config.toml.agent-identity-backup first' '$log'"
 expect "dry run: it lists the backup path and what the identity --unapply will change" bash -c "
   grep -q 'previous copy would go to $CFG/settings.json.uninstall-backup' '$log' &&
   grep -q 'takes the env keys .*JARVIS_AGENT_IDENTITY' '$log' && grep -q 'agent-identity.gitconfig' '$log'"
@@ -170,6 +173,7 @@ expect "remove: the backups are kept and reported" bash -c "
   [ -e '$CFG/settings.json.guard-backup' ] && grep -q 'left     $CFG/settings.json.guard-backup' '$log'"
 expect "remove: the backup holds the settings as they were before the edit" cmp -s "$CFG/settings.json.uninstall-backup" "$root/settings.installed"
 expect "remove: the disableBypassPermissionsMode notice is printed" grep -q "^left     $CFG/settings.json permissions.disableBypassPermissionsMode" "$log"
+expect "remove: the identity backup is not listed as kept (step 3 overwrites it)" bash -c "! grep -q 'agent-identity-backup  (backup kept' '$log'"
 expect "remove: the new backup is reported as left" grep -q "^left     $CFG/settings.json.uninstall-backup" "$log"
 expect "remove: the Codex guard, which the issue leaves out, is untouched" bash -c "[ -e '$CX/hooks/jarvis-guard.py' ] && [ -e '$CX/hooks.json' ]"
 expect "remove: the checkout is untouched (status, HEAD)" test "$(repo_state)" = "$repo_before"
@@ -192,6 +196,7 @@ if [ -f "$repo/scripts/doctor.sh" ]; then
 fi
 
 # --- cases that need a sandbox of their own ---------------------------------------------------
+REAL_JQ=$(command -v jq)
 fsum() { shasum -a 256 <"$1" | cut -d' ' -f1; }
 mrun() { log="$root/$MN.$((++MI)).log"; sbx bash "$uninstall" "$@" >"$log" 2>&1; rc=$?; }
 logg() { grep -q -- "$1" "$log"; }
@@ -212,15 +217,16 @@ other="Bash(my-own-rule *)"
 mini b1a; before=$(fsum "$CFG/settings.json"); printf 'not json' >"$CFG/claude-guard.applied.json"
 mrun --remove
 { [ "$rc" = 1 ] && logg '^PROBLEM  .*cannot be read as a guard record' && guard_whole "$before" &&
-    logg "^left     $CFG/hooks/claude-guard.py" && logg "^left     $CFG/claude-guard.applied.json"; } && ok "B1 unreadable record: exit 1, PROBLEM, everything left and reported" || bad "B1 unreadable record" "$log"
+    logg "^left     $CFG/hooks/claude-guard.py" && logg "^left     $CFG/claude-guard.applied.json" && logg "^left     $CFG/settings.json  (guard left whole"; } && ok "B1 unreadable record: exit 1, PROBLEM, everything left and reported" || bad "B1 unreadable record" "$log"
 mini b1b; before=$(fsum "$CFG/settings.json"); rm -f "$CFG/claude-guard.applied.json"
 mrun --remove
 { [ "$rc" = 1 ] && logg "^PROBLEM  no $CFG/claude-guard.applied.json, but the guard's hooks or settings entries are here" &&
-  [ "$(fsum "$CFG/settings.json")" = "$before" ] && hooks_all && logg "^left     $CFG/hooks/jarvis-shell-syntax.py"; } &&
+  [ "$(fsum "$CFG/settings.json")" = "$before" ] && hooks_all && logg "^left     $CFG/hooks/jarvis-shell-syntax.py" && logg "^left     $CFG/settings.json  (guard left whole"; } &&
   ok "B1 missing record: exit 1, PROBLEM, settings and hooks left" || bad "B1 missing record" "$log"
 mini b1c; printf 'x{' >"$CFG/settings.json"; before=$(fsum "$CFG/settings.json")
 mrun --remove
-{ [ "$rc" = 1 ] && logg "^PROBLEM  $CFG/settings.json is not a JSON object" && guard_whole "$before"; } &&
+{ [ "$rc" = 1 ] && logg "^PROBLEM  $CFG/settings.json is not a JSON object" && guard_whole "$before" &&
+  logg "^left     $CFG/settings.json  (guard left whole"; } &&
   ok "B1 settings not JSON: exit 1, PROBLEM, record and hooks left" || bad "B1 settings not JSON" "$log"
 mini b1d; mrun --remove
 { [ "$rc" = 0 ] && [ ! -e "$CFG/claude-guard.applied.json" ] && [ ! -e "$CFG/hooks/claude-guard.py" ]; } &&
@@ -280,14 +286,62 @@ mrun --remove
 { [ "$rc" = 0 ] && [ ! -L "$H/realskills/mine-linked" ] && [ -L "$H/realskills/foreign" ] && [ -L "$H/.claude/skills" ]; } &&
   ok "S10 skills directory is a link: its Jarvis links go, the foreign one and the directory link stay" || bad "S10" "$log"
 
+# Legacy record: before "owned" existed, the record was a copy of guard.json, and all of it counts as the guard's.
+mini legacy; cp "$guard" "$CFG/claude-guard.applied.json"
+jq --arg r "$other" '.permissions.deny += [$r]' "$CFG/settings.json" >"$root/legacy.s" && cp "$root/legacy.s" "$CFG/settings.json"
+mrun --remove
+{ [ "$rc" = 0 ] && jq -e --arg r "$other" '.permissions.deny == [$r] and (.hooks // {}) == {} and (.autoMode // {}) == {}' "$CFG/settings.json" >/dev/null &&
+  [ ! -e "$CFG/claude-guard.applied.json" ] && [ ! -e "$CFG/hooks/claude-guard.py" ]; } &&
+  ok "legacy record (a copy of guard.json, no owned): the whole guard goes, the person's rule stays" || bad "legacy record" "$log"
+
+# U5b: a backup path that is a dangling link is not written through either.
+mini u5b; before=$(fsum "$CFG/settings.json"); ln -s "$root/u5b.target" "$CFG/settings.json.uninstall-backup"
+mrun --remove
+{ [ "$rc" = 1 ] && logg "^PROBLEM  $CFG/settings.json.uninstall-backup already exists" && [ ! -e "$root/u5b.target" ] && guard_whole "$before"; } &&
+  ok "S5/S7 backup path is a dangling link: exit 1, PROBLEM, nothing created through it, guard left" || bad "S5/S7 dangling backup" "$log"
+
+# U18: a hook that is a link, even to an identical copy, is left.
+mini u18; cp "$repo/.agents/claude-guard/bash-guard.py" "$root/u18.copy"; rm "$CFG/hooks/claude-guard.py"; ln -s "$root/u18.copy" "$CFG/hooks/claude-guard.py"
+mrun --remove
+{ [ "$rc" = 0 ] && [ -L "$CFG/hooks/claude-guard.py" ] && [ ! -e "$CFG/hooks/jarvis-session-notes.py" ] &&
+  logg "^left     $CFG/hooks/claude-guard.py  (not byte-identical" && logg 'delete it by hand' && logg 'doctor.sh reports the machine as installed'; } &&
+  ok "S6 a hook that is a link is left, and the line says to delete it by hand" || bad "S6 hook link" "$log"
+
+# Concurrent edit: settings.json is saved between the read and the replace. A jq on PATH makes the change at the
+# one call that writes the new settings (a lone "jq ."), so the script itself is run as it is.
+mini conc; mkdir -p "$root/conc-bin"
+printf '#!/bin/sh\nif [ "$#" = 1 ] && [ "$1" = . ]; then printf %%s "{\\"saved\\":\\"meanwhile\\"}" >"$CONC_FILE"; fi\nexec "%s" "$@"\n' "$REAL_JQ" >"$root/conc-bin/jq"
+chmod +x "$root/conc-bin/jq"
+log="$root/conc.log"; sbx env PATH="$root/conc-bin:$PATH" CONC_FILE="$CFG/settings.json" bash "$uninstall" --remove >"$log" 2>&1; rc=$?
+{ [ "$rc" = 1 ] && logg "^PROBLEM  $CFG/settings.json changed while this ran" && [ "$(cat "$CFG/settings.json")" = '{"saved":"meanwhile"}' ] &&
+  [ -e "$CFG/claude-guard.applied.json" ] && hooks_all && [ ! -e "$CFG/settings.json.uninstall-backup" ] &&
+  [ "$(find "$CFG" -maxdepth 1 -name 'settings.json.*' ! -name '*backup' | wc -l | tr -d ' ')" = 0 ] &&
+  logg "^left     $CFG/settings.json  (guard left whole"; } &&
+  ok "concurrent edit: exit 1, PROBLEM, their change kept, no temporary file, guard left" || bad "concurrent edit" "$log"
+
+# Item 1: ~/.agents stays while a link that is kept still goes through it.
+mini keep1; ln -s ../../.agents/skills/retired-skill "$H/.claude/skills/retired"
+mrun --remove
+{ [ "$rc" = 1 ] && [ -L "$H/.agents" ] && [ -L "$H/.claude/skills/retired" ] && logg "^left     $H/.agents" && logg "^PROBLEM  $H/.agents is kept" &&
+  [ ! -L "$H/.claude/CLAUDE.md" ]; } &&
+  ok "~/.agents stays, exit 1, when a kept dangling link still goes through it" || bad "keep ~/.agents (dangling)" "$log"
+mini keep2; ln -s ../../.agents/AGENTS.md "$H/.claude/skills/rules-link"
+mrun --remove
+{ [ "$rc" = 1 ] && [ -L "$H/.agents" ] && [ -L "$H/.claude/skills/rules-link" ] && logg "^PROBLEM  $H/.agents is kept"; } &&
+  ok "~/.agents stays, exit 1, when a kept link into the checkout outside skills/ still goes through it" || bad "keep ~/.agents (outside)" "$log"
+
 # S13: a skills directory that cannot be scanned.
 mini s13
 if [ "$(id -u)" = 0 ]; then echo "skip S13: running as root, a mode-000 directory is still readable"
 else
   n=$(find "$H/.claude/skills" -type l | wc -l | tr -d ' '); chmod 000 "$H/.claude/skills"
   mrun --remove; chmod 755 "$H/.claude/skills"
-  { [ "$rc" = 1 ] && logg "^PROBLEM  $H/.claude/skills cannot be scanned" && [ "$(find "$H/.claude/skills" -type l | wc -l | tr -d ' ')" = "$n" ]; } &&
-    ok "S13 unreadable skills directory: exit 1, PROBLEM, links left" || bad "S13" "$log"
+  { [ "$rc" = 1 ] && logg "^PROBLEM  $H/.claude/skills cannot be scanned" && [ "$(find "$H/.claude/skills" -type l | wc -l | tr -d ' ')" = "$n" ] &&
+    [ -L "$H/.agents" ] && logg "^left     $H/.agents"; } &&
+    ok "S13 unreadable skills directory: exit 1, PROBLEM, its links and ~/.agents left" || bad "S13" "$log"
+  mrun --remove
+  { [ "$rc" = 0 ] && [ "$(find "$H/.claude/skills" -type l | wc -l | tr -d ' ')" = 0 ] && [ ! -L "$H/.agents" ]; } &&
+    ok "S13 after chmod 755 a second run removes the links and ~/.agents" || bad "S13 second run" "$log"
 fi
 
 # S14 and SF2: what is not ours is reported as left and kept.

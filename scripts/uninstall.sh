@@ -78,6 +78,7 @@ resolve() {
 
 # bridge_link <path> <expected prefix: a resolved path or directory>
 # Remove a link only if it resolves to the prefix or below it.
+agents_users=0   # a kept link that still goes through ~/.agents
 bridge_link() {
   local l=$1 root=$2 got
   if [ ! -L "$l" ]; then
@@ -86,24 +87,29 @@ bridge_link() {
   fi
   if ! got=$(resolve "$l"); then
     left "$l" "dangling link to $(readlink "$l"); not removed, check it"
+    case $(readlink "$l") in *.agents|*.agents/*) agents_users=1 ;; esac
   elif [ "$got" = "$root" ] || [[ "$got" == "$root"/* ]]; then
     do_rm "$l" "link into $here"
   else
     left "$l" "points at $got, outside $root"
+    case $(readlink "$l") in *.agents|*.agents/*) agents_users=1 ;; esac
   fi
 }
 
 # --- 1. the guard ----------------------------------------------------------------
 echo ""
 echo "== guard ($claude_home) =="
-# Follow links to the end of the chain, as apply-claude-guard.sh writes there.
-real_settings=$settings
-hops=0
-while [ -L "$real_settings" ]; do
-  hops=$((hops + 1)); [ "$hops" -le 40 ] || die "$settings: too many levels of links"
-  t=$(readlink "$real_settings")
-  case $t in /*) real_settings=$t ;; *) real_settings="$(dirname "$real_settings")/$t" ;; esac
-done
+# follow <path>: the end of a chain of links, which is where the installers write.
+follow() {
+  local p=$1 n=0 t
+  while [ -L "$p" ]; do
+    n=$((n + 1)); [ "$n" -le 40 ] || die "$1: too many levels of links"
+    t=$(readlink "$p")
+    case $t in /*) p=$t ;; *) p="$(dirname "$p")/$t" ;; esac
+  done
+  printf '%s\n' "$p"
+}
+real_settings=$(follow "$settings")
 
 # The lists the guard manages, read from the installer so the two cannot drift.
 managed=$(sed -n '/def lists:/,/;$/p' "$here/scripts/apply-claude-guard.sh" |
@@ -123,6 +129,7 @@ cur='' refs_now=0
 if [ -e "$real_settings" ]; then
   if jq -e 'type == "object"' "$real_settings" >/dev/null 2>&1; then
     cur=$(cat "$real_settings"); refs_now=$(refs_in "$cur")
+    read_sum=$(cksum <"$real_settings")
   else
     guard_problem "$real_settings is not a JSON object; fix it by hand. The guard's record, hooks and settings entries are left in place."
   fi
@@ -147,7 +154,7 @@ if [ "$guard_stop" = 0 ]; then
           elif (($o | keys) - $m | length) > 0 then error("path")
           elif ([$o[] | type == "array"] | all | not) then error("values")
           else $o end
-        else . as $r | $m | map({key: ., value: ($r | getpath(split(".")) // [])})
+        else . as $r | $m | map(. as $k | {key: $k, value: ($r | getpath($k | split(".")) // [])})
              | map(select(.value | type == "array" and length > 0)) | from_entries end' "$record" 2>/dev/null); then
       guard_problem "$record cannot be read as a guard record (it must be a JSON object whose owned map is an object of arrays under the lists apply-claude-guard.sh manages); fix it by hand. The guard's record, hooks and settings entries are left in place."
     fi
@@ -177,23 +184,34 @@ if [ "$guard_stop" = 0 ] && [ "$have_record" = 1 ] && [ -n "$cur" ]; then
   fi
 fi
 
+guard_leave_all() {
+  [ ! -e "$record" ] && [ ! -L "$record" ] || left "$record" "guard left whole, see PROBLEM above"
+  [ ! -e "$real_settings" ] || left "$real_settings" "guard left whole, see PROBLEM above"
+  for i in ${present[@]+"${present[@]}"}; do left "$claude_home/hooks/${hook_names[$i]}" "guard left whole, see PROBLEM above"; done
+}
+if [ "$guard_stop" = 0 ] && [ "$have_record" = 1 ] && [ "$edit" = 1 ]; then
+  if [ "$act" = 1 ]; then
+    tmp=$(mktemp "$real_settings.XXXXXX")
+    jq . <<<"$new" >"$tmp"
+    # Someone may have saved the file since it was read; replacing it now would drop their change
+    # (apply-claude-guard.sh makes the same check).
+    if [ "$(cksum <"$real_settings" 2>/dev/null || echo absent)" != "$read_sum" ]; then
+      rm -f "$tmp"
+      guard_problem "$real_settings changed while this ran; nothing was written. Run it again. The guard's record, hooks and settings entries are left in place."
+    else
+      cp -p "$real_settings" "$backup"
+      mv "$tmp" "$real_settings"
+      printf 'edited   %s  (guard entries from %s taken out; previous copy: %s)\n' "$real_settings" "$record" "$backup"
+    fi
+  else
+    printf 'would edit  %s  (take out the guard entries listed in %s, one occurrence of each; every other entry stays; previous copy would go to %s)\n' "$real_settings" "$record" "$backup"
+  fi
+elif [ "$guard_stop" = 0 ] && [ "$have_record" = 1 ]; then
+  if [ -n "$cur" ]; then echo "no guard entry from the record is in $real_settings; nothing to take out"
+  else echo "no $settings: nothing to take entries out of"; fi
+fi
 if [ "$guard_stop" = 0 ]; then
   if [ "$have_record" = 1 ]; then
-    if [ "$edit" = 1 ]; then
-      if [ "$act" = 1 ]; then
-        cp -p "$real_settings" "$backup"
-        tmp=$(mktemp "$real_settings.XXXXXX")
-        jq . <<<"$new" >"$tmp"
-        mv "$tmp" "$real_settings"
-        printf 'edited   %s  (guard entries from %s taken out; previous copy: %s)\n' "$real_settings" "$record" "$backup"
-      else
-        printf 'would edit  %s  (take out the guard entries listed in %s, one occurrence of each; every other entry stays; previous copy would go to %s)\n' "$real_settings" "$record" "$backup"
-      fi
-    elif [ -n "$cur" ]; then
-      echo "no guard entry from the record is in $real_settings; nothing to take out"
-    else
-      echo "no $settings: nothing to take entries out of"
-    fi
     if [ -n "$new" ] && jq -e '.permissions.disableBypassPermissionsMode != null' <<<"$new" >/dev/null 2>&1; then
       left "$real_settings permissions.disableBypassPermissionsMode" "the guard sets it but does not record whether you had it; remove it by hand if you want it gone"
     fi
@@ -206,17 +224,15 @@ if [ "$guard_stop" = 0 ]; then
     elif [ -f "$h" ] && [ ! -L "$h" ] && cmp -s "$h" "$here/.agents/claude-guard/${hook_srcs[$i]}"; then
       do_rm "$h" "hook copied by apply-claude-guard.sh, identical to this checkout's ${hook_srcs[$i]}"
     else
-      left "$h" "not byte-identical to this checkout's ${hook_srcs[$i]}: edited or not copied by the installer"
+      left "$h" "not byte-identical to this checkout's ${hook_srcs[$i]} (edited, a link, or not copied by the installer); delete it by hand if you want it gone. doctor.sh reports the machine as installed until you do"
     fi
   done
 else
-  [ ! -e "$record" ] && [ ! -L "$record" ] || left "$record" "guard left whole, see PROBLEM above"
-  [ ! -e "$real_settings" ] || left "$real_settings" "guard left whole, see PROBLEM above"
-  for i in ${present[@]+"${present[@]}"}; do left "$claude_home/hooks/${hook_names[$i]}" "guard left whole, see PROBLEM above"; done
+  guard_leave_all
 fi
 prev_b=''
-for b in "$settings.guard-backup" "$real_settings.guard-backup" "$settings.agent-identity-backup" "$real_settings.agent-identity-backup" \
-         "$settings.uninstall-backup" "$backup"; do
+# (settings.json.agent-identity-backup is not listed: step 3's --unapply overwrites it.)
+for b in "$settings.guard-backup" "$real_settings.guard-backup" "$settings.uninstall-backup" "$backup"; do
   [ "$b" = "$prev_b" ] && continue
   prev_b=$b
   if [ -e "$b" ] || [ -L "$b" ]; then left "$b" "backup kept; delete it yourself when you no longer need it"; fi
@@ -226,13 +242,14 @@ done
 echo ""
 echo "== bridge =="
 skills_root="$here/.agents/skills"
+scan_failed=0
 bridge_dir() { # <dir> <label>
   local d=$1 listing l
   [ -d "$d" ] || { echo "no $d: nothing to unlink"; return 0; }
   # -H: the directory itself may be a link (a dotfiles checkout); its entries are what count.
   if ! listing=$(find -H "$d" -mindepth 1 -maxdepth 1 2>&1 | sort); then
     printf 'PROBLEM  %s cannot be scanned (%s); its links are left in place.\n' "$d" "$(printf '%s' "$listing" | head -1)" >&2
-    fail=1
+    fail=1; scan_failed=1
     return 0
   fi
   while IFS= read -r l; do
@@ -248,8 +265,16 @@ if [ -d "$codex_home" ]; then
 else
   echo "no $codex_home: Codex bridge skipped"
 fi
-# Last: every other link resolves through ~/.agents, so it stays until they are judged.
-bridge_link "$HOME/.agents" "$here/.agents"
+# Last: every other link resolves through ~/.agents, so it stays until they are judged. It also stays
+# when a skills directory could not be scanned or a link that is kept still goes through it: removing it
+# would leave those links dangling.
+if [ -L "$HOME/.agents" ] && { [ "$scan_failed" = 1 ] || [ "$agents_users" = 1 ]; }; then
+  left "$HOME/.agents" "a skills directory could not be scanned, or a link that is kept still goes through it; fix that, then run this again"
+  printf 'PROBLEM  %s is kept because links that stay in place resolve through it.\n' "$HOME/.agents" >&2
+  fail=1
+else
+  bridge_link "$HOME/.agents" "$here/.agents"
+fi
 
 # --- 3. the identity -------------------------------------------------------------
 echo ""
@@ -266,12 +291,14 @@ unapply() { # <label> <record> <detail> <args...>
     printf 'would run  bash %s %s  (%s is applied; %s; record %s)\n' "$ident" "$*" "$label" "$detail" "$rec"
   fi
 }
+cl_bak="$real_settings.agent-identity-backup"
+cx_cfg=$(follow "$codex_home/config.toml"); cx_bak="$cx_cfg.agent-identity-backup"
 cl_keys=$(jq -r '(.env // {}) | keys | join(", ")' "$claude_home/agent-identity.applied.json" 2>/dev/null) || cl_keys=''
 cx_git=$(jq -r '.gitconfig // empty' "$codex_home/agent-identity.applied.json" 2>/dev/null) || cx_git=''
 unapply "Claude Code" "$claude_home/agent-identity.applied.json" \
-  "it takes the env keys ${cl_keys:-the record lists} out of $real_settings and deletes the record" --unapply
+  "it takes the env keys ${cl_keys:-the record lists} out of $real_settings, copying it to $cl_bak first (replacing any copy there), and deletes the record" --unapply
 unapply "Codex" "$codex_home/agent-identity.applied.json" \
-  "it takes its block out of $codex_home/config.toml, deletes ${cx_git:-the gitconfig the record names} and the record" --unapply --codex
+  "it takes its block out of $cx_cfg, copying it to $cx_bak first (replacing any copy there), deletes ${cx_git:-the gitconfig the record names} and the record" --unapply --codex
 if [ -e "$claude_home/agent-identity.require.json" ]; then
   echo "NOTE     the identity switch is on ($claude_home/agent-identity.require.json): --unapply leaves it on, so GitHub writes stay refused."
   echo "         Turn it off first with: bash $ident --unrequire"

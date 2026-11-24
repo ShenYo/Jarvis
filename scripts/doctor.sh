@@ -70,14 +70,17 @@ identity_file="${JARVIS_AGENT_IDENTITY_FILE:-$HOME/.Jarvis/config-local/agent-id
 #   hook's --require-identity), a guard hook copy in the Claude config directory, a settings.json hook
 #   command naming one, ~/.claude/CLAUDE.md or $CODEX_HOME/AGENTS.md as a link into a Jarvis checkout,
 #   and any link in ~/.claude/skills or $CODEX_HOME/skills that resolves, or dangles, into one.
-# The identity config file is the person's own and is not evidence. Without jq the settings cannot be
+# The identity config file is the person's own and is not evidence. The link spelling alone counts only when
+# ~/.agents is absent or a link; with a real ~/.agents the link must resolve into a Jarvis checkout. Without jq the settings cannot be
 # read, so doctor does not claim "not installed" and runs the checks, which report the missing jq.
 here_p=$(cd -P "$here" 2>/dev/null && pwd -P) || here_p=$here
 jarvis_link() { # <path> <glob a bridge link's target text matches>
   local t base r
   [ -L "$1" ] || return 1
   t=$(readlink "$1")
-  case $t in $2) return 0 ;; esac
+  # The spelling of the bridge's targets counts only while ~/.agents is Jarvis's (absent, or a link). A real
+  # ~/.agents is another tool's, say a skills CLI's, and its links are judged by where they lead.
+  if [ -L "$HOME/.agents" ] || [ ! -e "$HOME/.agents" ]; then case $t in $2) return 0 ;; esac; fi
   case $t in /*) base=$t ;; *) base="$(dirname "$1")/$t" ;; esac
   r="$(cd -P "$(dirname "$base")" 2>/dev/null && pwd -P)/$(basename "$base")"
   case $r in "$here_p"/*) return 0 ;; esac

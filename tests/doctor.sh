@@ -214,6 +214,36 @@ bare p-cfgdir; mkdir -p "$h/elsewhere"; runenv="CLAUDE_CONFIG_DIR=$h/elsewhere";
 partial p-cfgdir "the guard record under CLAUDE_CONFIG_DIR"
 runenv=""
 
+# A skills-CLI layout, with no Jarvis anywhere: a real ~/.agents holding the person's own skills, and links
+# that spell the same text as Jarvis's bridge. They resolve into that directory, not into a Jarvis checkout.
+bare cli-layout; mkdir -p "$h/.agents/skills/foo" "$h/.claude/skills" "$cx/skills"; : >"$h/.agents/AGENTS.md"
+ln -s ../../.agents/skills/foo "$h/.claude/skills/foo"; ln -s ../.agents/AGENTS.md "$h/.claude/CLAUDE.md"
+ln -s ../../.agents/skills/foo "$cx/skills/foo"; ln -s ../.agents/AGENTS.md "$cx/AGENTS.md"
+run cli-layout
+expect "not installed: a skills CLI's own ~/.agents with links of the same spelling is not evidence" bash -c "
+  [ '$code' = 0 ] && grep -q 'is not installed' '$log'"
+
+bare p-envswitch; runenv="JARVIS_REQUIRE_AGENT_IDENTITY=1"; partial p-envswitch "the switch in the environment"; runenv=""
+bare p-cxmd; mkdir -p "$cx"; ln -s ../.agents/AGENTS.md "$cx/AGENTS.md"; partial p-cxmd "a Codex AGENTS.md link into ~/.agents"
+bare p-linkdir; mkdir -p "$h/real" "$h/.claude"; ln -s "$h/real" "$h/.claude/skills"
+ln -s "$(find "$repo/.agents/skills" -mindepth 1 -maxdepth 2 -name SKILL.md | head -1 | xargs dirname)" "$h/real/x"
+partial p-linkdir "a Jarvis skill link inside a skills directory that is itself a link"
+hooks_json='{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"python3 /x/hooks/jarvis-guard.py --codex%s"}]}]}}'
+bare p-reqid; mkdir -p "$cx"; printf "$hooks_json" ' --require-identity' >"$cx/hooks.json"; partial p-reqid "the Codex hook with --require-identity"
+bare c-reqoff; mkdir -p "$cx"; printf "$hooks_json" '' >"$cx/hooks.json"; run c-reqoff
+expect "not installed: a Codex hook entry without --require-identity is not evidence" bash -c "[ '$code' = 0 ] && grep -q 'is not installed' '$log'"
+bare p-alias; ln -s "$repo" "$h/jv-checkout"; ln -s "$repo/.agents" "$h/alias"; mkdir -p "$h/.claude/skills"
+ln -s "$h/alias/skills/$(find "$repo/.agents/skills" -mindepth 1 -maxdepth 2 -name SKILL.md | head -1 | xargs dirname | xargs basename)" "$h/.claude/skills/x"
+doctor_was=$doctor; doctor="$h/jv-checkout/scripts/doctor.sh"; partial p-alias "a link by another spelling, doctor run through a linked checkout path"; doctor=$doctor_was
+nojq="$root/nojq"; mkdir -p "$nojq"
+for t in bash sh env git sed grep egrep awk cat cksum cmp diff find sort tr head tail mktemp cp mv rm dirname basename \
+         readlink wc shasum sha256sum stat ls mkdir ln cut date uname tee true false test xargs rmdir chmod pwd; do
+  p=$(command -v "$t" 2>/dev/null) && [ -x "$p" ] && ln -sf "$p" "$nojq/$t"
+done
+bare p-nojq; runpath=$nojq; run p-nojq; runpath=""
+expect "no jq: doctor does not claim not installed; the checks report the missing jq (exit 2)" bash -c "
+  [ '$code' = 2 ] && ! grep -q 'is not installed' '$log' && grep -q '^ERROR' '$log'"
+
 # --- stale guard -------------------------------------------------------------
 fixture stale-guard
 printf '# drift\n' >>"$h/.claude/hooks/claude-guard.py"
