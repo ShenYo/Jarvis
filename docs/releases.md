@@ -39,4 +39,4 @@ gh release create vX.Y.Z --notes-from-tag
 
 Pushing the tag and publishing the release are both checkpoints: the user
 authorizes each by naming the tag and the commit. Deleting a tag or a release is
-never the agent's ([`docs/git.md`](./git.md)).
+never the agent's ([`docs/git-guideline/safety-boundary.md`](./git-guideline/safety-boundary.md)).

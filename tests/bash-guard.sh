@@ -973,10 +973,10 @@ for f in "required_approving_review_count = 0|required_approving_review_count" "
   name=${f#*|}
   set_rules ".${f%|*}"
   gh_stub probe ask "gh pr merge 12 --auto -R $R"
-  reason_is "$name false: the reason names it and docs/git.md" "*$name*docs/git.md*" "gh pr merge 12 --auto -R $R"
+  reason_is "$name false: the reason names it and docs/git-guideline/safety-boundary.md" "*$name*docs/git-guideline/safety-boundary.md*" "gh pr merge 12 --auto -R $R"
   set_rules "del(.$name)"
   gh_stub probe ask "gh pr merge 12 --auto -R $R"
-  reason_is "$name missing: the reason names it and docs/git.md" "*$name*docs/git.md*" "gh pr merge 12 --auto -R $R"
+  reason_is "$name missing: the reason names it and docs/git-guideline/safety-boundary.md" "*$name*docs/git-guideline/safety-boundary.md*" "gh pr merge 12 --auto -R $R"
 done
 reset_stub; set_rules '.required_approving_review_count = "1"'; gh_stub probe ask "gh pr merge 12 --auto -R $R"
 set_rules '.required_approving_review_count = true'; gh_stub probe ask "gh pr merge 12 --auto -R $R"
@@ -997,7 +997,7 @@ for v in exempt always pull_requests_only bogus; do
   set_bypass 1 "$v"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
 done
 set_bypass 1 exempt
-reason_is "a bypassable ruleset: the reason names current_user_can_bypass and docs/git.md" "*current_user_can_bypass*exempt*docs/git.md*" "gh pr merge 12 --auto -R $R"
+reason_is "a bypassable ruleset: the reason names current_user_can_bypass and docs/git-guideline/safety-boundary.md" "*current_user_can_bypass*exempt*docs/git-guideline/safety-boundary.md*" "gh pr merge 12 --auto -R $R"
 echo '{"id":1,"name":"main"}' >"$stub/ruleset-1.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
 echo '{"id":1,"current_user_can_bypass":null}' >"$stub/ruleset-1.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
 echo '[]' >"$stub/ruleset-1.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
@@ -1007,7 +1007,7 @@ reset_stub; jq '[.[] | del(.ruleset_id)]' "$stub/rules.json" >"$stub/r.json"; mv
 reset_stub; jq '[.[] | .ruleset_source_type = "Organization"]' "$stub/rules.json" >"$stub/r.json"; mv "$stub/r.json" "$stub/rules.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
 echo "-- refused: no CODEOWNERS file on the base branch, or one with errors"
 reset_stub; set_codeowners; gh_stub probe ask "gh pr merge 12 --auto -R $R"
-reason_is "no CODEOWNERS: the reason names it and docs/git.md" "*no CODEOWNERS file*docs/git.md*" "gh pr merge 12 --auto -R $R"
+reason_is "no CODEOWNERS: the reason names it and docs/git-guideline/safety-boundary.md" "*no CODEOWNERS file*docs/git-guideline/safety-boundary.md*" "gh pr merge 12 --auto -R $R"
 echo '[{"type":"dir"}]' >"$stub/contents/CODEOWNERS.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
 # only a file counts, whatever else the entry says: a symlink or a directory is not a CODEOWNERS file
 reset_stub
@@ -1015,9 +1015,9 @@ for t in symlink dir submodule; do
   codeowners_body '* @ShenYo' | jq --arg t "$t" '.type = $t' >"$stub/contents/github_CODEOWNERS.json"
   gh_stub probe ask "gh pr merge 12 --auto -R $R"
 done
-reason_is "a symlink is not a CODEOWNERS file" "*no CODEOWNERS file*docs/git.md*" "gh pr merge 12 --auto -R $R"
+reason_is "a symlink is not a CODEOWNERS file" "*no CODEOWNERS file*docs/git-guideline/safety-boundary.md*" "gh pr merge 12 --auto -R $R"
 reset_stub; echo '{"errors":[{"line":1,"kind":"Invalid owner"}]}' >"$stub/errors.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
-reason_is "CODEOWNERS errors: the reason names them" "*CODEOWNERS*errors*docs/git.md*" "gh pr merge 12 --auto -R $R"
+reason_is "CODEOWNERS errors: the reason names them" "*CODEOWNERS*errors*docs/git-guideline/safety-boundary.md*" "gh pr merge 12 --auto -R $R"
 echo '{"message":"Not Found"}' >"$stub/errors.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
 echo 'not json' >"$stub/errors.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
 rm -f "$stub/errors.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
@@ -1028,7 +1028,7 @@ for t in '* @ShenYo' $'# the owner\n\n* @ShenYo   # approves everything\n' '* @S
 done
 set_codeowners_text $'# nothing\n# at all'
 gh_stub probe ask "gh pr merge 12 --auto -R $R"
-reason_is "no rule: the reason says so" "*CODEOWNERS*it has no rule*docs/git.md*" "gh pr merge 12 --auto -R $R"
+reason_is "no rule: the reason says so" "*CODEOWNERS*it has no rule*docs/git-guideline/safety-boundary.md*" "gh pr merge 12 --auto -R $R"
 set_codeowners_text '/docs/ @ShenYo'
 gh_stub probe ask "gh pr merge 12 --auto -R $R"
 reason_is "a path rule: the reason names the line" "*line 1 (/docs/ @ShenYo) is not the \`*\` rule*" "gh pr merge 12 --auto -R $R"
@@ -1066,7 +1066,7 @@ rm -f "$stub/user.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
 reset_stub
 echo "-- the ruleset must be active"
 for e in evaluate disabled bogus; do set_bypass 1 never "$e"; gh_stub probe ask "gh pr merge 12 --auto -R $R"; done
-reason_is "a ruleset not active: the reason names enforcement" "*enforcement = 'bogus'*docs/git.md*" "gh pr merge 12 --auto -R $R"
+reason_is "a ruleset not active: the reason names enforcement" "*enforcement = 'bogus'*docs/git-guideline/safety-boundary.md*" "gh pr merge 12 --auto -R $R"
 printf '{"id":1,"current_user_can_bypass":"never"}' >"$stub/ruleset-1.json"; gh_stub probe ask "gh pr merge 12 --auto -R $R"
 reset_stub
 echo "-- refused: gh fails, hangs or is not there"
@@ -1105,7 +1105,7 @@ total=$((total + 1))
 if [ "$(deadline_probe -1)" = "None 0" ]; then echo "ok   budget spent: gh is not started"; else echo "FAIL budget spent: gh is not started"; fails=$((fails + 1)); fi
 echo "-- refused: the repository is not named, or is named two ways, or the environment redirects gh"
 gh_stub probe ask 'gh pr merge 12 --auto'
-reason_is "no -R: the reason asks for an explicit repository" "*--auto needs an explicit -R owner/repo*docs/git.md*" 'gh pr merge 12 --auto'
+reason_is "no -R: the reason asks for an explicit repository" "*--auto needs an explicit -R owner/repo*docs/git-guideline/safety-boundary.md*" 'gh pr merge 12 --auto'
 gh_stub probe ask "gh pr merge 12 --auto --squash"
 gh_stub probe ask "gh pr merge https://github.com/url/repo/pull/12 --auto -R other/repo"
 GH_REPO=other/repo gh_stub probe ask "gh pr merge 12 --auto -R $R"
@@ -1116,8 +1116,8 @@ more() { # the command, and the glob its reason must match
   gh_stub probe ask "$1"
   reason_is "the reason names what disqualified: $1" "$2" "$1"
 }
-more "GIT_DIR=/other/.git gh pr merge 12 --auto -R $R" '*starts with an assignment (GIT_DIR=*docs/git.md*'
-more "export GIT_DIR=/other/.git; gh pr merge 12 --auto -R $R" '*not the only command*`;`*docs/git.md*'
+more "GIT_DIR=/other/.git gh pr merge 12 --auto -R $R" '*starts with an assignment (GIT_DIR=*docs/git-guideline/safety-boundary.md*'
+more "export GIT_DIR=/other/.git; gh pr merge 12 --auto -R $R" '*not the only command*`;`*docs/git-guideline/safety-boundary.md*'
 more ". ./env.sh; gh pr merge 12 --auto -R $R" '*not the only command*`;`*'
 more "gh repo set-default other/x && gh pr merge 12 --auto -R $R" '*not the only command*`&`*'
 more "gh pr merge 12 --auto -R $R || true" '*not the only command*'

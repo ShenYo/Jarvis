@@ -67,7 +67,7 @@ but that single command, it asks as for any merge. Retargeting a pull request wi
 --base` or the API asks too, because an armed auto-merge would follow it. The `gh api` checks read
 the request the way `gh` does: attached short options (`-fbase=dev`), `--input` bodies decoded as
 JSON (one that is not JSON asks), and percent-encoded paths. The owner's settings
-for this are in [`docs/git.md`](./git.md).
+for this are in [`docs/git-guideline/safety-boundary.md`](./git-guideline/safety-boundary.md).
 
 What this does not do. The hook reads the command it is given, not a script
 that command runs, and not a command a program builds at run time; in auto

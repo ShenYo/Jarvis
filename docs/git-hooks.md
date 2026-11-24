@@ -8,8 +8,10 @@
 commit-time and push-time checks. They are a guard against mistakes, not a
 server-side control: `core.hooksPath` is per-clone configuration that is never
 cloned, so a fresh clone of this repository runs none of them until someone
-sets it again. When a hook refuses, it points at [`docs/git.md`](./git.md),
-which holds this repository's Git rules.
+sets it again. When a hook refuses, it points at the rule it enforces, in
+[`git-commit.md`](./git-guideline/git-commit.md) or
+[`safety-boundary.md`](./git-guideline/safety-boundary.md) (index:
+[`docs/git.md`](./git.md)).
 
 | Hook | Refuses |
 | --- | --- |
