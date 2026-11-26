@@ -8,7 +8,7 @@
 
 這份文件適用於已經完成[新機器設定](./setup-new-machine.zh-TW.md)的機器。先找出符合你狀況的情境，再照它的步驟做。每個指令都在一般的終端機執行，不要在 Claude Code 或 Codex 裡用 `!` 執行。
 
-Jarvis 安裝的東西分成兩類。個人規則和每個 Skill 都是連結，`~/.Jarvis` 更新後就會跟著更新。Claude Code 和 Codex 的 guard 則是複製進去的，要重跑它的腳本才會更新。agent 身分的設定檔 `~/.Jarvis/config-local/agent-identity` 屬於這台機器，任何更新都不會動到它。
+Jarvis 安裝的東西分成兩類。個人規則和每個 Skill 都是連結，`~/.Jarvis` 更新後就會跟著更新。Claude Code、Codex 和 agy 的 guard 則是複製進去的，要重跑它的腳本才會更新。agent 身分的設定檔 `~/.Jarvis/config-local/agent-identity` 屬於這台機器，任何更新都不會動到它。
 
 ## 你是哪一種情境？
 
@@ -40,11 +40,12 @@ Jarvis 的 `main` 有變動後，每台機器都做一次。每一步重複執�
    ```
 
    檢查：最後一行以 `checks passed:` 開頭。
-3. 重跑兩個 guard 腳本。它們會把目前的 guard 複製進去，agent-identity 開關維持原狀：
+3. 重跑 guard 腳本。它們會把目前的 guard 複製進去，agent-identity 開關維持原狀：
 
    ```sh
    bash ~/.Jarvis/scripts/apply-claude-guard.sh
    bash ~/.Jarvis/scripts/apply-codex-guard.sh
+   bash ~/.Jarvis/scripts/apply-agy-guard.sh   # ~/.gemini/config 存在時
    ```
 
    檢查：Codex 那次的最後一行是 `trust: OK - Codex trusts the Jarvis guard entry …`。如果顯示 `UNTRUSTED` 或 `DISABLED`，代表 hook 的定義變了，請前往 [C](#c-更新後檢查失敗)。
@@ -97,7 +98,7 @@ bash ~/.Jarvis/scripts/doctor.sh
 
 - 第一行沒有 `behind`；
 - tag 是 [Releases](https://github.com/ShenYo/Jarvis/releases) 上最新的那一個；
-- `doctor.sh` 以 0 結束，也就是沒有印出任何 `PROBLEM` 或 `ERROR` 行。它會跑兩個 guard 的 `--check`、bridge 檢查和 identity 檢查，而且什麼都不修（identity 檢查的 SSH probe 可能一次性地把 `github.com` 加進 `~/.ssh/known_hosts`）。以 0 結束仍然允許有 `UNVERIFIED` 行：每一條都要讀。`codex-guard` 的 `UNVERIFIED` 代表讀不到 Codex 的 trust：`PATH` 上的 `python3` 沒有 `tomllib` 模組。`identity-codex` 的 `UNVERIFIED` 代表同樣缺少 `tomllib`（`config.toml` 裡的 identity 沒被檢查），或是警告說有東西沒檢查到，例如 ruleset 讀不到、網路連不上；`identity` 的 `UNVERIFIED` 是第二種。不論哪一種，都讓 `python3` 有 `tomllib` 模組，或處理那些警告，再跑一次。開關在一個 runtime 開著、另一個關著，或開關的 record 過期，是 `PROBLEM`，不是 `UNVERIFIED`。`live-callback` 那一行永遠是 `UNVERIFIED`，只有在新 session 裡實際試一次才能確認。`dup-skills` 或 `dup-codex` 的 `UNVERIFIED` 會列出被一個以上 provider 提供的 Skill 名稱（personal Skills、已啟用的 plugin、Anthropic 同步下來的 Skills；Codex 則是 `.system` Skills）：同一個名稱的兩份描述會多花 context，也可能讓錯的那份被觸發。留一份就好：停用該 plugin 或 bundle，或移除該 vendored Skill（透過經過 review 的 Git 變更，見 [Remove](./maintenance.md#remove)），手動刪掉它已經 dangling 的 bridge link（重跑 sync 只會回報，不會移除），再重跑 `sync-personal-skills.sh`；不要編輯 vendored Skill。這項檢查只讀磁碟上有的東西，不讀 project Skills、project 自己 settings 啟用的 plugin，也不讀 `~/.codex/plugins` 底下的 Codex plugin Skills。它會計入磁碟上的每個檔案：停用已同步的 plugin 或 bundle 可能仍留下檔案，所以那一行可能不會消失；請把它當作已知事項。`settings.json` 或 `installed_plugins.json` 不是 JSON（或缺少 `jq`）時，該行是 `UNVERIFIED`，並說明 plugin Skills 沒被檢查。`dup-agy` 的 `UNVERIFIED` 會列出 agy 同時原生從 `~/.agents/skills/` 與從 `~/.gemini/config/skills/` 或 `~/.gemini/config/plugins/*/skills/` 取得的 Skill 名稱。agy 不需要 Skill bridge，因此留一份就好（移除多餘的 link 或 plugin），或把已知重疊（例如 Orca 的 links）當作已知事項。
+- `doctor.sh` 以 0 結束，也就是沒有印出任何 `PROBLEM` 或 `ERROR` 行。它會跑各個 guard 的 `--check`、bridge 檢查和 identity 檢查，而且什麼都不修（identity 檢查的 SSH probe 可能一次性地把 `github.com` 加進 `~/.ssh/known_hosts`）。以 0 結束仍然允許有 `UNVERIFIED` 行：每一條都要讀。`codex-guard` 的 `UNVERIFIED` 代表讀不到 Codex 的 trust：`PATH` 上的 `python3` 沒有 `tomllib` 模組。`identity-codex` 的 `UNVERIFIED` 代表同樣缺少 `tomllib`（`config.toml` 裡的 identity 沒被檢查），或是警告說有東西沒檢查到，例如 ruleset 讀不到、網路連不上；`identity` 的 `UNVERIFIED` 是第二種。不論哪一種，都讓 `python3` 有 `tomllib` 模組，或處理那些警告，再跑一次。開關在一個 runtime 開著、另一個關著，或開關的 record 過期，是 `PROBLEM`，不是 `UNVERIFIED`。`live-callback` 那一行永遠是 `UNVERIFIED`，只有在新 session 裡實際試一次才能確認。`dup-skills` 或 `dup-codex` 的 `UNVERIFIED` 會列出被一個以上 provider 提供的 Skill 名稱（personal Skills、已啟用的 plugin、Anthropic 同步下來的 Skills；Codex 則是 `.system` Skills）：同一個名稱的兩份描述會多花 context，也可能讓錯的那份被觸發。留一份就好：停用該 plugin 或 bundle，或移除該 vendored Skill（透過經過 review 的 Git 變更，見 [Remove](./maintenance.md#remove)），手動刪掉它已經 dangling 的 bridge link（重跑 sync 只會回報，不會移除），再重跑 `sync-personal-skills.sh`；不要編輯 vendored Skill。這項檢查只讀磁碟上有的東西，不讀 project Skills、project 自己 settings 啟用的 plugin，也不讀 `~/.codex/plugins` 底下的 Codex plugin Skills。它會計入磁碟上的每個檔案：停用已同步的 plugin 或 bundle 可能仍留下檔案，所以那一行可能不會消失；請把它當作已知事項。`settings.json` 或 `installed_plugins.json` 不是 JSON（或缺少 `jq`）時，該行是 `UNVERIFIED`，並說明 plugin Skills 沒被檢查。`dup-agy` 的 `UNVERIFIED` 會列出 agy 同時原生從 `~/.agents/skills/` 與從 `~/.gemini/config/skills/` 或 `~/.gemini/config/plugins/*/skills/` 取得的 Skill 名稱。agy 不需要 Skill bridge，因此留一份就好（移除多餘的 link 或 plugin），或把已知重疊（例如 Orca 的 links）當作已知事項。
 
 否則請做 [A](#a-例行更新)。
 

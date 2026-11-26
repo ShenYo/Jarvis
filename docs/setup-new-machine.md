@@ -223,7 +223,7 @@ Check: both scripts exit 0 with `--check`, and `--trust` prints
 `trust: OK - Codex trusts the Jarvis guard entry` and exits 0.
 
 **Person-only:** trusting the hook in Codex's `/hooks`. `bootstrap.sh` applies
-both guards, then stops here until `--trust` succeeds.
+the guards (Claude Code and Codex before this stop, and agy after when `~/.gemini/config` exists), stopping here until `--trust` succeeds.
 
 Optional, and person-only: tell Claude Code's auto-mode classifier which repositories this
 machine trusts. Run `/auto-mode-setup` in Claude Code from inside the Jarvis

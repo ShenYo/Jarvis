@@ -5,7 +5,7 @@
 > 開關（打開後，沒有套用 identity 的 runtime 一律不能寫入 GitHub）。agent identity 本身見
 > `agent-identity.md`。
 
-The guard is one set of rules that refuses destructive Git and file operations in every project on this machine, in three forms: one for Claude Code, one for Codex, and one for agy. A third part, the agent-identity switch, makes the [agent identity](./agent-identity.md) mandatory for GitHub writes. To install them, follow [Setting up a new machine](./setup-new-machine.md).
+The guard is one set of rules that refuses destructive Git and file operations in every project on this machine, in three forms: one for Claude Code, one for Codex, and one for agy. A fourth part, the agent-identity switch, makes the [agent identity](./agent-identity.md) mandatory for GitHub writes. To install them, follow [Setting up a new machine](./setup-new-machine.md).
 
 ## Claude Code guard
 
