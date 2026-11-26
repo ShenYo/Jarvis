@@ -12,8 +12,9 @@
 #      record is missing or unreadable, settings.json is not JSON, or the backup
 #      path is taken, none of the guard is removed: every piece is reported as
 #      "left" and the run exits 1
-#   2  the bridge: ~/.claude/skills/<name>, ~/.claude/CLAUDE.md, and under
-#      $CODEX_HOME (default ~/.codex) skills/<name> and AGENTS.md, then ~/.agents
+#   2  the bridge: ~/.claude/skills/<name>, ~/.claude/CLAUDE.md, under
+#      $CODEX_HOME (default ~/.codex) skills/<name> and AGENTS.md,
+#      ~/.gemini/config/AGENTS.md, then ~/.agents
 #      -- each only when it is a link that resolves into this checkout
 #   3  the identity: apply-agent-identity.sh --unapply (and --unapply --codex),
 #      only for a runtime whose agent-identity.applied.json exists
@@ -264,6 +265,11 @@ if [ -d "$codex_home" ]; then
   bridge_link "$codex_home/AGENTS.md" "$here/.agents/AGENTS.md"
 else
   echo "no $codex_home: Codex bridge skipped"
+fi
+if [ -d "$HOME/.gemini/config" ]; then
+  bridge_link "$HOME/.gemini/config/AGENTS.md" "$here/.agents/AGENTS.md"
+else
+  echo "no $HOME/.gemini/config: agy instructions skipped"
 fi
 # Last: every other link resolves through ~/.agents, so it stays until they are judged. It also stays
 # when a skills directory could not be scanned or a link that is kept still goes through it: removing it

@@ -224,6 +224,82 @@ HOME="$h" CODEX_HOME="$h/.codex" bash "$script" --nonsense >"$root/chk-usage.log
 if [ "$code" = 2 ] && [ ! -e "$h/.claude" ]; then ok "an unknown argument exits 2 and writes nothing"
 else bad "an unknown argument exits 2 and writes nothing (exit $code)" "$root/chk-usage.log"; fi
 
+# --- agy (~/.gemini/config/AGENTS.md) ---------------------------------------
+# When ~/.gemini/config is absent, agy is skipped and the directory is not created.
+h=$(home agy-absent); run agy-absent
+if [ "$code" = 0 ] && [ ! -e "$h/.gemini" ] && grep -q '^agy: not installed' "$root/agy-absent.log"; then
+  ok "agy: skipped when ~/.gemini/config is absent"
+else
+  bad "agy: skipped when ~/.gemini/config is absent (exit $code)" "$root/agy-absent.log"
+fi
+
+# When ~/.gemini/config exists, AGENTS.md is linked to ../../.agents/AGENTS.md
+# and ~/.gemini/GEMINI.md is left untouched.
+h=$(home agy-clean)
+mkdir -p "$h/.gemini/config"
+: >"$h/.gemini/GEMINI.md"
+run agy-clean
+if [ "$code" = 0 ] && [ -L "$h/.gemini/config/AGENTS.md" ] \
+   && [ "$(readlink "$h/.gemini/config/AGENTS.md")" = "../../.agents/AGENTS.md" ] \
+   && [ -f "$h/.gemini/GEMINI.md" ] && [ ! -L "$h/.gemini/GEMINI.md" ] && [ ! -s "$h/.gemini/GEMINI.md" ]; then
+  ok "agy: creates ~/.gemini/config/AGENTS.md -> ../../.agents/AGENTS.md and leaves ~/.gemini/GEMINI.md untouched"
+else
+  bad "agy: creates ~/.gemini/config/AGENTS.md -> ../../.agents/AGENTS.md (exit $code)" "$root/agy-clean.log"
+fi
+
+# Second run changes nothing; --check passes and writes nothing.
+before=$(snap "$h"); run agy-clean; after=$(snap "$h")
+if [ "$code" = 0 ] && [ "$before" = "$after" ] && ! grep -q '^linked ' "$root/agy-clean.log"; then
+  ok "agy: second run changes nothing"
+else
+  bad "agy: second run changes nothing (exit $code)" "$root/agy-clean.log"
+fi
+before=$(snap "$h"); runc agy-clean; after=$(snap "$h")
+if [ "$code" = 0 ] && [ "$before" = "$after" ] && grep -q '^agy instructions:' "$root/agy-clean.log"; then
+  ok "agy: --check passes on a linked home and writes nothing"
+else
+  bad "agy: --check passes on a linked home (exit $code)" "$root/agy-clean.log"
+fi
+
+# Missing link: --check reports MISSING and writes nothing.
+rm "$h/.gemini/config/AGENTS.md"
+before=$(snap "$h"); runc agy-clean; after=$(snap "$h")
+if [ "$code" = 1 ] && [ "$before" = "$after" ] && grep -q '^MISSING  .*\.gemini/config/AGENTS\.md' "$root/agy-clean.log"; then
+  ok "agy: --check reports MISSING and writes nothing"
+else
+  bad "agy: --check reports MISSING and writes nothing (exit $code)" "$root/agy-clean.log"
+fi
+
+# Non-empty different file: reported as CONFLICT and left byte-identical by both normal run and --check.
+printf 'my own agy rules\n' >"$h/.gemini/config/AGENTS.md"
+before_sum=$(cksum <"$h/.gemini/config/AGENTS.md")
+run agy-clean; rc1=$code
+after_sum1=$(cksum <"$h/.gemini/config/AGENTS.md")
+runc agy-clean; rc2=$code
+after_sum2=$(cksum <"$h/.gemini/config/AGENTS.md")
+if [ "$rc1" = 1 ] && [ "$rc2" = 1 ] && [ "$before_sum" = "$after_sum1" ] && [ "$before_sum" = "$after_sum2" ] \
+   && [ ! -L "$h/.gemini/config/AGENTS.md" ] && grep -q '^CONFLICT .*\.gemini/config/AGENTS\.md' "$root/agy-clean.log"; then
+  ok "agy: non-empty different file reported as CONFLICT and left byte-identical"
+else
+  bad "agy: non-empty different file reported as CONFLICT (exit $rc1, $rc2)" "$root/agy-clean.log"
+fi
+
+# Dangling link: --check reports DANGLING without relinking; normal run relinks.
+rm "$h/.gemini/config/AGENTS.md"
+ln -s "$h/nowhere" "$h/.gemini/config/AGENTS.md"
+before=$(snap "$h"); runc agy-clean; after=$(snap "$h")
+if [ "$code" = 1 ] && [ "$before" = "$after" ] && grep -q '^DANGLING .*\.gemini/config/AGENTS\.md' "$root/agy-clean.log"; then
+  ok "agy: --check reports a dangling link and does not relink it"
+else
+  bad "agy: --check reports a dangling link (exit $code)" "$root/agy-clean.log"
+fi
+run agy-clean
+if [ "$code" = 0 ] && [ "$(readlink "$h/.gemini/config/AGENTS.md")" = "../../.agents/AGENTS.md" ]; then
+  ok "agy: normal run relinks a dangling link"
+else
+  bad "agy: normal run relinks a dangling link (exit $code)" "$root/agy-clean.log"
+fi
+
 echo
 if [ "$fails" -gt 0 ]; then echo "$fails of $total failed"; exit 1; fi
 echo "all $total passed"

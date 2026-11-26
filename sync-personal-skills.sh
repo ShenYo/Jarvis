@@ -11,6 +11,7 @@
 #   ~/.codex/skills/<name>         -> ../../.agents/skills/<name>
 #   ~/.claude/CLAUDE.md            -> ../.agents/AGENTS.md
 #   ~/.codex/AGENTS.md             -> ../.agents/AGENTS.md
+#   ~/.gemini/config/AGENTS.md     -> ../../.agents/AGENTS.md
 #
 # Skills may also be grouped one level deep — .agents/skills/git/commit/ links
 # as ~/.claude/skills/git-commit, from that skill's own `name:` field.
@@ -321,6 +322,22 @@ if [ -d "$CODEX_HOME_DIR" ]; then
 else
   echo ""
   echo "Codex: not installed ($CODEX_HOME_DIR absent) — skipped."
+fi
+
+# agy (Antigravity CLI 1.5.18 and Antigravity IDE 2.24.0) shares
+# ~/.gemini/config/ as its global customization root and loads
+# ~/.gemini/config/AGENTS.md (including through a symlink), without touching
+# ~/.gemini/GEMINI.md (which Gemini CLI shares). Only linked when
+# ~/.gemini/config exists.
+AGY_CONFIG_DIR="$HOME/.gemini/config"
+if [ -d "$AGY_CONFIG_DIR" ]; then
+  echo ""
+  if [ -f "$GLOBAL_RULES" ]; then
+    link_rules "$AGY_CONFIG_DIR/AGENTS.md" "agy"
+  fi
+else
+  echo ""
+  echo "agy: not installed ($AGY_CONFIG_DIR absent) — skipped."
 fi
 
 # A top-level directory that neither is a skill nor groups any is dead weight —

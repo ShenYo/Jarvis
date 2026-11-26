@@ -1,7 +1,7 @@
 # Architecture
 
 > **中文摘要**：這份文件說明 Jarvis 的結構：`.agents/` 是唯一的 canonical copy，`~/.agents`
-> 與 Claude Code／Codex 的 bridge 都是 symlink，所以沒有東西需要同步；也說明哪些內容由 CLI
+> 與 Claude Code／Codex／agy 的 bridge 都是 symlink，所以沒有東西需要同步；也說明哪些內容由 CLI
 > 管理、哪些由這裡自己維護，以及 bridge 能驗證與不能驗證的範圍。
 
 How the repository is laid out, how the symlinks reach the tools, which content belongs to a CLI, and what the bridge does and does not prove. To install it, follow [Setting up a new machine](./setup-new-machine.md); to change it day to day, [Maintenance](./maintenance.md).
@@ -31,8 +31,9 @@ are [`docs/git.md`](./git.md).
 at the root is for an agent working *in this repository*. The one in
 `.agents/` is for *every project*: [`.agents/AGENTS.md`](../.agents/AGENTS.md)
 holds personal rules, such as replying in the user's language, and the bridge
-links it as `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`, which Claude Code
-and Codex load in every session wherever it starts. It exists
+links it as `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and (when
+`~/.gemini/config` exists) `~/.gemini/config/AGENTS.md`, which Claude Code,
+Codex, and agy load in every session wherever it starts. It exists
 because a rule that lived only in project memory did not reach a session
 started anywhere else
 ([history](./history.md#personal-instructions-for-every-project)). Reference it reaches only for some tasks
@@ -83,6 +84,7 @@ ${CODEX_HOME:-$HOME/.codex}/skills/<name>
 ~/.claude/CLAUDE.md       -> ../.agents/AGENTS.md
 ${CODEX_HOME:-$HOME/.codex}/AGENTS.md
                            -> ../.agents/AGENTS.md
+~/.gemini/config/AGENTS.md -> ../../.agents/AGENTS.md
 ```
 
 Two hops, and the second one matters: `~/.claude/skills/<name>` resolves
@@ -183,5 +185,8 @@ have more than one provider here, and the losing Skill is invisible rather than
 lower-priority. If a project needs its own version of a name that exists here,
 rename one of them.
 
-Gemini has no bridge created by this script. Its discovery and runtime behavior
-are pending/unknown here; these documents make no Gemini enforcement claim.
+When `~/.gemini/config` exists, the bridge links `~/.gemini/config/AGENTS.md` to
+`../../.agents/AGENTS.md` for agy (verified on `agy` CLI 1.5.18 and Antigravity
+IDE 2.24.0). It does not touch `~/.gemini/GEMINI.md`, so Gemini CLI stays
+unaffected; Gemini CLI has no bridge created by this script and remains
+pending/unknown here. These documents make no Gemini CLI enforcement claim.

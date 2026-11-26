@@ -17,8 +17,10 @@ It is meant to be forked and adopted; the [fork checklist](./docs/fork-checklist
 says what to change. A fork is a one-time snapshot, and there is no promise that
 upstream merges cleanly into it.
 
-Support: macOS and Claude Code first. Codex and agy are pending. Linux and
-Windows are not supported.
+Support: macOS and Claude Code first; Codex has bridge, guard and identity; agy
+(CLI 1.5.18 and Antigravity IDE 2.24.0) has personal instructions, with guard
+and identity pending; Gemini CLI is out of scope. Linux and Windows are not
+supported.
 
 ## What it solves
 
@@ -39,7 +41,7 @@ Jarvis addresses four related scenarios:
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| **Jarvis** | This machine's canonical personal Skills, bridge script, and personal Skill provenance; the personal instructions linked as `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md`; the [Claude Code guard](./docs/guard.md#claude-code-guard) it copies into `~/.claude/settings.json` | A project's `.agents/`, project policy, or any other personal setting |
+| **Jarvis** | This machine's canonical personal Skills, bridge script, and personal Skill provenance; the personal instructions linked as `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md` and `~/.gemini/config/AGENTS.md`; the [Claude Code guard](./docs/guard.md#claude-code-guard) it copies into `~/.claude/settings.json` | A project's `.agents/`, project policy, or any other personal setting |
 | **Friday** | A reviewed shared baseline that a consumer may pin and adopt | This machine's personal catalog or a consumer's conflict resolution |
 | **Consumer project** | Its `.agents/` seed, overlays, integrations, tests, and recorded Friday provenance | Jarvis's personal Skills or Friday's vendor payload |
 
@@ -60,8 +62,10 @@ on this machine, and an agent working here may rely on it.
 In place:
 
 - **Personal instructions.** [`.agents/AGENTS.md`](./.agents/AGENTS.md) is
-  linked as `~/.claude/CLAUDE.md` for Claude Code and as `~/.codex/AGENTS.md`
-  for Codex, so both load it in every session. It is grouped by scope: *Base
+  linked as `~/.claude/CLAUDE.md` for Claude Code, `~/.codex/AGENTS.md` for
+  Codex, and `~/.gemini/config/AGENTS.md` for agy (CLI 1.5.18 and Antigravity
+  IDE 2.24.0, without touching `~/.gemini/GEMINI.md`), so each loads it in
+  every session. It is grouped by scope: *Base
   behavior* (reply language, written rules over auto memory, handing work to
   cheaper models), *Coding* (understand first, nothing speculative, surgical
   changes, verify, write decisions where they live) and *Contracts*

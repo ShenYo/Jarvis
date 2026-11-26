@@ -16,7 +16,9 @@ canonical copy。
 [fork 清單](./docs/fork-checklist.md)說明該改什麼。fork 是一次性的快照，不保證
 upstream 日後能乾淨地 merge 進來。
 
-支援範圍：優先支援 macOS 與 Claude Code。Codex 與 agy 尚待支援。不支援 Linux 與 Windows。
+支援範圍：優先支援 macOS 與 Claude Code；Codex 已具備 bridge、guard 與 identity；agy
+（CLI 1.5.18 與 Antigravity IDE 2.24.0）已具備個人指示，guard 與 identity 尚待實作；Gemini
+CLI 不在支援範圍內。不支援 Linux 與 Windows。
 
 ## 它解決的問題
 
@@ -36,7 +38,7 @@ Jarvis 處理四個相關情境：
 
 | Layer | Owns | Does not own |
 | --- | --- | --- |
-| **Jarvis** | 這台機器的 canonical 個人 Skills、bridge script，以及個人 Skill 的 provenance；以 `~/.claude/CLAUDE.md` 與 `~/.codex/AGENTS.md` 連結的個人指示；複製進 `~/.claude/settings.json` 的 [Claude Code guard](./docs/guard.md#claude-code-guard) | 某個專案的 `.agents/`、專案政策，或其他任何個人設定 |
+| **Jarvis** | 這台機器的 canonical 個人 Skills、bridge script，以及個人 Skill 的 provenance；以 `~/.claude/CLAUDE.md`、`~/.codex/AGENTS.md` 與 `~/.gemini/config/AGENTS.md` 連結的個人指示；複製進 `~/.claude/settings.json` 的 [Claude Code guard](./docs/guard.md#claude-code-guard) | 某個專案的 `.agents/`、專案政策，或其他任何個人設定 |
 | **Friday** | 一份經審查、consumer 可以 pin 並採用的共享 baseline | 這台機器的個人目錄，或某個 consumer 的衝突處理 |
 | **Consumer project** | 它自己的 `.agents/` seed、overlays、整合、測試，以及已記錄的 Friday provenance | Jarvis 的個人 Skills，或 Friday 的 vendor payload |
 
@@ -55,8 +57,9 @@ runner 或別人的筆電上沒有這個 repository 的副本。因此專案所�
 已就緒：
 
 - **個人指示。** [`.agents/AGENTS.md`](./.agents/AGENTS.md) 被連結成 Claude Code 的
-  `~/.claude/CLAUDE.md`，以及 Codex 的 `~/.codex/AGENTS.md`，所以兩者在每個 session
-  都會載入它。它依 scope 分組：*Base behavior*（回覆語系、書面規則優先於 auto
+  `~/.claude/CLAUDE.md`、Codex 的 `~/.codex/AGENTS.md`，以及 agy 的
+  `~/.gemini/config/AGENTS.md`（CLI 1.5.18 與 Antigravity IDE 2.24.0，不碰
+  `~/.gemini/GEMINI.md`），所以三者在每個 session 都會載入它。它依 scope 分組：*Base behavior*（回覆語系、書面規則優先於 auto
   memory、把工作交給較便宜的 model）、*Coding*（先理解、不做臆測、外科手術式的修改、
   驗證、把決定寫在它該在的地方）與 *Contracts*（英文文件加中文摘要、沒有自己規則的
   repository 的 Git 規則）。
