@@ -460,7 +460,7 @@ expect "a check that exits 2: the other checks still ran" bash -c "grep -Eq '^ok
 scratch="$root/lockrepo"
 mkdir -p "$scratch/scripts" "$scratch/.agents/skills"
 cp "$repo/scripts/doctor.sh" "$repo/scripts/check-skill-lock.sh" "$repo/scripts/apply-claude-guard.sh" \
-   "$repo/scripts/apply-codex-guard.sh" "$repo/scripts/apply-agent-identity.sh" "$scratch/scripts/"
+   "$repo/scripts/apply-codex-guard.sh" "$repo/scripts/apply-agy-guard.sh" "$repo/scripts/apply-agent-identity.sh" "$scratch/scripts/"
 cp "$repo/sync-personal-skills.sh" "$scratch/"
 mkdir -p "$scratch/.agents/claude-guard"; cp "$repo"/.agents/claude-guard/* "$scratch/.agents/claude-guard/"
 printf 'name: demo\n' >"$scratch/.agents/skills/SKILL.md" 2>/dev/null; rm -f "$scratch/.agents/skills/SKILL.md"
@@ -641,6 +641,7 @@ expect "usage: the two-argument case is refused for its count, not for an unknow
 fixture agy-ok
 mkdir -p "$h/.gemini/config"
 HOME="$h" CODEX_HOME="$cx" bash "$repo/sync-personal-skills.sh" >>"$root/agy-ok.setup" 2>&1
+HOME="$h" CODEX_HOME="$cx" bash "$repo/scripts/apply-agy-guard.sh" >>"$root/agy-ok.setup" 2>&1
 run agy-ok
 expect "agy link ok: doctor exits 0 and bridge is ok" bash -c "
   [ $code = 0 ] && [ -L '$h/.gemini/config/AGENTS.md' ] &&
@@ -674,6 +675,7 @@ expect "no ~/.gemini/config: dup-agy is skipped" grep -Eq '^skipped +dup-agy ' "
 fixture dup-agy-ok
 mkdir -p "$h/.gemini/config"
 HOME="$h" CODEX_HOME="$cx" bash "$repo/sync-personal-skills.sh" >>"$root/dup-agy-ok.setup" 2>&1
+HOME="$h" CODEX_HOME="$cx" bash "$repo/scripts/apply-agy-guard.sh" >>"$root/dup-agy-ok.setup" 2>&1
 run dup-agy-ok
 expect "agy ok: dup-agy is ok, exits 0, and says agy reads ~/.agents/skills/ natively" bash -c "
   [ $code = 0 ] && grep -Eq '^ok +dup-agy .*agy reads ~/.agents/skills/ natively' '$log' && ! grep -q '^PROBLEM' '$log'"
@@ -681,6 +683,7 @@ expect "agy ok: dup-agy is ok, exits 0, and says agy reads ~/.agents/skills/ nat
 fixture dup-agy-cfg
 mkdir -p "$h/.gemini/config/skills"
 HOME="$h" CODEX_HOME="$cx" bash "$repo/sync-personal-skills.sh" >>"$root/dup-agy-cfg.setup" 2>&1
+HOME="$h" CODEX_HOME="$cx" bash "$repo/scripts/apply-agy-guard.sh" >>"$root/dup-agy-cfg.setup" 2>&1
 ln -s "../../../.agents/skills/$skill_a" "$h/.gemini/config/skills/$skill_a"
 run dup-agy-cfg
 expect "agy duplicate in ~/.gemini/config/skills: dup-agy is UNVERIFIED (never PROBLEM), exit 0, names both providers" bash -c "
@@ -690,11 +693,38 @@ expect "agy duplicate in ~/.gemini/config/skills: dup-agy is UNVERIFIED (never P
 fixture dup-agy-plugin
 mkdir -p "$h/.gemini/config/plugins/demo-plug/skills/$skill_a"
 HOME="$h" CODEX_HOME="$cx" bash "$repo/sync-personal-skills.sh" >>"$root/dup-agy-plugin.setup" 2>&1
+HOME="$h" CODEX_HOME="$cx" bash "$repo/scripts/apply-agy-guard.sh" >>"$root/dup-agy-plugin.setup" 2>&1
 printf -- '---\nname: %s\ndescription: plugin copy\n---\n' "$skill_a" >"$h/.gemini/config/plugins/demo-plug/skills/$skill_a/SKILL.md"
 run dup-agy-plugin
 expect "agy duplicate in ~/.gemini/config/plugins/*/skills: dup-agy is UNVERIFIED (never PROBLEM), exit 0, names both providers" bash -c "
   [ $code = 0 ] && grep -Eq '^UNVERIFIED +dup-agy ' '$log' && ! grep -q '^PROBLEM' '$log' &&
   grep -Fq '| $skill_a: agy plugin demo-plug, personal (~/.agents/skills)' '$log'"
+
+# --- agy guard ----------------------------------------------------------------
+fixture agy-guard-none
+run agy-guard-none
+expect "no ~/.gemini/config: agy-guard is skipped" grep -Eq '^skipped +agy-guard ' "$log"
+
+fixture agy-guard-ok
+mkdir -p "$h/.gemini/config"
+HOME="$h" CODEX_HOME="$cx" bash "$repo/sync-personal-skills.sh" >>"$root/agy-guard-ok.setup" 2>&1
+HOME="$h" CODEX_HOME="$cx" bash "$repo/scripts/apply-agy-guard.sh" >>"$root/agy-guard-ok.setup" 2>&1
+run agy-guard-ok
+expect "agy guard ok: doctor reports ok agy-guard and exits 0" bash -c "
+  [ $code = 0 ] && grep -Eq '^ok +agy-guard ' '$log'"
+
+echo "# drift" >>"$h/.gemini/config/hooks/jarvis-guard.py"
+run agy-guard-drift
+expect "agy guard drifted: doctor reports PROBLEM agy-guard and exits 1" bash -c "
+  [ $code = 1 ] && grep -Eq '^PROBLEM +agy-guard ' '$log'"
+
+h="$root/agy-guard-partial"; cx="$h/.codex"
+mkdir -p "$h/.gemini/config"
+ln -s "$repo" "$h/.Jarvis"
+HOME="$h" bash "$repo/scripts/apply-agy-guard.sh" >>"$root/agy-guard-partial.setup" 2>&1
+run agy-guard-partial
+expect "agy-guard partial install: doctor recognizes it as installed (not 'not installed') and exits 1" bash -c "
+  [ $code = 1 ] && ! grep -q 'Jarvis is not installed' '$log' && grep -Eq '^PROBLEM +bridge ' '$log'"
 
 echo
 if [ "$fails" -gt 0 ]; then echo "$fails of $total failed"; exit 1; fi

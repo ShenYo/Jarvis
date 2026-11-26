@@ -12,6 +12,10 @@
 #      record is missing or unreadable, settings.json is not JSON, or the backup
 #      path is taken, none of the guard is removed: every piece is reported as
 #      "left" and the run exits 1
+#   1b agy guard ($HOME/.gemini/config): removes the "jarvis-guard" group from
+#      hooks.json (other groups such as herdr and orca-status stay), and removes
+#      hooks/jarvis-guard.py if byte-identical to this checkout's bash-guard.py
+#      and no hooks.json entry still names it
 #   2  the bridge: ~/.claude/skills/<name>, ~/.claude/CLAUDE.md, under
 #      $CODEX_HOME (default ~/.codex) skills/<name> and AGENTS.md,
 #      ~/.gemini/config/AGENTS.md, then ~/.agents
@@ -234,6 +238,70 @@ fi
 prev_b=''
 # (settings.json.agent-identity-backup is not listed: step 3's --unapply overwrites it.)
 for b in "$settings.guard-backup" "$real_settings.guard-backup" "$settings.uninstall-backup" "$backup"; do
+  [ "$b" = "$prev_b" ] && continue
+  prev_b=$b
+  if [ -e "$b" ] || [ -L "$b" ]; then left "$b" "backup kept; delete it yourself when you no longer need it"; fi
+done
+
+# --- 1b. agy guard ---------------------------------------------------------------
+agy_home="$HOME/.gemini/config"
+agy_hooks="$agy_home/hooks.json"
+agy_hook_dst="$agy_home/hooks/jarvis-guard.py"
+real_agy_hooks=$(follow "$agy_hooks")
+echo ""
+echo "== agy guard ($agy_home) =="
+agy_stop=0 agy_cur='' agy_new='' agy_edit=0 agy_sum=''
+agy_backup="$real_agy_hooks.uninstall-backup"
+if [ -e "$real_agy_hooks" ]; then
+  if jq -e 'type == "object"' "$real_agy_hooks" >/dev/null 2>&1; then
+    agy_cur=$(cat "$real_agy_hooks")
+    agy_sum=$(cksum <"$real_agy_hooks")
+    agy_new=$(jq 'del(."jarvis-guard")' <<<"$agy_cur")
+    [ "$(jq -S . <<<"$agy_cur")" = "$(jq -S . <<<"$agy_new")" ] || agy_edit=1
+    if [ "$agy_edit" = 1 ] && { [ -e "$agy_backup" ] || [ -L "$agy_backup" ]; }; then
+      printf 'PROBLEM  %s already exists; this run would overwrite it (or write through it). Move it away, then run this again. The agy guard is left in place.\n' "$agy_backup" >&2
+      fail=1; agy_stop=1
+    fi
+  else
+    printf 'PROBLEM  %s is not a JSON object; fix it by hand. The agy guard is left in place.\n' "$real_agy_hooks" >&2
+    fail=1; agy_stop=1
+  fi
+fi
+if [ "$agy_stop" = 0 ]; then
+  if [ "$agy_edit" = 1 ]; then
+    if [ "$act" = 1 ]; then
+      tmp=$(mktemp "$real_agy_hooks.XXXXXX")
+      jq . <<<"$agy_new" >"$tmp"
+      if [ "$(cksum <"$real_agy_hooks" 2>/dev/null || echo absent)" != "$agy_sum" ]; then
+        rm -f "$tmp"
+        printf 'PROBLEM  %s changed while this ran; nothing was written. Run it again. The agy guard is left in place.\n' "$real_agy_hooks" >&2
+        fail=1; agy_stop=1
+      else
+        cp -p "$real_agy_hooks" "$agy_backup"
+        mv "$tmp" "$real_agy_hooks"
+        printf 'edited   %s  (jarvis-guard group taken out; previous copy: %s)\n' "$real_agy_hooks" "$agy_backup"
+      fi
+    else
+      printf 'would edit  %s  (take out jarvis-guard group; every other group stays; previous copy would go to %s)\n' "$real_agy_hooks" "$agy_backup"
+    fi
+  else
+    echo "no jarvis-guard entry in $real_agy_hooks"
+  fi
+fi
+if [ "$agy_stop" = 0 ] && { [ -e "$agy_hook_dst" ] || [ -L "$agy_hook_dst" ]; }; then
+  if [ -n "$agy_new" ] && jq -e '[.. | strings | select(contains("hooks/jarvis-guard.py"))] | length > 0' <<<"$agy_new" >/dev/null 2>&1; then
+    left "$agy_hook_dst" "an entry in $real_agy_hooks still names it; removing it would break that entry"
+  elif [ -f "$agy_hook_dst" ] && [ ! -L "$agy_hook_dst" ] && cmp -s "$agy_hook_dst" "$here/.agents/claude-guard/bash-guard.py"; then
+    do_rm "$agy_hook_dst" "hook copied by apply-agy-guard.sh, identical to this checkout's bash-guard.py"
+  else
+    left "$agy_hook_dst" "not byte-identical to this checkout's bash-guard.py (edited, a link, or not copied by the installer); delete it by hand if you want it gone"
+  fi
+elif [ "$agy_stop" = 1 ]; then
+  [ ! -e "$real_agy_hooks" ] || left "$real_agy_hooks" "agy guard left whole, see PROBLEM above"
+  { [ ! -e "$agy_hook_dst" ] && [ ! -L "$agy_hook_dst" ]; } || left "$agy_hook_dst" "agy guard left whole, see PROBLEM above"
+fi
+prev_b=''
+for b in "$agy_hooks.guard-backup" "$real_agy_hooks.guard-backup" "$agy_hooks.uninstall-backup" "$agy_backup"; do
   [ "$b" = "$prev_b" ] && continue
   prev_b=$b
   if [ -e "$b" ] || [ -L "$b" ]; then left "$b" "backup kept; delete it yourself when you no longer need it"; fi
