@@ -169,15 +169,17 @@ writes anything, and shows the bridge's own lines. A missing or dangling link is
 not a stop: a normal run creates or replaces it.
 
 When Codex is installed, `${CODEX_HOME:-$HOME/.codex}/AGENTS.md` gets the same
-link and the same refusals, so both tools read one file and there is no copy to
-keep in step. Codex reads `AGENTS.override.md` in its home instead of
-`AGENTS.md` when that file is not empty, so the script stops while one exists
+link and the same refusals; Codex reads `AGENTS.override.md` in its home instead
+of `AGENTS.md` when that file is not empty, so the script stops while one exists
 (the bridge calls it `SHADOWED`). When `~/.gemini/config` exists,
 `~/.gemini/config/AGENTS.md` gets the same link and the same refusals for agy
-(without touching `~/.gemini/GEMINI.md`, which Gemini CLI shares). A Skill name
-that already exists under
-`~/.claude/skills` or `${CODEX_HOME:-$HOME/.codex}/skills` and is not a link to
-that Skill is refused the same way.
+(without touching `~/.gemini/GEMINI.md`, which Gemini CLI shares), so all three
+tools read one file and there is no copy to keep in step. Both `agy` CLI 1.5.18
+and Antigravity IDE 2.24.0 discover `~/.agents/skills/` natively through
+`~/.agents`, so the bridge creates no Skill links under
+`~/.gemini/config/skills/` (leaving Orca's links alone). A Skill name that
+already exists under `~/.claude/skills` or `${CODEX_HOME:-$HOME/.codex}/skills`
+and is not a link to that Skill is refused the same way.
 
 The script creates `~/.agents` if it is missing, ensures the Claude bridge
 directory exists, and creates or replaces a canonical-name entry only when it

@@ -12,6 +12,8 @@
 #   dup-skills      Skill names this machine offers Claude Code from more than one provider: personal
 #                   Skills, enabled plugins, and the Skills Anthropic syncs to ~/.claude (read from disk)
 #   dup-codex       the same for Codex: ~/.codex/skills and its .system Skills
+#   dup-agy         the same for agy: ~/.agents/skills (read natively), ~/.gemini/config/skills
+#                   and ~/.gemini/config/plugins/*/skills
 #   identity        apply-agent-identity.sh --check   optional; includes SSH and gh (network);
 #                   only "state: applied" is ok
 #   identity-codex  apply-agent-identity.sh --check --codex
@@ -299,6 +301,7 @@ fi
 # in a project's own settings are not read. Codex plugin Skills under ~/.codex/plugins are not read either, so
 # dup-codex says so in its ok text. Everything on disk counts: turning off a synced plugin or bundle may leave its
 # files on disk, so the line may not clear, and a person then reads it as known. A finding is UNVERIFIED, never PROBLEM.
+# Limitation: skills_in scans depth-1 <dir>/*/SKILL.md only; grouped Skills (.agents/skills/<group>/<name>/) are outside dup-agy's scope.
 skills_in() { # <provider> <dir>: one "<name><TAB><provider>" line per <dir>/*/SKILL.md
   local f n
   for f in "$2"/*/SKILL.md; do
@@ -364,6 +367,20 @@ if [ -d "$codex_home/skills" ]; then
   )
 else
   result skipped dup-codex "Codex is not set up ($codex_home/skills does not exist)"
+fi
+
+if [ -d "$HOME/.gemini/config" ]; then
+  report_dups dup-agy \
+    "agy reads ~/.agents/skills/ natively (no bridge needed); keep one copy: remove the extra link in ~/.gemini/config/skills/ or the agy plugin that offers it (never edit a vendored Skill), or read a known overlap such as Orca's links as known" \
+    "agy reads ~/.agents/skills/ natively; no bridge needed" < <(
+    skills_in "personal (~/.agents/skills)" "$HOME/.agents/skills"
+    skills_in "agy config (~/.gemini/config/skills)" "$HOME/.gemini/config/skills"
+    for d in "$HOME/.gemini/config/plugins"/*/; do
+      [ -d "${d}skills" ] && skills_in "agy plugin $(basename "$d")" "${d}skills"
+    done
+  )
+else
+  result skipped dup-agy "agy is not set up ($HOME/.gemini/config does not exist)"
 fi
 
 # The identity is optional only when nothing of it exists: no config file, no switch, no applied record.

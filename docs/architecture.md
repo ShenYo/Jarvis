@@ -187,6 +187,12 @@ rename one of them.
 
 When `~/.gemini/config` exists, the bridge links `~/.gemini/config/AGENTS.md` to
 `../../.agents/AGENTS.md` for agy (verified on `agy` CLI 1.5.18 and Antigravity
-IDE 2.24.0). It does not touch `~/.gemini/GEMINI.md`, so Gemini CLI stays
-unaffected; Gemini CLI has no bridge created by this script and remains
+IDE 2.24.0). Both `agy` CLI 1.5.18 and Antigravity IDE 2.24.0 discover
+`~/.agents/skills/` natively through `~/.agents`, so the bridge creates no Skill
+links under `~/.gemini/config/skills/` — adding them would only duplicate every
+Skill and collide with tool-owned links such as Orca's. `scripts/doctor.sh`
+reports duplicate Skill names across `~/.agents/skills/`,
+`~/.gemini/config/skills/` and `~/.gemini/config/plugins/*/skills/` as
+`UNVERIFIED`. The bridge does not touch `~/.gemini/GEMINI.md`, so Gemini CLI
+stays unaffected; Gemini CLI has no bridge created by this script and remains
 pending/unknown here. These documents make no Gemini CLI enforcement claim.

@@ -666,6 +666,36 @@ run agy-only
 expect "agy-only partial install: doctor recognizes it as installed (not 'not installed') and exits 1" bash -c "
   [ $code = 1 ] && ! grep -q 'Jarvis is not installed' '$log' && grep -Eq '^PROBLEM +bridge ' '$log'"
 
+# --- agy Skills native discovery and duplicates (dup-agy) --------------------
+fixture dup-agy-none
+run dup-agy-none
+expect "no ~/.gemini/config: dup-agy is skipped" grep -Eq '^skipped +dup-agy ' "$log"
+
+fixture dup-agy-ok
+mkdir -p "$h/.gemini/config"
+HOME="$h" CODEX_HOME="$cx" bash "$repo/sync-personal-skills.sh" >>"$root/dup-agy-ok.setup" 2>&1
+run dup-agy-ok
+expect "agy ok: dup-agy is ok, exits 0, and says agy reads ~/.agents/skills/ natively" bash -c "
+  [ $code = 0 ] && grep -Eq '^ok +dup-agy .*agy reads ~/.agents/skills/ natively' '$log' && ! grep -q '^PROBLEM' '$log'"
+
+fixture dup-agy-cfg
+mkdir -p "$h/.gemini/config/skills"
+HOME="$h" CODEX_HOME="$cx" bash "$repo/sync-personal-skills.sh" >>"$root/dup-agy-cfg.setup" 2>&1
+ln -s "../../../.agents/skills/$skill_a" "$h/.gemini/config/skills/$skill_a"
+run dup-agy-cfg
+expect "agy duplicate in ~/.gemini/config/skills: dup-agy is UNVERIFIED (never PROBLEM), exit 0, names both providers" bash -c "
+  [ $code = 0 ] && grep -Eq '^UNVERIFIED +dup-agy ' '$log' && ! grep -q '^PROBLEM' '$log' &&
+  grep -Fq '| $skill_a: agy config (~/.gemini/config/skills), personal (~/.agents/skills)' '$log'"
+
+fixture dup-agy-plugin
+mkdir -p "$h/.gemini/config/plugins/demo-plug/skills/$skill_a"
+HOME="$h" CODEX_HOME="$cx" bash "$repo/sync-personal-skills.sh" >>"$root/dup-agy-plugin.setup" 2>&1
+printf -- '---\nname: %s\ndescription: plugin copy\n---\n' "$skill_a" >"$h/.gemini/config/plugins/demo-plug/skills/$skill_a/SKILL.md"
+run dup-agy-plugin
+expect "agy duplicate in ~/.gemini/config/plugins/*/skills: dup-agy is UNVERIFIED (never PROBLEM), exit 0, names both providers" bash -c "
+  [ $code = 0 ] && grep -Eq '^UNVERIFIED +dup-agy ' '$log' && ! grep -q '^PROBLEM' '$log' &&
+  grep -Fq '| $skill_a: agy plugin demo-plug, personal (~/.agents/skills)' '$log'"
+
 echo
 if [ "$fails" -gt 0 ]; then echo "$fails of $total failed"; exit 1; fi
 echo "all $total passed"
