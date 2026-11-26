@@ -68,7 +68,7 @@ identity_file="${JARVIS_AGENT_IDENTITY_FILE:-$HOME/.Jarvis/config-local/agent-id
 #   the ~/.agents link (dangling or not; a real directory or file there is not ours), the guard's record,
 #   either identity record, the identity switch (its record, the environment, the settings env, the Codex
 #   hook's --require-identity), a guard hook copy in the Claude config directory, a settings.json hook
-#   command naming one, ~/.claude/CLAUDE.md or $CODEX_HOME/AGENTS.md as a link into a Jarvis checkout,
+#   command naming one, ~/.claude/CLAUDE.md, $CODEX_HOME/AGENTS.md or ~/.gemini/config/AGENTS.md as a link into a Jarvis checkout,
 #   and any link in ~/.claude/skills or $CODEX_HOME/skills that resolves, or dangles, into one.
 # The identity config file is the person's own and is not evidence. The link spelling alone counts only when
 # ~/.agents is absent or a link; with a real ~/.agents the link must resolve into a Jarvis checkout. Without jq the settings cannot be
@@ -99,6 +99,7 @@ done
 [ "${JARVIS_REQUIRE_AGENT_IDENTITY:-}" = 1 ] && installed=1
 jarvis_link "$HOME/.claude/CLAUDE.md" '*.agents/AGENTS.md' && installed=1
 jarvis_link "$codex_home/AGENTS.md" '*.agents/AGENTS.md' && installed=1
+jarvis_link "$HOME/.gemini/config/AGENTS.md" '*.agents/AGENTS.md' && installed=1
 if [ "$installed" = 0 ]; then
   for d in "$HOME/.claude/skills" "$codex_home/skills"; do
     [ -d "$d" ] || continue

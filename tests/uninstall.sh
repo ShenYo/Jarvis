@@ -360,5 +360,37 @@ mrun --remove
 { logg '^NOTE     the identity switch is on' && logg -- '--unrequire'; } &&
   ok "SF2 the --unrequire NOTE is printed when the switch record exists" || bad "SF2 NOTE" "$log"
 
+# --- agy instructions link (~/.gemini/config/AGENTS.md) ----------------------
+mini agy-own
+mkdir -p "$H/.gemini/config"
+: >"$H/.gemini/GEMINI.md"
+ln -s ../../.agents/AGENTS.md "$H/.gemini/config/AGENTS.md"
+mrun --dry-run
+{ [ "$rc" = 0 ] && [ -L "$H/.gemini/config/AGENTS.md" ] && logg "^would remove  $H/.gemini/config/AGENTS\.md"; } &&
+  ok "agy dry-run: reports would remove ~/.gemini/config/AGENTS.md without removing it" || bad "agy dry-run" "$log"
+mrun --remove
+{ [ "$rc" = 0 ] && [ ! -e "$H/.gemini/config/AGENTS.md" ] && [ ! -L "$H/.gemini/config/AGENTS.md" ] &&
+  [ -f "$H/.gemini/GEMINI.md" ] && [ ! -L "$H/.gemini/GEMINI.md" ] && [ ! -s "$H/.gemini/GEMINI.md" ] &&
+  logg "^removed  $H/.gemini/config/AGENTS\.md"; } &&
+  ok "agy remove: removes Jarvis link ~/.gemini/config/AGENTS.md and leaves ~/.gemini/GEMINI.md untouched" || bad "agy remove" "$log"
+
+mini agy-foreign
+mkdir -p "$H/.gemini/config" "$H/elsewhere"
+printf 'mine\n' >"$H/.gemini/config/AGENTS.md"
+mrun --remove
+{ [ "$rc" = 0 ] && [ -f "$H/.gemini/config/AGENTS.md" ] && [ "$(cat "$H/.gemini/config/AGENTS.md")" = mine ] &&
+  logg "^left     $H/.gemini/config/AGENTS\.md  (not a link"; } &&
+  ok "agy foreign real file: reported as left and kept" || bad "agy foreign real file" "$log"
+
+mini agy-extlink
+mkdir -p "$H/.gemini/config" "$H/elsewhere"
+printf 'other\n' >"$H/elsewhere/AGENTS.md"
+ln -s "$H/elsewhere/AGENTS.md" "$H/.gemini/config/AGENTS.md"
+mrun --remove
+{ [ "$rc" = 0 ] && [ -L "$H/.gemini/config/AGENTS.md" ] &&
+  [ "$(readlink "$H/.gemini/config/AGENTS.md")" = "$H/elsewhere/AGENTS.md" ] &&
+  logg "^left     $H/.gemini/config/AGENTS\.md  (points at"; } &&
+  ok "agy foreign symlink: reported as left and kept" || bad "agy foreign symlink" "$log"
+
 echo
 if [ "$fails" = 0 ]; then echo "uninstall: all passed"; else echo "uninstall: $fails FAILED"; exit 1; fi

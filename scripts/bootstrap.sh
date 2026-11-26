@@ -100,11 +100,13 @@ ok "Claude Code home exists ($claude_home)"
 
 # What the bridge will not replace is the bridge's own verdict, asked before anything is written:
 # sync-personal-skills.sh --check changes nothing, and a normal run fails on the same CONFLICT and
-# SHADOWED conditions (a real file or a live link elsewhere at ~/.claude/CLAUDE.md or
-# ${CODEX_HOME}/AGENTS.md, a non-empty AGENTS.override.md, an existing non-matching entry under a
-# skills directory). MISSING and DANGLING are not stops: a normal run repairs them.
+# SHADOWED conditions (a real file or a live link elsewhere at ~/.claude/CLAUDE.md,
+# ${CODEX_HOME}/AGENTS.md or ~/.gemini/config/AGENTS.md, a non-empty AGENTS.override.md, an existing
+# non-matching entry under a skills directory). MISSING and DANGLING are not stops: a normal run
+# repairs them.
 # Without ~/.agents, --check ends at once on that one, before it looks at anything else, so it is
-# run in a stand-in HOME that has ~/.agents and links to the real ~/.Jarvis, ~/.claude and ~/.codex.
+# run in a stand-in HOME that has ~/.agents and links to the real ~/.Jarvis, ~/.claude, ~/.codex
+# and ~/.gemini.
 bridge="$here/sync-personal-skills.sh"
 if [ -e "$HOME/.agents" ] || [ -L "$HOME/.agents" ]; then
   bridge_out=$(bash "$bridge" --check 2>&1 </dev/null); bridge_rc=$?
@@ -112,7 +114,7 @@ else
   fake=$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-home.XXXXXX") || fail "could not make a temporary directory"
   trap 'rm -rf "$fake"' EXIT; trap 'exit 130' INT TERM
   ln -s "$HOME/.Jarvis" "$fake/.Jarvis"; ln -s .Jarvis/.agents "$fake/.agents"
-  for d in .claude .codex; do [ ! -e "$HOME/$d" ] || ln -s "$HOME/$d" "$fake/$d"; done
+  for d in .claude .codex .gemini; do [ ! -e "$HOME/$d" ] || ln -s "$HOME/$d" "$fake/$d"; done
   bridge_out=$(HOME="$fake" bash "$bridge" --check 2>&1 </dev/null); bridge_rc=$?
   rm -rf "$fake"; trap - EXIT INT TERM
   bridge_out=${bridge_out//"$fake"/$HOME}

@@ -637,6 +637,35 @@ HOME="$h" CODEX_HOME="$cx" bash "$doctor" --help >"$log.3" 2>&1; c3=$?
 expect "usage: an unknown argument exits 2, an empty plus an extra argument exits 2, --help exits 0" test "$c1$c2$c3" = 220
 expect "usage: the two-argument case is refused for its count, not for an unknown flag" grep -q '^Usage:' "$log.2"
 
+# --- agy instructions link ---------------------------------------------------
+fixture agy-ok
+mkdir -p "$h/.gemini/config"
+HOME="$h" CODEX_HOME="$cx" bash "$repo/sync-personal-skills.sh" >>"$root/agy-ok.setup" 2>&1
+run agy-ok
+expect "agy link ok: doctor exits 0 and bridge is ok" bash -c "
+  [ $code = 0 ] && [ -L '$h/.gemini/config/AGENTS.md' ] &&
+  [ \"\$(readlink '$h/.gemini/config/AGENTS.md')\" = '../../.agents/AGENTS.md' ] &&
+  grep -Eq '^ok +bridge ' '$log'"
+
+rm "$h/.gemini/config/AGENTS.md"
+run agy-missing
+expect "agy link missing: doctor exits 1 and reports MISSING for ~/.gemini/config/AGENTS.md" bash -c "
+  [ $code = 1 ] && grep -Eq '^PROBLEM +bridge ' '$log' && grep -q 'MISSING  .*\.gemini/config/AGENTS\.md' '$log'"
+
+printf 'custom agy rules\n' >"$h/.gemini/config/AGENTS.md"
+run agy-conflict
+expect "agy link conflict: doctor exits 1 and reports CONFLICT for ~/.gemini/config/AGENTS.md" bash -c "
+  [ $code = 1 ] && grep -Eq '^PROBLEM +bridge ' '$log' && grep -q 'CONFLICT .*\.gemini/config/AGENTS\.md' '$log'"
+
+# Partial install: only ~/.gemini/config/AGENTS.md exists (no ~/.agents, no Claude/Codex).
+h="$root/agy-only"; cx="$h/.codex"
+mkdir -p "$h/.gemini/config"
+ln -s "$repo" "$h/.Jarvis"
+ln -s ../../.agents/AGENTS.md "$h/.gemini/config/AGENTS.md"
+run agy-only
+expect "agy-only partial install: doctor recognizes it as installed (not 'not installed') and exits 1" bash -c "
+  [ $code = 1 ] && ! grep -q 'Jarvis is not installed' '$log' && grep -Eq '^PROBLEM +bridge ' '$log'"
+
 echo
 if [ "$fails" -gt 0 ]; then echo "$fails of $total failed"; exit 1; fi
 echo "all $total passed"

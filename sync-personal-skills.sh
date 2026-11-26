@@ -11,6 +11,7 @@
 #   ~/.codex/skills/<name>         -> ../../.agents/skills/<name>
 #   ~/.claude/CLAUDE.md            -> ../.agents/AGENTS.md
 #   ~/.codex/AGENTS.md             -> ../.agents/AGENTS.md
+#   ~/.gemini/config/AGENTS.md     -> ../../.agents/AGENTS.md
 #
 # Skills may also be grouped one level deep — .agents/skills/git/commit/ links
 # as ~/.claude/skills/git-commit, from that skill's own `name:` field.
@@ -223,7 +224,8 @@ bridge "$HOME/.claude/skills" "Claude Code"
 # memory, which only loads for sessions started in that project. The language
 # rule lived only in two projects' memory, so a session started anywhere else
 # never saw it and replied in English. Codex does the same with
-# $CODEX_HOME/AGENTS.md, so it gets the same link, below.
+# $CODEX_HOME/AGENTS.md and agy with ~/.gemini/config/AGENTS.md, so both get
+# the same link, below.
 #
 # The content lives here, versioned, and each tool's file is a link to it
 # through ~/.agents, the same stable address the skill links use: one file, no
@@ -321,6 +323,22 @@ if [ -d "$CODEX_HOME_DIR" ]; then
 else
   echo ""
   echo "Codex: not installed ($CODEX_HOME_DIR absent) — skipped."
+fi
+
+# agy (Antigravity CLI 1.5.18 and Antigravity IDE 2.24.0) shares
+# ~/.gemini/config/ as its global customization root and loads
+# ~/.gemini/config/AGENTS.md (including through a symlink), without touching
+# ~/.gemini/GEMINI.md (which Gemini CLI shares). Only linked when
+# ~/.gemini/config exists.
+AGY_CONFIG_DIR="$HOME/.gemini/config"
+if [ -d "$AGY_CONFIG_DIR" ]; then
+  echo ""
+  if [ -f "$GLOBAL_RULES" ]; then
+    link_rules "$AGY_CONFIG_DIR/AGENTS.md" "agy"
+  fi
+else
+  echo ""
+  echo "agy: not installed ($AGY_CONFIG_DIR absent) — skipped."
 fi
 
 # A top-level directory that neither is a skill nor groups any is dead weight —
