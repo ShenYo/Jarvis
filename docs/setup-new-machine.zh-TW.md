@@ -143,12 +143,15 @@ Claude/Codex bridge 目錄。
 停下來，並原樣列出 bridge 自己的那些行。缺失或 dangling 的 link 不是 stop：正常執行會建立或替換它。
 
 安裝了 Codex 時，`${CODEX_HOME:-$HOME/.codex}/AGENTS.md` 也會得到同樣的 link 與同樣
-的拒絕規則，所以兩個工具讀的是同一份檔案，沒有需要同步的副本。Codex 的 home 裡若有
-非空的 `AGENTS.override.md`，Codex 會改讀它而不讀 `AGENTS.md`，所以只要它存在，腳本
-就會停下來（bridge 稱之為 `SHADOWED`）。當 `~/.gemini/config` 存在時，agy 的
-`~/.gemini/config/AGENTS.md` 也會得到同樣的 link 與同樣的拒絕規則（不碰 Gemini CLI
-共用的 `~/.gemini/GEMINI.md`）。`~/.claude/skills` 或 `${CODEX_HOME:-$HOME/.codex}/skills`
-底下若已有同名、但不是指向該 Skill 的 link 的 entry，也以同樣方式拒絕。
+的拒絕規則；Codex 的 home 裡若有非空的 `AGENTS.override.md`，Codex 會改讀它而不讀
+`AGENTS.md`，所以只要它存在，腳本就會停下來（bridge 稱之為 `SHADOWED`）。當
+`~/.gemini/config` 存在時，agy 的 `~/.gemini/config/AGENTS.md` 也會得到同樣的 link 與
+同樣的拒絕規則（不碰 Gemini CLI 共用的 `~/.gemini/GEMINI.md`），所以三個工具讀的是同
+一份檔案，沒有需要同步的副本。`agy` CLI 1.5.18 與 Antigravity IDE 2.24.0 皆透過
+`~/.agents` 原生探索 `~/.agents/skills/`，因此 bridge 不會在 `~/.gemini/config/skills/`
+建立 Skill links（保留 Orca 的 links 不動）。`~/.claude/skills` 或
+`${CODEX_HOME:-$HOME/.codex}/skills` 底下若已有同名、但不是指向該 Skill 的 link 的
+entry，也以同樣方式拒絕。
 
 這支腳本會在 `~/.agents` 不存在時建立它、確保 Claude bridge 目錄存在，並且只
 在某個 canonical-name entry 缺失或 dangling 時才建立或替換它。當

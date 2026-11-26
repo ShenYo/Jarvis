@@ -18,8 +18,9 @@ says what to change. A fork is a one-time snapshot, and there is no promise that
 upstream merges cleanly into it.
 
 Support: macOS and Claude Code first. Codex is pending; agy (CLI 1.5.18 and
-Antigravity IDE 2.24.0) has personal instructions, with guard and identity
-pending; Gemini CLI is out of scope. Linux and Windows are not supported.
+Antigravity IDE 2.24.0) has personal instructions and native Skills discovery
+(`~/.agents/skills/`), with guard and identity pending; Gemini CLI is out of
+scope. Linux and Windows are not supported.
 
 ## What it solves
 
@@ -118,7 +119,10 @@ The `skills` CLI writes the canonical copy and the lock entry but does not
 create the bridge, so a Skill it installs stays invisible to Claude Code and
 Codex until [`sync-personal-skills.sh`](./sync-personal-skills.sh) runs:
 install with the CLI, then bridge
-([history](./docs/history.md#inventory-and-unreachable-skills)). A real directory rather than
+([history](./docs/history.md#inventory-and-unreachable-skills)). `agy` (CLI
+1.5.18 and Antigravity IDE 2.24.0) discovers `~/.agents/skills/` natively
+through `~/.agents`, so it needs no Skill bridge under `~/.gemini/config/skills/`
+(which leaves Orca's links there untouched). A real directory rather than
 a symlink in the Claude bridge directory belongs to another tool, and the
 bridge script deliberately leaves it alone.
 

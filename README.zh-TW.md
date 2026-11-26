@@ -17,8 +17,8 @@ canonical copy。
 upstream 日後能乾淨地 merge 進來。
 
 支援範圍：優先支援 macOS 與 Claude Code。Codex 尚待支援；agy（CLI 1.5.18 與
-Antigravity IDE 2.24.0）已具備個人指示，guard 與 identity 尚待實作；Gemini CLI 不在
-支援範圍內。不支援 Linux 與 Windows。
+Antigravity IDE 2.24.0）已具備個人指示與原生 Skills 探索（`~/.agents/skills/`），
+guard 與 identity 尚待實作；Gemini CLI 不在支援範圍內。不支援 Linux 與 Windows。
 
 ## 它解決的問題
 
@@ -103,8 +103,10 @@ canonical Skill 都是 CLI-managed，而且全部在兩個工具中都可被存�
 `skills` CLI 會寫入 canonical 副本與 lock entry，但不會建立 bridge，因此它安裝的
 Skill 在 [`sync-personal-skills.sh`](./sync-personal-skills.sh) 執行之前，對 Claude
 Code 與 Codex 都是看不見的：先用 CLI 安裝，再做 bridge
-（[歷史](./docs/history.md#inventory-and-unreachable-skills)）。Claude bridge 目錄中若有真實目錄而非
-symlink，它屬於其他工具，bridge 腳本刻意不去動它。
+（[歷史](./docs/history.md#inventory-and-unreachable-skills)）。`agy`（CLI 1.5.18 與
+Antigravity IDE 2.24.0）透過 `~/.agents` 原生探索 `~/.agents/skills/`，因此不需要在
+`~/.gemini/config/skills/` 建立 Skill bridge（也不會碰 Orca 在該目錄的 links）。Claude
+bridge 目錄中若有真實目錄而非 symlink，它屬於其他工具，bridge 腳本刻意不去動它。
 
 這些數字是點算的結果，不是快取；請重新點算而不要直接相信：
 

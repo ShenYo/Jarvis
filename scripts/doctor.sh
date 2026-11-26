@@ -12,6 +12,8 @@
 #   dup-skills      Skill names this machine offers Claude Code from more than one provider: personal
 #                   Skills, enabled plugins, and the Skills Anthropic syncs to ~/.claude (read from disk)
 #   dup-codex       the same for Codex: ~/.codex/skills and its .system Skills
+#   dup-agy         the same for agy: ~/.agents/skills (read natively), ~/.gemini/config/skills
+#                   and ~/.gemini/config/plugins/*/skills
 #   identity        apply-agent-identity.sh --check   optional; includes SSH and gh (network);
 #                   only "state: applied" is ok
 #   identity-codex  apply-agent-identity.sh --check --codex
@@ -364,6 +366,20 @@ if [ -d "$codex_home/skills" ]; then
   )
 else
   result skipped dup-codex "Codex is not set up ($codex_home/skills does not exist)"
+fi
+
+if [ -d "$HOME/.gemini/config" ]; then
+  report_dups dup-agy \
+    "agy reads ~/.agents/skills/ natively (no bridge needed); keep one copy or read known overlaps (e.g. Orca links in ~/.gemini/config/skills/ or installed plugins) as known" \
+    "agy reads ~/.agents/skills/ natively; no bridge needed" < <(
+    skills_in "personal (~/.agents/skills)" "$HOME/.agents/skills"
+    skills_in "agy config (~/.gemini/config/skills)" "$HOME/.gemini/config/skills"
+    for d in "$HOME/.gemini/config/plugins"/*/; do
+      [ -d "${d}skills" ] && skills_in "agy plugin $(basename "$d")" "${d}skills"
+    done
+  )
+else
+  result skipped dup-agy "agy is not set up ($HOME/.gemini/config does not exist)"
 fi
 
 # The identity is optional only when nothing of it exists: no config file, no switch, no applied record.
