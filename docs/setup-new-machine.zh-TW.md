@@ -176,6 +176,7 @@ Stage 2。
 ```sh
 bash ~/.Jarvis/scripts/apply-claude-guard.sh
 bash ~/.Jarvis/scripts/apply-codex-guard.sh
+bash ~/.Jarvis/scripts/apply-agy-guard.sh   # ~/.gemini/config 存在時
 ```
 
 每支腳本都把自己的檔案複製進 `~/.claude` 或 `~/.codex`（有設 `$CODEX_HOME` 就用它），並把被取代的內容

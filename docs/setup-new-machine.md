@@ -204,6 +204,7 @@ Apply the guards: `bash ~/.Jarvis/scripts/apply-claude-guard.sh` and
 ```sh
 bash ~/.Jarvis/scripts/apply-claude-guard.sh
 bash ~/.Jarvis/scripts/apply-codex-guard.sh
+bash ~/.Jarvis/scripts/apply-agy-guard.sh   # when ~/.gemini/config exists
 ```
 
 Each script copies its files into `~/.claude` or `~/.codex` (`$CODEX_HOME` if

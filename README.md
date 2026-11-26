@@ -99,7 +99,7 @@ In place:
 
 Pending:
 
-- Guard for agy (CLI 1.5.18 and Antigravity IDE 2.24.0).
+- Guard for agy (CLI 1.5.18 and Antigravity IDE 2.24.0): [`scripts/apply-agy-guard.sh`](./scripts/apply-agy-guard.sh) added; live probe checklist awaits owner verification.
 - Agent identity for agy: [#16](https://github.com/ShenYo/Jarvis/issues/16).
 - Codex Skill Phase B as a whole remains **UNVERIFIED**; do not infer
   completion from individual probes or bridge entries.

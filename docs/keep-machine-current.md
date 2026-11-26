@@ -157,7 +157,7 @@ This machine is current when all three hold:
   `UNVERIFIED` and says plugin Skills went unchecked. A `dup-agy` `UNVERIFIED`
   lists Skill names agy gets both natively from `~/.agents/skills/` and from
   `~/.gemini/config/skills/` or `~/.gemini/config/plugins/*/skills/`. agy needs
-  no bridge, so keep one copy (remove the extra link or plugin), or read a known
+  no Skill bridge, so keep one copy (remove the extra link or plugin), or read a known
   overlap, such as Orca's links, as known.
 
 Otherwise do [A](#a-routine-update).
