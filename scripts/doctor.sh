@@ -9,6 +9,7 @@
 #                   and in the working tree (git status of .agents/skills is empty)
 #   claude-guard    apply-claude-guard.sh --check     the installed guard is the repo's
 #   codex-guard     apply-codex-guard.sh --check      same for Codex, and Codex trusts it
+#   agy-guard       apply-agy-guard.sh --check        same for agy
 #   dup-skills      Skill names this machine offers Claude Code from more than one provider: personal
 #                   Skills, enabled plugins, and the Skills Anthropic syncs to ~/.claude (read from disk)
 #   dup-codex       the same for Codex: ~/.codex/skills and its .system Skills
@@ -56,7 +57,7 @@ esac
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd) || exit 2
 for f in sync-personal-skills.sh scripts/check-skill-lock.sh scripts/apply-claude-guard.sh \
-         scripts/apply-codex-guard.sh scripts/apply-agent-identity.sh; do
+         scripts/apply-codex-guard.sh scripts/apply-agy-guard.sh scripts/apply-agent-identity.sh; do
   [ -f "$here/$f" ] || { echo "doctor: $here/$f is missing" >&2; exit 2; }
 done
 
@@ -94,7 +95,8 @@ for p in "$claude_home/claude-guard.applied.json" "$claude_home/agent-identity.a
          "$codex_home/agent-identity.applied.json" "$claude_home/agent-identity.require.json" \
          "$HOME/.claude/agent-identity.require.json" \
          "$claude_home/hooks/claude-guard.py" "$claude_home/hooks/jarvis-session-notes.py" \
-         "$claude_home/hooks/jarvis-shell-syntax.py"; do
+         "$claude_home/hooks/jarvis-shell-syntax.py" \
+         "$HOME/.gemini/config/hooks/jarvis-guard.py"; do
   { [ -e "$p" ] || [ -L "$p" ]; } && installed=1
 done
 [ -L "$HOME/.agents" ] && installed=1
@@ -123,6 +125,9 @@ if [ "$installed" = 0 ] && [ -e "$codex_home/hooks.json" ] && [ "$(jq -r '
             | $i != null and (($w[$i + 1:]) | index("--require-identity") != null)) then "on"
       else "off" end' "$codex_home/hooks.json" 2>/dev/null)" = on ]; then
   installed=1
+fi
+if [ "$installed" = 0 ] && [ -e "$HOME/.gemini/config/hooks.json" ]; then
+  jq -e '."jarvis-guard" != null' "$HOME/.gemini/config/hooks.json" >/dev/null 2>&1 && installed=1
 fi
 if [ "$installed" = 0 ]; then
   echo "doctor: Jarvis is not installed on this machine (no ~/.agents link, guard, bridge link, hook copy or identity record). Next: see docs/setup-new-machine.md"
@@ -294,6 +299,14 @@ else
   result skipped codex-guard "Codex is not set up ($codex_home does not exist)"
 fi
 
+if [ -d "$HOME/.gemini/config" ]; then
+  check agy-guard "the installed guard is the repository's" \
+    "bash $here/scripts/apply-agy-guard.sh" plain \
+    bash "$here/scripts/apply-agy-guard.sh" --check
+else
+  result skipped agy-guard "agy is not set up ($HOME/.gemini/config does not exist)"
+fi
+
 # A Skill name offered by two providers costs context twice and lets the wrong copy trigger. The name is the
 # `name:` of the SKILL.md frontmatter, else its directory name. Only what is on disk is read: personal Skills,
 # the plugins enabled in the user settings.json (every installed version of one plugin counts once), and the
@@ -301,7 +314,7 @@ fi
 # in a project's own settings are not read. Codex plugin Skills under ~/.codex/plugins are not read either, so
 # dup-codex says so in its ok text. Everything on disk counts: turning off a synced plugin or bundle may leave its
 # files on disk, so the line may not clear, and a person then reads it as known. A finding is UNVERIFIED, never PROBLEM.
-# Limitation: skills_in scans depth-1 <dir>/*/SKILL.md only; grouped Skills (.agents/skills/<group>/<name>/) are outside dup-agy's scope.
+# Limitation: skills_in reads depth-1 <dir>/*/SKILL.md only; deeper layouts are not scanned by any dup-* check.
 skills_in() { # <provider> <dir>: one "<name><TAB><provider>" line per <dir>/*/SKILL.md
   local f n
   for f in "$2"/*/SKILL.md; do
@@ -371,8 +384,8 @@ fi
 
 if [ -d "$HOME/.gemini/config" ]; then
   report_dups dup-agy \
-    "agy reads ~/.agents/skills/ natively (no bridge needed); keep one copy: remove the extra link in ~/.gemini/config/skills/ or the agy plugin that offers it (never edit a vendored Skill), or read a known overlap such as Orca's links as known" \
-    "agy reads ~/.agents/skills/ natively; no bridge needed" < <(
+    "agy reads ~/.agents/skills/ natively (no Skill bridge needed); keep one copy: remove the extra link in ~/.gemini/config/skills/ or the agy plugin that offers it (never edit a vendored Skill), or read a known overlap such as Orca's links as known" \
+    "agy reads ~/.agents/skills/ natively; no Skill bridge needed" < <(
     skills_in "personal (~/.agents/skills)" "$HOME/.agents/skills"
     skills_in "agy config (~/.gemini/config/skills)" "$HOME/.gemini/config/skills"
     for d in "$HOME/.gemini/config/plugins"/*/; do

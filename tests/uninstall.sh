@@ -392,5 +392,40 @@ mrun --remove
   logg "^left     $H/.gemini/config/AGENTS\.md  (points at"; } &&
   ok "agy foreign symlink: reported as left and kept" || bad "agy foreign symlink" "$log"
 
+# --- agy guard (~/.gemini/config/hooks.json, hooks/jarvis-guard.py) -----------
+mini agy-guard-own
+mkdir -p "$H/.gemini/config"
+cat >"$H/.gemini/config/hooks.json" <<'EOF'
+{
+  "herdr": {"PreInvocation": [{"command": "echo herdr", "timeout": 10, "type": "command"}]},
+  "orca-status": {"PreToolUse": [{"matcher": "*", "hooks": [{"type": "command", "command": "echo orca", "timeout": 10}]}]}
+}
+EOF
+sbx bash "$repo/scripts/apply-agy-guard.sh" >>"$setup" 2>&1 || { echo "FAIL agy guard install"; exit 1; }
+mrun --dry-run
+{ [ "$rc" = 0 ] && [ -f "$H/.gemini/config/hooks/jarvis-guard.py" ] &&
+  jq -e '."jarvis-guard" != null' "$H/.gemini/config/hooks.json" >/dev/null &&
+  logg "^would edit  $H/.gemini/config/hooks\.json" &&
+  logg "^would remove  $H/.gemini/config/hooks/jarvis-guard\.py"; } &&
+  ok "agy guard dry-run: reports would edit hooks.json and would remove jarvis-guard.py without changing them" || bad "agy guard dry-run" "$log"
+mrun --remove
+{ [ "$rc" = 0 ] && [ ! -e "$H/.gemini/config/hooks/jarvis-guard.py" ] &&
+  jq -e '."jarvis-guard" == null and .herdr != null and ."orca-status" != null' "$H/.gemini/config/hooks.json" >/dev/null &&
+  logg "^edited   $H/.gemini/config/hooks\.json" &&
+  logg "^removed  $H/.gemini/config/hooks/jarvis-guard\.py" &&
+  logg "^left     $H/.gemini/config/hooks\.json\.guard-backup" &&
+  logg "^left     $H/.gemini/config/hooks\.json\.uninstall-backup"; } &&
+  ok "agy guard remove: takes out jarvis-guard and jarvis-guard.py, keeps herdr/orca-status and backups" || bad "agy guard remove" "$log"
+
+mini agy-guard-edited
+mkdir -p "$H/.gemini/config"
+sbx bash "$repo/scripts/apply-agy-guard.sh" >>"$setup" 2>&1
+echo "# edited" >>"$H/.gemini/config/hooks/jarvis-guard.py"
+mrun --remove
+{ [ "$rc" = 0 ] && [ -f "$H/.gemini/config/hooks/jarvis-guard.py" ] &&
+  jq -e '."jarvis-guard" == null' "$H/.gemini/config/hooks.json" >/dev/null &&
+  logg "^left     $H/.gemini/config/hooks/jarvis-guard\.py  (not byte-identical"; } &&
+  ok "agy guard edited hook: reported as left and kept" || bad "agy guard edited hook" "$log"
+
 echo
 if [ "$fails" = 0 ]; then echo "uninstall: all passed"; else echo "uninstall: $fails FAILED"; exit 1; fi

@@ -158,13 +158,30 @@ expect "nothing was written" test "$before" = "$after"
 expect "output equals doctor's" cmp -s "$chk" "$root/doctor2.log"
 expect "exit status equals doctor's" test "$chkcode" = "$doccode"
 
-echo "== a Claude-only machine (no Codex) completes without a stop"
+echo "== a Claude-only machine (no Codex, no agy) completes without a stop"
 sandbox noccodex
 mkdir -p "$h/.claude"
 run noccodex
 expect "exit 0" test "$code" = 0
 expect "Codex is skipped with a note" has '^note  Codex is not set up'
+expect "without ~/.gemini/config, agy is not created" test ! -e "$h/.gemini/config"
+expect "without ~/.gemini/config, bootstrap does nothing for agy" hasnot 'agy guard'
 expect "it says stages 1 and 2 are done" has '^bootstrap: stages 1 and 2 are done'
+
+echo "== with ~/.gemini/config present, bootstrap applies the agy guard and a second run reports it ok"
+sandbox withagy
+mkdir -p "$h/.claude" "$h/.gemini/config"
+run withagy
+expect "with ~/.gemini/config: exit 0" test "$code" = 0
+expect "with ~/.gemini/config: agy guard hook copied" test -f "$h/.gemini/config/hooks/jarvis-guard.py"
+expect "with ~/.gemini/config: hooks.json has jarvis-guard" jq -e '."jarvis-guard" != null' "$h/.gemini/config/hooks.json" >/dev/null
+expect "with ~/.gemini/config: reports done agy guard" has '^done  agy guard: applied'
+before=$(state "$h")
+run withagy2
+after=$(state "$h")
+expect "with ~/.gemini/config second run: exit 0" test "$code" = 0
+expect "with ~/.gemini/config second run: reports agy guard installed" has '^ok    agy guard is installed'
+expect "with ~/.gemini/config second run: HOME and clone are byte-identical" test "$before" = "$after"
 
 echo "== a checkout that is not ~/.Jarvis is refused"
 sandbox elsewhere

@@ -53,13 +53,14 @@ MAX_DEPTH = 6
 MAX_ALIAS_DEPTH = 8
 
 CODEX = "--codex" in sys.argv[1:]
+AGY = "--agy" in sys.argv[1:]
 # Under Codex the switch is an argument of the hook's own command line
 # (scripts/apply-codex-guard.sh --require-identity writes it): a Codex hook does
 # not see the shell_environment_policy the identity is set through, so an
 # environment variable inherited from somewhere else would say nothing about
 # this hook's configuration. Under Claude Code the switch is the environment.
 REQUIRE_ARG = "--require-identity" in sys.argv[1:]
-GUARD = "Codex guard" if CODEX else "Claude guard"
+GUARD = "Codex guard" if CODEX else ("agy guard" if AGY else "Claude guard")
 
 # Every git lookup shares one budget, well inside the hook's 10 s timeout (the
 # one apply-codex-guard.sh writes for Codex; guard.json's for Claude Code): a
@@ -79,15 +80,22 @@ CODEX_CHECKPOINT = (
     CHECKPOINT[:-1] + ", and Codex cannot ask. State the exact command and "
     "let the user run it, or do it in a runtime that can ask."
 )
+AGY_CHECKPOINT = (
+    CHECKPOINT[:-1] + ", and agy guard does not ask. State the exact command and "
+    "let the user run it, or do it in a runtime that can ask."
+)
 
 
 def switch_on():
     """True when this machine requires an agent identity for GitHub writes.
+    agy mode has no agent identity yet (Phase 5), so it returns False.
     Codex mode reads only the hook's --require-identity argument (a whole argument,
     wherever it stands) and ignores the environment. Claude mode reads
     JARVIS_REQUIRE_AGENT_IDENTITY=1 or the record --require leaves (see
     require_record). The switch is off unless something sets it, and then nothing
     here changes."""
+    if AGY:
+        return False
     if CODEX:
         return REQUIRE_ARG
     return env_switch_on() or require_record()[0] is not None
@@ -195,6 +203,8 @@ def identity_applied():
     git has no GIT_CONFIG_COUNT. judge_identity then checks the record with
     codex_record_problems. A GitHub write must really act as that identity,
     whether or not the switch above is on."""
+    if AGY:
+        return False
     if CODEX:
         return os.path.lexists(codex_record_path())
     return bool(os.environ.get("JARVIS_AGENT_IDENTITY", "").strip())
@@ -2002,15 +2012,18 @@ def emit(decision, reason):
     global ANSWERED
     if ANSWERED:
         return
-    if CODEX:
+    if CODEX or AGY:
         signal.signal(signal.SIGALRM, signal.SIG_IGN)
         signal.alarm(0)
     ANSWERED = True
-    print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse",
-        "permissionDecision": decision,
-        "permissionDecisionReason": reason,
-    }}))
+    if AGY:
+        print(json.dumps({"decision": decision, "reason": reason}))
+    else:
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": decision,
+            "permissionDecisionReason": reason,
+        }}))
     sys.stdout.flush()
 
 
@@ -2020,10 +2033,19 @@ def run():
     except Exception:
         emit("deny", GUARD + ": the hook input was not JSON, so the command was not checked.")
         return
-    if data.get("tool_name") != "Bash":
-        return
-    command = (data.get("tool_input") or {}).get("command") or ""
-    cwd = data.get("cwd") or os.getcwd()
+    if AGY:
+        tool_call = data.get("toolCall") or {}
+        if tool_call.get("name") != "run_command":
+            return
+        args = tool_call.get("args") or {}
+        command = args.get("CommandLine") or ""
+        arg_cwd = args.get("Cwd")
+        cwd = arg_cwd if isinstance(arg_cwd, str) and arg_cwd else (data.get("cwd") or os.getcwd())
+    else:
+        if data.get("tool_name") != "Bash":
+            return
+        command = (data.get("tool_input") or {}).get("command") or ""
+        cwd = data.get("cwd") or os.getcwd()
     res = decide(command, cwd)
     if res.unset or res.hijack:
         reasons = list(res.deny)
@@ -2036,14 +2058,15 @@ def run():
         emit("deny", (GUARD + ": " + "; ".join(reasons) + ". " + advice + suffix).rstrip())
     elif res.deny:
         emit("deny", GUARD + ": " + "; ".join(res.deny) + ". " + PROHIBITED)
-    elif res.ask and CODEX:
-        emit("deny", GUARD + ": " + "; ".join(res.ask) + ". " + CODEX_CHECKPOINT)
+    elif res.ask and (CODEX or AGY):
+        cp = CODEX_CHECKPOINT if CODEX else AGY_CHECKPOINT
+        emit("deny", GUARD + ": " + "; ".join(res.ask) + ". " + cp)
     elif res.ask:
         emit("ask", GUARD + ": " + "; ".join(res.ask) + ". " + CHECKPOINT)
 
 
 def main():
-    if not CODEX:
+    if not CODEX and not AGY:
         run()
         return 0
     # Codex runs the command when a hook exits non-zero, so a failure has to

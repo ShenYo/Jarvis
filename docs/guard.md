@@ -5,7 +5,7 @@
 > 開關（打開後，沒有套用 identity 的 runtime 一律不能寫入 GitHub）。agent identity 本身見
 > `agent-identity.md`。
 
-The guard is one set of rules that refuses destructive Git and file operations in every project on this machine, in two forms: one for Claude Code and one for Codex. A third part, the agent-identity switch, makes the [agent identity](./agent-identity.md) mandatory for GitHub writes. To install them, follow [Setting up a new machine](./setup-new-machine.md).
+The guard is one set of rules that refuses destructive Git and file operations in every project on this machine, in three forms: one for Claude Code, one for Codex, and one for agy. A fourth part, the agent-identity switch, makes the [agent identity](./agent-identity.md) mandatory for GitHub writes. To install them, follow [Setting up a new machine](./setup-new-machine.md).
 
 ## Claude Code guard
 
@@ -128,6 +128,29 @@ lets commands through. The measurements are in
 
 ```sh
 bash ~/.Jarvis/tests/codex-guard.sh
+```
+
+## agy
+
+[`apply-agy-guard.sh`](../scripts/apply-agy-guard.sh) gives agy sessions (`agy` CLI 1.5.18 and Antigravity IDE 2.24.0) the same protection through a user-level `PreToolUse` hook: it copies `bash-guard.py` to `~/.gemini/config/hooks/jarvis-guard.py` and merges a top-level `"jarvis-guard"` group (`matcher: "run_command"`, `--agy`) into `~/.gemini/config/hooks.json`, leaving every other group (`herdr`, `orca-status`) untouched. Like Codex, the hook answers `deny` for both permanently prohibited operations and human-review checkpoints, telling the agent to state the exact command and let the user run it, or do it in a runtime that can ask.
+
+```sh
+bash ~/.Jarvis/scripts/apply-agy-guard.sh          # copy the hook, merge hooks.json, keep a .guard-backup
+bash ~/.Jarvis/scripts/apply-agy-guard.sh --check  # exit 1 when it would change something
+```
+
+Unlike Codex, agy has no `/hooks` trust-hash step, and agy 1.5.18 fails closed on hook error, timeout, or missing binary. The hook also keeps an 8-second watchdog inside the 10-second timeout so it emits a clean `deny` reason before timing out.
+
+What this does not do (agy 1.5.18 / Antigravity IDE 2.24.0):
+
+- **IDE live enforcement is unverified** until the owner runs the live probe checklist on their home directory (CLI `PreToolUse` blocking and fail-closed behaviour were verified in Phase 0; IDE shares `~/.gemini/config/hooks.json` by documentation and awaits live confirmation).
+- **The agent-identity switch is not on agy yet** (Phase 5, [#16](https://github.com/ShenYo/Jarvis/issues/16)): `--agy` ignores `JARVIS_REQUIRE_AGENT_IDENTITY` and `~/.claude/agent-identity.require.json` so enabling the switch for Claude Code and Codex does not break agy before agy has an identity.
+- **Script files and runtime-constructed commands** are not parsed (the same limit as Claude Code and Codex).
+
+The tests run in a sandbox `HOME` and never touch the real `~/.gemini`:
+
+```sh
+bash ~/.Jarvis/tests/agy-guard.sh
 ```
 
 ## The agent-identity switch

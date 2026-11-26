@@ -176,6 +176,7 @@ Stage 2。
 ```sh
 bash ~/.Jarvis/scripts/apply-claude-guard.sh
 bash ~/.Jarvis/scripts/apply-codex-guard.sh
+bash ~/.Jarvis/scripts/apply-agy-guard.sh   # ~/.gemini/config 存在時
 ```
 
 每支腳本都把自己的檔案複製進 `~/.claude` 或 `~/.codex`（有設 `$CODEX_HOME` 就用它），並把被取代的內容
@@ -192,8 +193,8 @@ bash ~/.Jarvis/scripts/apply-codex-guard.sh --trust
 檢查：兩支腳本加 `--check` 都以 0 離開，而 `--trust` 印出
 `trust: OK - Codex trusts the Jarvis guard entry` 並以 0 離開。
 
-**Person-only：** 在 Codex 的 `/hooks` 裡信任這支 hook。`bootstrap.sh` 會套用兩個 guard，然後停在這裡，直到
-`--trust` 成功。
+**Person-only：** 在 Codex 的 `/hooks` 裡信任這支 hook。`bootstrap.sh` 會先套用 Claude Code 與 Codex 的 guard，停在這裡直到
+`--trust` 成功，接著再套用 agy guard（`~/.gemini/config` 存在時）。
 
 選用，而且 person-only：告訴 Claude Code 的 auto-mode classifier 這台機器信任哪些 repository。在 Claude Code 裡，從
 Jarvis checkout（`~/.Jarvis`）內執行 `/auto-mode-setup`；從 home 目錄執行的話，它描述的是沒有 remote 的

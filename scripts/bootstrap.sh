@@ -3,7 +3,7 @@
 # and a clear stop at each step only a person can do.
 #
 #   stage 1  instructions and Skills   Git hooks path, the bridge (sync-personal-skills.sh)
-#   stage 2  the guard                 apply-claude-guard.sh, apply-codex-guard.sh
+#   stage 2  the guard                 apply-claude-guard.sh, apply-codex-guard.sh, apply-agy-guard.sh
 #   stage 3  agent identity            never done here: optional, and it needs a person (see the guide)
 #
 # Run it from the checkout, which must be ~/.Jarvis (the one command a person types first is the
@@ -227,6 +227,16 @@ if [ -d "$codex_home" ]; then
             "$worked" ;;
       esac
     fi
+  fi
+fi
+
+if [ -d "$HOME/.gemini/config" ]; then
+  agy_guard="$here/scripts/apply-agy-guard.sh"
+  if bash "$agy_guard" --check >/dev/null 2>&1; then
+    ok "agy guard is installed"
+  else
+    run_quiet "agy guard" bash "$agy_guard"
+    did "agy guard: applied"
   fi
 fi
 

@@ -85,7 +85,7 @@ runner 或別人的筆電上沒有這個 repository 的副本。因此專案所�
 
 待辦：
 
-- agy 的 guard（CLI 1.5.18 與 Antigravity IDE 2.24.0）。
+- agy guard 的 live 驗證（CLI 1.5.18 與 IDE 2.24.0）。
 - agy 的 agent 身分：[#16](https://github.com/ShenYo/Jarvis/issues/16)。
 - Codex Skill Phase B 整體上仍屬 **UNVERIFIED**；不要從個別探測或 bridge entries 推論
   已經完成。

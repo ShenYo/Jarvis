@@ -13,7 +13,7 @@ matches, and follow its steps. Run every command in a normal terminal, not with
 
 Some of what Jarvis installs is a link and follows `~/.Jarvis` by itself: the
 personal instructions and every Skill. The rest is copied in, and stays as it
-was until you re-run its script: the Claude Code and Codex guards. The agent
+was until you re-run its script: the Claude Code, Codex, and agy guards. The agent
 identity's config file, `~/.Jarvis/config-local/agent-identity`, belongs to
 this machine. No update touches it.
 
@@ -50,12 +50,13 @@ repeat.
    ```
 
    Check: the last line starts `checks passed:`.
-3. Re-run both guard scripts. They copy the current guard in, and keep the
+3. Re-run the guard scripts. They copy the current guard in, and keep the
    agent-identity switch as it is:
 
    ```sh
    bash ~/.Jarvis/scripts/apply-claude-guard.sh
    bash ~/.Jarvis/scripts/apply-codex-guard.sh
+   bash ~/.Jarvis/scripts/apply-agy-guard.sh   # when ~/.gemini/config exists
    ```
 
    Check: the last line of the Codex run is
@@ -130,7 +131,7 @@ This machine is current when all three hold:
 - the first line shows no `behind`;
 - the tag is the newest on [Releases](https://github.com/ShenYo/Jarvis/releases);
 - `doctor.sh` exits 0, which means it printed no `PROBLEM` and no `ERROR` line.
-  It runs both guard `--check` commands, the bridge check and the identity
+  It runs each guard's `--check` command, the bridge check and the identity
   checks, and repairs nothing (the identity check's SSH probe may add
   `github.com` to `~/.ssh/known_hosts` once). Exit 0 still allows `UNVERIFIED`
   lines: read each one. `codex-guard` `UNVERIFIED` means Codex's trust could not
@@ -157,7 +158,7 @@ This machine is current when all three hold:
   `UNVERIFIED` and says plugin Skills went unchecked. A `dup-agy` `UNVERIFIED`
   lists Skill names agy gets both natively from `~/.agents/skills/` and from
   `~/.gemini/config/skills/` or `~/.gemini/config/plugins/*/skills/`. agy needs
-  no bridge, so keep one copy (remove the extra link or plugin), or read a known
+  no Skill bridge, so keep one copy (remove the extra link or plugin), or read a known
   overlap, such as Orca's links, as known.
 
 Otherwise do [A](#a-routine-update).

@@ -1405,6 +1405,54 @@ unset GH_CONFIG_DIR
 export CODEX_HOME="$no_codex"
 reset_stub
 
+echo "-- agy mode: toolCall/run_command format, ask becomes deny, malformed JSON denies"
+probe_agy() { # expected, command, [cwd], [args_cwd]
+  local want=$1 cmd=$2 dir=${3:-$feat} acwd=${4-} label=$2 got out rc
+  if [ "$#" -ge 4 ]; then
+    label="$cmd (args.Cwd=${acwd:-<empty>}, cwd=$(basename "$dir"))"
+    jq -n --arg c "$cmd" --arg d "$dir" --arg ac "$acwd" '{toolCall:{id:"t1",name:"run_command",args:{CommandLine:$c,Cwd:$ac}},cwd:$d,hookEventName:"PreToolUse"}' >"$root/agy-in.json"
+  else
+    jq -n --arg c "$cmd" --arg d "$dir" '{toolCall:{id:"t1",name:"run_command",args:{CommandLine:$c}},cwd:$d,hookEventName:"PreToolUse"}' >"$root/agy-in.json"
+  fi
+  out=$(perl -e 'alarm 5; exec @ARGV' "$py" -I "$hook" --agy <"$root/agy-in.json"); rc=$?
+  if [ "$rc" = 142 ]; then
+    got=hang
+  else
+    got=$(printf '%s' "$out" | jq -r '.decision // empty')
+    got=${got:-allow}
+  fi
+  total=$((total + 1))
+  if [ "$got" = "$want" ]; then
+    printf 'ok   %-5s [agy] %s\n' "$want" "${label//$'\n'/⏎}"
+  else
+    printf 'FAIL [agy] want %s got %s: %s\n' "$want" "$got" "${label//$'\n'/⏎}"
+    fails=$((fails + 1))
+  fi
+}
+probe_agy deny "git push --force origin feat/x"
+probe_agy deny "git reset --hard HEAD~1"
+probe_agy deny "rm -r $root/sandbox/foo"
+probe_agy deny "git commit --no-verify -m x"
+probe_agy deny "gh pr merge 1"
+probe_agy deny "git push origin main" "$onmain"
+probe_agy allow "git status"
+probe_agy allow "ls -la"
+# Phase 5 identity is not on for agy yet, even if Claude's switch is set in the environment.
+JARVIS_REQUIRE_AGENT_IDENTITY=1 probe_agy allow "git push origin feat/x" "$feat"
+# toolCall.args.Cwd overrides top-level cwd when it is a non-empty string.
+probe_agy deny "git push origin HEAD" "$feat" "$onmain"
+probe_agy allow "git push origin HEAD" "$onmain" "$feat"
+probe_agy deny "git push origin HEAD" "$onmain" ""
+# Non-run_command tool calls are ignored cleanly.
+total=$((total + 1))
+out=$(jq -n '{toolCall:{name:"view_file",args:{AbsolutePath:"/tmp/x"}}}' | "$py" -I "$hook" --agy)
+if [ -z "$out" ]; then printf 'ok   %-5s [agy] non-run_command ignored\n' "allow"; else printf 'FAIL [agy] non-run_command got %s\n' "$out"; fails=$((fails + 1)); fi
+# Malformed JSON fails closed with deny and exit 0.
+total=$((total + 1))
+out=$(printf '{not json' | "$py" -I "$hook" --agy); rc=$?
+got=$(printf '%s' "$out" | jq -r '.decision // empty')
+if [ "$rc" = 0 ] && [ "$got" = deny ]; then printf 'ok   %-5s [agy] malformed json\n' "deny"; else printf 'FAIL [agy] malformed json rc=%s got=%s\n' "$rc" "$got"; fails=$((fails + 1)); fi
+
 echo
 if [ "$fails" -gt 0 ]; then echo "$fails of $total failed (sandboxes: $root)"; exit 1; fi
 echo "all $total passed"
