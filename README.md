@@ -112,8 +112,8 @@ are in [`docs/history.md`](./docs/history.md).
 This checkout has 36 canonical `SKILL.md` files, 36 Claude bridge links, 36
 Codex bridge links, and 35 lock entries. Every canonical Skill but
 `session-notes`, which is written here, is CLI-managed, and all are reachable
-from both tools. The last command below prints `session-notes` and nothing
-else.
+from Claude Code and Codex through the bridge, and from agy natively. The last
+command below prints `session-notes` and nothing else.
 
 The `skills` CLI writes the canonical copy and the lock entry but does not
 create the bridge, so a Skill it installs stays invisible to Claude Code and

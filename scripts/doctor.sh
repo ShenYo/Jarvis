@@ -301,6 +301,7 @@ fi
 # in a project's own settings are not read. Codex plugin Skills under ~/.codex/plugins are not read either, so
 # dup-codex says so in its ok text. Everything on disk counts: turning off a synced plugin or bundle may leave its
 # files on disk, so the line may not clear, and a person then reads it as known. A finding is UNVERIFIED, never PROBLEM.
+# Limitation: skills_in scans depth-1 <dir>/*/SKILL.md only; grouped Skills (.agents/skills/<group>/<name>/) are outside dup-agy's scope.
 skills_in() { # <provider> <dir>: one "<name><TAB><provider>" line per <dir>/*/SKILL.md
   local f n
   for f in "$2"/*/SKILL.md; do
@@ -370,7 +371,7 @@ fi
 
 if [ -d "$HOME/.gemini/config" ]; then
   report_dups dup-agy \
-    "agy reads ~/.agents/skills/ natively (no bridge needed); keep one copy or read known overlaps (e.g. Orca links in ~/.gemini/config/skills/ or installed plugins) as known" \
+    "agy reads ~/.agents/skills/ natively (no bridge needed); keep one copy: remove the extra link in ~/.gemini/config/skills/ or the agy plugin that offers it (never edit a vendored Skill), or read a known overlap such as Orca's links as known" \
     "agy reads ~/.agents/skills/ natively; no bridge needed" < <(
     skills_in "personal (~/.agents/skills)" "$HOME/.agents/skills"
     skills_in "agy config (~/.gemini/config/skills)" "$HOME/.gemini/config/skills"

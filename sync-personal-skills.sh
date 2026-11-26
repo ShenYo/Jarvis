@@ -330,6 +330,7 @@ fi
 # ~/.gemini/config/AGENTS.md (including through a symlink), without touching
 # ~/.gemini/GEMINI.md (which Gemini CLI shares). Only linked when
 # ~/.gemini/config exists.
+# agy discovers ~/.agents/skills/ natively; no Skill links under ~/.gemini/config/skills/ (see docs/architecture.md).
 AGY_CONFIG_DIR="$HOME/.gemini/config"
 if [ -d "$AGY_CONFIG_DIR" ]; then
   echo ""

@@ -154,7 +154,11 @@ This machine is current when all three hold:
   file on disk: turning off a synced plugin or bundle may leave its files there, so
   the line may not clear; read it as known. If `settings.json` or
   `installed_plugins.json` is not JSON (or `jq` is missing), the line is
-  `UNVERIFIED` and says plugin Skills went unchecked.
+  `UNVERIFIED` and says plugin Skills went unchecked. A `dup-agy` `UNVERIFIED`
+  lists Skill names agy gets both natively from `~/.agents/skills/` and from
+  `~/.gemini/config/skills/` or `~/.gemini/config/plugins/*/skills/`. agy needs
+  no bridge, so keep one copy (remove the extra link or plugin), or read a known
+  overlap, such as Orca's links, as known.
 
 Otherwise do [A](#a-routine-update).
 

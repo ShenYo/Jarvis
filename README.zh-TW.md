@@ -97,8 +97,8 @@ runner 或別人的筆電上沒有這個 repository 的副本。因此專案所�
 
 這個 checkout 有 36 個 canonical `SKILL.md` 檔案、36 個 Claude bridge links、36 個
 Codex bridge links，以及 35 筆 lock entries。除了在這裡撰寫的 `session-notes`，每個
-canonical Skill 都是 CLI-managed，而且全部在兩個工具中都可被存取。下面最後一個指令
-只會印出 `session-notes`。
+canonical Skill 都是 CLI-managed，而且全部可由 Claude Code 與 Codex 經由 bridge、由
+agy 原生讀取。下面最後一個指令只會印出 `session-notes`。
 
 `skills` CLI 會寫入 canonical 副本與 lock entry，但不會建立 bridge，因此它安裝的
 Skill 在 [`sync-personal-skills.sh`](./sync-personal-skills.sh) 執行之前，對 Claude
