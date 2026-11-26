@@ -2037,12 +2037,15 @@ def run():
         tool_call = data.get("toolCall") or {}
         if tool_call.get("name") != "run_command":
             return
-        command = (tool_call.get("args") or {}).get("CommandLine") or ""
+        args = tool_call.get("args") or {}
+        command = args.get("CommandLine") or ""
+        arg_cwd = args.get("Cwd")
+        cwd = arg_cwd if isinstance(arg_cwd, str) and arg_cwd else (data.get("cwd") or os.getcwd())
     else:
         if data.get("tool_name") != "Bash":
             return
         command = (data.get("tool_input") or {}).get("command") or ""
-    cwd = data.get("cwd") or os.getcwd()
+        cwd = data.get("cwd") or os.getcwd()
     res = decide(command, cwd)
     if res.unset or res.hijack:
         reasons = list(res.deny)

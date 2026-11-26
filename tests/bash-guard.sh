@@ -1406,9 +1406,14 @@ export CODEX_HOME="$no_codex"
 reset_stub
 
 echo "-- agy mode: toolCall/run_command format, ask becomes deny, malformed JSON denies"
-probe_agy() { # expected, command, [cwd]
-  local want=$1 cmd=$2 dir=${3:-$feat} got out rc
-  jq -n --arg c "$cmd" --arg d "$dir" '{toolCall:{id:"t1",name:"run_command",args:{CommandLine:$c}},cwd:$d,hookEventName:"PreToolUse"}' >"$root/agy-in.json"
+probe_agy() { # expected, command, [cwd], [args_cwd]
+  local want=$1 cmd=$2 dir=${3:-$feat} acwd=${4-} label=$2 got out rc
+  if [ "$#" -ge 4 ]; then
+    label="$cmd (args.Cwd=${acwd:-<empty>}, cwd=$(basename "$dir"))"
+    jq -n --arg c "$cmd" --arg d "$dir" --arg ac "$acwd" '{toolCall:{id:"t1",name:"run_command",args:{CommandLine:$c,Cwd:$ac}},cwd:$d,hookEventName:"PreToolUse"}' >"$root/agy-in.json"
+  else
+    jq -n --arg c "$cmd" --arg d "$dir" '{toolCall:{id:"t1",name:"run_command",args:{CommandLine:$c}},cwd:$d,hookEventName:"PreToolUse"}' >"$root/agy-in.json"
+  fi
   out=$(perl -e 'alarm 5; exec @ARGV' "$py" -I "$hook" --agy <"$root/agy-in.json"); rc=$?
   if [ "$rc" = 142 ]; then
     got=hang
@@ -1418,9 +1423,9 @@ probe_agy() { # expected, command, [cwd]
   fi
   total=$((total + 1))
   if [ "$got" = "$want" ]; then
-    printf 'ok   %-5s [agy] %s\n' "$want" "${cmd//$'\n'/⏎}"
+    printf 'ok   %-5s [agy] %s\n' "$want" "${label//$'\n'/⏎}"
   else
-    printf 'FAIL [agy] want %s got %s: %s\n' "$want" "$got" "${cmd//$'\n'/⏎}"
+    printf 'FAIL [agy] want %s got %s: %s\n' "$want" "$got" "${label//$'\n'/⏎}"
     fails=$((fails + 1))
   fi
 }
@@ -1434,6 +1439,10 @@ probe_agy allow "git status"
 probe_agy allow "ls -la"
 # Phase 5 identity is not on for agy yet, even if Claude's switch is set in the environment.
 JARVIS_REQUIRE_AGENT_IDENTITY=1 probe_agy allow "git push origin feat/x" "$feat"
+# toolCall.args.Cwd overrides top-level cwd when it is a non-empty string.
+probe_agy deny "git push origin HEAD" "$feat" "$onmain"
+probe_agy allow "git push origin HEAD" "$onmain" "$feat"
+probe_agy deny "git push origin HEAD" "$onmain" ""
 # Non-run_command tool calls are ignored cleanly.
 total=$((total + 1))
 out=$(jq -n '{toolCall:{name:"view_file",args:{AbsolutePath:"/tmp/x"}}}' | "$py" -I "$hook" --agy)
