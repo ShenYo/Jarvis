@@ -16,9 +16,9 @@ canonical copy。
 [fork 清單](./docs/fork-checklist.md)說明該改什麼。fork 是一次性的快照，不保證
 upstream 日後能乾淨地 merge 進來。
 
-支援範圍：優先支援 macOS 與 Claude Code；Codex 已具備 bridge、guard 與 identity；agy
-（CLI 1.5.18 與 Antigravity IDE 2.24.0）已具備個人指示，guard 與 identity 尚待實作；Gemini
-CLI 不在支援範圍內。不支援 Linux 與 Windows。
+支援範圍：優先支援 macOS 與 Claude Code。Codex 尚待支援；agy（CLI 1.5.18 與
+Antigravity IDE 2.24.0）已具備個人指示，guard 與 identity 尚待實作；Gemini CLI 不在
+支援範圍內。不支援 Linux 與 Windows。
 
 ## 它解決的問題
 
@@ -59,10 +59,10 @@ runner 或別人的筆電上沒有這個 repository 的副本。因此專案所�
 - **個人指示。** [`.agents/AGENTS.md`](./.agents/AGENTS.md) 被連結成 Claude Code 的
   `~/.claude/CLAUDE.md`、Codex 的 `~/.codex/AGENTS.md`，以及 agy 的
   `~/.gemini/config/AGENTS.md`（CLI 1.5.18 與 Antigravity IDE 2.24.0，不碰
-  `~/.gemini/GEMINI.md`），所以三者在每個 session 都會載入它。它依 scope 分組：*Base behavior*（回覆語系、書面規則優先於 auto
-  memory、把工作交給較便宜的 model）、*Coding*（先理解、不做臆測、外科手術式的修改、
-  驗證、把決定寫在它該在的地方）與 *Contracts*（英文文件加中文摘要、沒有自己規則的
-  repository 的 Git 規則）。
+  `~/.gemini/GEMINI.md`），所以三者在每個 session 都會載入它。它依 scope 分組：
+  *Base behavior*（回覆語系、書面規則優先於 auto memory、把工作交給較便宜的
+  model）、*Coding*（先理解、不做臆測、外科手術式的修改、驗證、把決定寫在它該在的
+  地方）與 *Contracts*（英文文件加中文摘要、沒有自己規則的 repository 的 Git 規則）。
 - **派工文件。** [`docs/dispatch/`](./docs/dispatch/policy.md) 收有 policy、prompt
   templates、Codex adapter 與 [review loop](./docs/dispatch/review-loop.md)。Codex 以 `gpt-6.1-sol` 擔任 Commander，以 `gpt-6-luna`
   擔任 Implementer 與 Worker，已於 2026-10-25 在 codex-cli 0.164.0 上驗證。
@@ -85,6 +85,7 @@ runner 或別人的筆電上沒有這個 repository 的副本。因此專案所�
 
 待辦：
 
+- agy 的 guard（CLI 1.5.18 與 Antigravity IDE 2.24.0）。
 - agy 的 agent 身分：[#16](https://github.com/ShenYo/Jarvis/issues/16)。
 - Codex Skill Phase B 整體上仍屬 **UNVERIFIED**；不要從個別探測或 bridge entries 推論
   已經完成。

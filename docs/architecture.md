@@ -63,7 +63,7 @@ dangling. Remove it, or restore whatever was there before.
 it, so there is exactly one copy of every skill.
 
 `~/.agents` **must be a symlink to `~/.Jarvis/.agents`**. It is the stable
-address through which the Claude and Codex bridge links resolve.
+address through which the Claude, Codex and agy bridge links resolve.
 
 A skill is a directory containing `SKILL.md` — not merely a directory. Skills
 may be grouped one level deep under a container that has no `SKILL.md` of its

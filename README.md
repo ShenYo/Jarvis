@@ -17,10 +17,9 @@ It is meant to be forked and adopted; the [fork checklist](./docs/fork-checklist
 says what to change. A fork is a one-time snapshot, and there is no promise that
 upstream merges cleanly into it.
 
-Support: macOS and Claude Code first; Codex has bridge, guard and identity; agy
-(CLI 1.5.18 and Antigravity IDE 2.24.0) has personal instructions, with guard
-and identity pending; Gemini CLI is out of scope. Linux and Windows are not
-supported.
+Support: macOS and Claude Code first. Codex is pending; agy (CLI 1.5.18 and
+Antigravity IDE 2.24.0) has personal instructions, with guard and identity
+pending; Gemini CLI is out of scope. Linux and Windows are not supported.
 
 ## What it solves
 
@@ -99,6 +98,7 @@ In place:
 
 Pending:
 
+- Guard for agy (CLI 1.5.18 and Antigravity IDE 2.24.0).
 - Agent identity for agy: [#16](https://github.com/ShenYo/Jarvis/issues/16).
 - Codex Skill Phase B as a whole remains **UNVERIFIED**; do not infer
   completion from individual probes or bridge entries.
