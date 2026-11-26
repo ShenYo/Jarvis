@@ -40,7 +40,7 @@ check "fresh: exit 0" test "$rc" = 0
 check "fresh: hook copied, not linked" test -f "$cfg/hooks/jarvis-guard.py" -a ! -L "$cfg/hooks/jarvis-guard.py"
 check "fresh: hook is the repository's" cmp -s "$src" "$cfg/hooks/jarvis-guard.py"
 check "fresh: jarvis-guard group has PreToolUse matcher run_command" q '."jarvis-guard".PreToolUse | length == 1 and .[0].matcher == "run_command"'
-check "fresh: one command handler, timeout 10, runs -I and --agy" q '."jarvis-guard".PreToolUse[0].hooks | length == 1 and .[0].type == "command" and .[0].timeout == 10 and (.[0].command | contains("-I") and contains("hooks/jarvis-guard.py") and endswith("--agy"))'
+check "fresh: one command handler, timeout 10, runs /bin/sh -c with -I and --agy" q '."jarvis-guard".PreToolUse[0].hooks | length == 1 and .[0].type == "command" and .[0].timeout == 10 and (.[0].command | startswith("/bin/sh -c \u0027") and contains("-I") and contains("hooks/jarvis-guard.py") and endswith("--agy\u0027"))'
 
 # 2. Idempotent re-run
 snapshot >"$dir/snap.before"
@@ -125,14 +125,17 @@ check "usage: unknown flag exit 2" test "$rc" = 2
 run --check --check; rc=$?
 check "usage: duplicate --check exit 2" test "$rc" = 2
 
-# 8. Execute the installed hook command against agy stdin payloads
+# 8. Execute the installed hook command directly (word-split exec, no outer shell) against agy stdin payloads
 sandbox
 run
 hook_cmd=$(jq -r '."jarvis-guard".PreToolUse[0].hooks[0].command' "$h")
+exec_hook() {
+  HOME="$dir" python3 -c 'import shlex, subprocess, sys; sys.exit(subprocess.run(shlex.split(sys.argv[1])).returncode)' "$hook_cmd" 2>"$dir/err"
+}
 probe_cmd() {
   local want=$1 cmd=$2 out rc got
   jq -n --arg c "$cmd" --arg d "$dir" '{toolCall:{id:"t1",name:"run_command",args:{CommandLine:$c}},cwd:$d,hookEventName:"PreToolUse"}' >"$dir/in.json"
-  out=$(HOME="$dir" /bin/sh -c "$hook_cmd" <"$dir/in.json" 2>"$dir/err"); rc=$?
+  out=$(exec_hook <"$dir/in.json"); rc=$?
   got=$(printf '%s' "$out" | jq -r '.decision // empty' 2>/dev/null)
   got=${got:-allow}
   check "hook probe ($cmd): $want" test "$rc" = 0 -a "$got" = "$want"
@@ -145,10 +148,10 @@ probe_cmd deny "gh pr merge 1"
 probe_cmd allow "git status"
 
 jq -n --arg d "$dir" '{toolCall:{id:"t2",name:"view_file",args:{AbsolutePath:"/tmp/x"}},cwd:$d,hookEventName:"PreToolUse"}' >"$dir/noncmd.json"
-out=$(HOME="$dir" /bin/sh -c "$hook_cmd" <"$dir/noncmd.json"); rc=$?
+out=$(exec_hook <"$dir/noncmd.json"); rc=$?
 check "hook probe non-run_command: empty output, exit 0" test "$rc" = 0 -a -z "$out"
 
-out=$(HOME="$dir" /bin/sh -c "$hook_cmd" <<<'{bad json'); rc=$?
+out=$(exec_hook <<<'{bad json'); rc=$?
 got=$(printf '%s' "$out" | jq -r '.decision // empty' 2>/dev/null)
 check "hook probe malformed json: fail-closed deny, exit 0" test "$rc" = 0 -a "$got" = deny
 

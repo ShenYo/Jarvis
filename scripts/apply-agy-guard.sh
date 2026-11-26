@@ -73,7 +73,7 @@ fi
 # working directory cannot plant a module. The timeout is 10 s: the guard's
 # own budget is 6 s (see DEADLINE in bash-guard.py), and an 8 s watchdog
 # emits deny before agy's timeout (agy also fails closed on error or timeout).
-cmd='py=/usr/bin/python3; [ -x "$py" ] || py=python3; exec "$py" -I "$HOME/.gemini/config/hooks/jarvis-guard.py" --agy'
+cmd='/bin/sh -c '\''py=/usr/bin/python3; [ -x "$py" ] || py=python3; exec "$py" -I "$HOME/.gemini/config/hooks/jarvis-guard.py" --agy'\'''
 group=$(jq -n --arg c "$cmd" '{PreToolUse: [{matcher: "run_command", hooks: [{type: "command", command: $c, timeout: 10}]}]}')
 
 merged=$(jq --argjson g "$group" '.["jarvis-guard"] = $g' <<<"$current")
