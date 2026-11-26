@@ -224,7 +224,8 @@ bridge "$HOME/.claude/skills" "Claude Code"
 # memory, which only loads for sessions started in that project. The language
 # rule lived only in two projects' memory, so a session started anywhere else
 # never saw it and replied in English. Codex does the same with
-# $CODEX_HOME/AGENTS.md, so it gets the same link, below.
+# $CODEX_HOME/AGENTS.md and agy with ~/.gemini/config/AGENTS.md, so both get
+# the same link, below.
 #
 # The content lives here, versioned, and each tool's file is a link to it
 # through ~/.agents, the same stable address the skill links use: one file, no

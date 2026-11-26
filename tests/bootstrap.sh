@@ -274,6 +274,16 @@ expect "the file is untouched" test "$(cat "$cx/AGENTS.md")" = 'codex rules'
 expect "what names the real HOME, not the stand-in" has "what: .*$h/.codex/AGENTS.md"
 expect "no stand-in HOME is left behind" test -z "$(ls -A "$root/tmp")"
 
+echo "== an existing ~/.gemini/config/AGENTS.md is a stop, nothing written"
+real_agy() { mkdir -p "$h/.gemini/config"; printf 'agy rules\n' >"$h/.gemini/config/AGENTS.md"; }
+conflict_case agyconf real_agy
+expect "exit 3 with the four fields" complete_stop
+expect "what carries the bridge's CONFLICT line for agy" has 'what: .*CONFLICT .*[.]gemini/config/AGENTS.md is a real file'
+expect "the HOME and the clone are byte-identical" untouched
+expect "the file is untouched" test "$(cat "$h/.gemini/config/AGENTS.md")" = 'agy rules'
+expect "what names the real HOME, not the stand-in" has "what: .*$h/.gemini/config/AGENTS.md"
+expect "no stand-in HOME is left behind" test -z "$(ls -A "$root/tmp")"
+
 echo "== a non-empty ~/.codex/AGENTS.override.md is a stop (SHADOWED), nothing written"
 override() { printf 'override\n' >"$cx/AGENTS.override.md"; }
 conflict_case shadow override

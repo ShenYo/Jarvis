@@ -642,7 +642,10 @@ fixture agy-ok
 mkdir -p "$h/.gemini/config"
 HOME="$h" CODEX_HOME="$cx" bash "$repo/sync-personal-skills.sh" >>"$root/agy-ok.setup" 2>&1
 run agy-ok
-expect "agy link ok: doctor exits 0 and bridge is ok" bash -c "[ $code = 0 ] && grep -Eq '^ok +bridge ' '$log'"
+expect "agy link ok: doctor exits 0 and bridge is ok" bash -c "
+  [ $code = 0 ] && [ -L '$h/.gemini/config/AGENTS.md' ] &&
+  [ \"\$(readlink '$h/.gemini/config/AGENTS.md')\" = '../../.agents/AGENTS.md' ] &&
+  grep -Eq '^ok +bridge ' '$log'"
 
 rm "$h/.gemini/config/AGENTS.md"
 run agy-missing

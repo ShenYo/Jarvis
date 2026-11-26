@@ -249,7 +249,9 @@ fi
 
 # Second run changes nothing; --check passes and writes nothing.
 before=$(snap "$h"); run agy-clean; after=$(snap "$h")
-if [ "$code" = 0 ] && [ "$before" = "$after" ] && ! grep -q '^linked ' "$root/agy-clean.log"; then
+if [ "$code" = 0 ] && [ "$before" = "$after" ] && [ -L "$h/.gemini/config/AGENTS.md" ] \
+   && [ "$(readlink "$h/.gemini/config/AGENTS.md")" = "../../.agents/AGENTS.md" ] \
+   && ! grep -q '^linked ' "$root/agy-clean.log"; then
   ok "agy: second run changes nothing"
 else
   bad "agy: second run changes nothing (exit $code)" "$root/agy-clean.log"
